@@ -136,7 +136,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
     let mut insert_index = nodes_count;
     let mut next_nodes = Vec::with_capacity(prim_count);
     assert!(i8::MAX as usize > SEARCH_DISTANCE);
-    let mut merge: Vec<i8> = Vec::new();
+    let mut merge: Vec<i8> = vec![0; prim_count];
 
     #[cfg(not(feature = "parallel"))]
     let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
@@ -144,18 +144,20 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
     let mut depth: usize = 0;
     while current_nodes.len() > 1 {
         if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
-            // TODO make build_ploc_from_leafs_one that embeds this
-            // logic into the main `while index < merge.len() {` loop
+            // TODO try making build_ploc_from_leafs_one that embeds this logic into
+            // the main `while index < merge.len() {` loop  (may not be faster, tbd)
             let mut last_cost = f32::MAX;
-            (0..current_nodes.len() - 1).for_each(|i| {
+            let count = current_nodes.len() - 1;
+            assert!(count < merge.len()); // Try to elide bounds check
+            (0..count).for_each(|i| {
                 let cost = current_nodes[i]
                     .aabb
                     .union(&current_nodes[i + 1].aabb)
                     .half_area();
-                merge.push(if last_cost < cost { -1 } else { 1 });
+                merge[i] = if last_cost < cost { -1 } else { 1 };
                 last_cost = cost;
             });
-            merge.push(-1);
+            merge[current_nodes.len() - 1] = -1;
         } else {
             #[cfg(feature = "parallel")]
             let iter = (0..current_nodes.len()).into_par_iter();
@@ -173,7 +175,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
         };
 
         let mut index = 0;
-        while index < merge.len() {
+        while index < current_nodes.len() {
             let index_offset = merge[index] as i64;
             let best_index = (index as i64 + index_offset) as usize;
             // The two nodes should be merged if they agree on their respective merge indices.
@@ -219,7 +221,6 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
                 index += 1;
             }
         }
-        merge.clear();
 
         (next_nodes, current_nodes) = (current_nodes, next_nodes);
         next_nodes.clear();
