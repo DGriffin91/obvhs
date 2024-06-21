@@ -50,7 +50,7 @@ pub fn build_bvh2_from_tris(
         config.search_depth_threshold,
     );
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
-    collapse(&mut bvh2, 3);
+    collapse(&mut bvh2, config.max_prims_per_leaf);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
 
@@ -82,7 +82,7 @@ pub fn build_bvh2<T: Boundable>(
         config.search_depth_threshold,
     );
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
-    collapse(&mut bvh2, 3);
+    collapse(&mut bvh2, config.max_prims_per_leaf);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
 

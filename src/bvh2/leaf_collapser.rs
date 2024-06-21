@@ -15,6 +15,10 @@ const TRAVERSAL_COST: f32 = 1.0;
 pub fn collapse(bvh: &mut Bvh2, max_prims: u32) {
     crate::scope!("collapse");
 
+    if max_prims <= 1 {
+        return;
+    }
+
     if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
         return;
     }
