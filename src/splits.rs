@@ -92,7 +92,7 @@ pub fn split_aabbs_precise(
                 let (t_left, t_right) = split_triangle(axis as u32, pos, verts);
                 tmp_left = t_left.intersection(&tmp_left);
                 tmp_right = t_right.intersection(&tmp_right);
-                let area = left.half_area() + right.half_area();
+                let area = tmp_left.half_area() + tmp_right.half_area();
                 if area < best_cost {
                     best_cost = area;
                     left = tmp_left;
