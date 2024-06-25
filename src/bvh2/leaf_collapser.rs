@@ -6,13 +6,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bvh2::{Bvh2, Bvh2Node};
 
-const TRAVERSAL_COST: f32 = 1.0;
-
 /// Collapses leaves of the BVH according to the SAH. This optimization
 /// is only helpful for bottom-up builders, as top-down builders already
 /// have a termination criterion that prevents leaf creation when the SAH
 /// cost does not improve.
-pub fn collapse(bvh: &mut Bvh2, max_prims: u32) {
+pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     crate::scope!("collapse");
 
     if max_prims <= 1 {
@@ -57,7 +55,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32) {
             if left_count > 0 && right_count > 0 && total_count <= max_prims {
                 let left = bvh.nodes[first_child];
                 let right = bvh.nodes[first_child + 1];
-                let collapse_cost = node.aabb.half_area() * (total_count as f32 - TRAVERSAL_COST);
+                let collapse_cost = node.aabb.half_area() * (total_count as f32 - traversal_cost);
                 let base_cost = left.aabb.half_area() * left_count as f32
                     + right.aabb.half_area() * right_count as f32;
                 let both_have_same_prim =

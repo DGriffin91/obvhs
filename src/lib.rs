@@ -145,20 +145,38 @@ pub struct BvhBuildParams {
     pub ploc_search_distance: PlocSearchDistance,
     pub search_depth_threshold: usize,
     pub reinsertion_batch_ratio: f32,
+    /// For BVH2 only, a second pass of reinsertion after collapse. Since collapse reduces the node count,
+    /// this reinsertion pass will be faster. 0 to disable. Relative to the initial reinsertion_batch_ratio.
+    pub post_collapse_reinsertion_batch_ratio_multiplier: f32,
     pub sort_precision: SortPrecision,
-    /// Min 1, Max 3
+    /// Min 1 (CwBvh will clamp to max 3)
     pub max_prims_per_leaf: u32,
+    pub collapse_traversal_cost: f32,
 }
 
 impl BvhBuildParams {
+    pub fn fastest_build() -> Self {
+        BvhBuildParams {
+            pre_split: false,
+            ploc_search_distance: PlocSearchDistance::Minimum,
+            search_depth_threshold: 0,
+            reinsertion_batch_ratio: 0.0,
+            post_collapse_reinsertion_batch_ratio_multiplier: 0.0,
+            sort_precision: SortPrecision::U64,
+            max_prims_per_leaf: 1,
+            collapse_traversal_cost: 1.0,
+        }
+    }
     pub fn very_fast_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Minimum,
             search_depth_threshold: 0,
             reinsertion_batch_ratio: 0.01,
+            post_collapse_reinsertion_batch_ratio_multiplier: 0.0,
             sort_precision: SortPrecision::U64,
-            max_prims_per_leaf: 3,
+            max_prims_per_leaf: 8,
+            collapse_traversal_cost: 3.0,
         }
     }
     pub fn fast_build() -> Self {
@@ -167,8 +185,10 @@ impl BvhBuildParams {
             ploc_search_distance: PlocSearchDistance::Low,
             search_depth_threshold: 2,
             reinsertion_batch_ratio: 0.02,
+            post_collapse_reinsertion_batch_ratio_multiplier: 0.0,
             sort_precision: SortPrecision::U64,
-            max_prims_per_leaf: 3,
+            max_prims_per_leaf: 8,
+            collapse_traversal_cost: 3.0,
         }
     }
     /// Tries to be around the same build time as embree but with faster traversal
@@ -178,8 +198,10 @@ impl BvhBuildParams {
             ploc_search_distance: PlocSearchDistance::Medium,
             search_depth_threshold: 3,
             reinsertion_batch_ratio: 0.05,
+            post_collapse_reinsertion_batch_ratio_multiplier: 2.0,
             sort_precision: SortPrecision::U64,
-            max_prims_per_leaf: 3,
+            max_prims_per_leaf: 8,
+            collapse_traversal_cost: 3.0,
         }
     }
     pub fn slow_build() -> Self {
@@ -188,8 +210,10 @@ impl BvhBuildParams {
             ploc_search_distance: PlocSearchDistance::High,
             search_depth_threshold: 2,
             reinsertion_batch_ratio: 0.2,
+            post_collapse_reinsertion_batch_ratio_multiplier: 2.0,
             sort_precision: SortPrecision::U128,
-            max_prims_per_leaf: 3,
+            max_prims_per_leaf: 8,
+            collapse_traversal_cost: 3.0,
         }
     }
     pub fn very_slow_build() -> Self {
@@ -198,8 +222,10 @@ impl BvhBuildParams {
             ploc_search_distance: PlocSearchDistance::Medium,
             search_depth_threshold: 1,
             reinsertion_batch_ratio: 1.0,
+            post_collapse_reinsertion_batch_ratio_multiplier: 1.0,
             sort_precision: SortPrecision::U128,
-            max_prims_per_leaf: 3,
+            max_prims_per_leaf: 8,
+            collapse_traversal_cost: 3.0,
         }
     }
 }

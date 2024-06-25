@@ -123,6 +123,8 @@ impl Bvh2Node {
 pub struct Traversal {
     pub stack: HeapStack<u32>,
     pub ray: Ray,
+    pub current_primitive_index: u32,
+    pub primitive_count: u32,
 }
 
 impl Traversal {
@@ -131,6 +133,8 @@ impl Traversal {
     pub fn reinit(&mut self, ray: Ray) {
         self.stack.clear();
         self.stack.push(0);
+        self.primitive_count = 0;
+        self.current_primitive_index = 0;
         self.ray = ray;
     }
 }
@@ -161,7 +165,12 @@ impl Bvh2 {
         if !self.nodes.is_empty() {
             stack.push(0);
         }
-        Traversal { stack, ray }
+        Traversal {
+            stack,
+            ray,
+            current_primitive_index: 0,
+            primitive_count: 0,
+        }
     }
 
     /// Traverse the bvh for a given `Ray`. Returns the closest intersected primitive.
@@ -209,36 +218,39 @@ impl Bvh2 {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        while let Some(current_node_index) = state.stack.pop() {
-            let node = &self.nodes[*current_node_index as usize];
-            if node.aabb.ray_intersect(&state.ray) >= state.ray.tmax {
-                continue;
+        loop {
+            while state.primitive_count > 0 {
+                let primitive_id = state.current_primitive_index;
+                state.current_primitive_index += 1;
+                state.primitive_count -= 1;
+                let t = intersection_fn(&state.ray, primitive_id as usize);
+                if t < state.ray.tmax {
+                    hit.primitive_id = primitive_id;
+                    hit.t = t;
+                    state.ray.tmax = t;
+                    // Yield when we hit a primitive
+                    return true;
+                }
             }
+            if let Some(current_node_index) = state.stack.pop() {
+                let node = &self.nodes[*current_node_index as usize];
+                if node.aabb.ray_intersect(&state.ray) >= state.ray.tmax {
+                    continue;
+                }
 
-            if node.is_leaf() {
-                for i in 0..node.prim_count {
-                    let primitive_id = node.first_index + i;
-                    if primitive_id == u32::MAX {
-                        continue;
-                    }
-                    let t = intersection_fn(&state.ray, primitive_id as usize);
-                    if t < state.ray.tmax {
-                        hit.primitive_id = primitive_id;
-                        hit.t = t;
-                        state.ray.tmax = t;
-                        // Yield when we hit a primitive
-                        return true;
-                    }
+                if node.is_leaf() {
+                    state.primitive_count = node.prim_count;
+                    state.current_primitive_index = node.first_index;
+                } else {
+                    state.stack.push(node.first_index);
+                    state.stack.push(node.first_index + 1);
                 }
             } else {
-                state.stack.push(node.first_index);
-                state.stack.push(node.first_index + 1);
+                // Returns false when there are no more primitives to test.
+                // This doesn't mean we never hit one along the way though. (and yielded then)
+                return false;
             }
         }
-
-        // Returns false when there are no more primitives to test.
-        // This doesn't mean we never hit one along the way though. (and yielded then)
-        false
     }
 
     /// Recursively traverse the bvh for a given `Ray`.
