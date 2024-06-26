@@ -125,6 +125,55 @@ impl CwBvhNode {
 
         hit_mask
     }
+
+    #[inline(always)]
+    pub fn intersect_aabb(&self, aabb: &Aabb, oct_inv4: u32) -> u32 {
+        let extent = vec3a(
+            f32::from_bits((self.e[0] as u32) << 23),
+            f32::from_bits((self.e[1] as u32) << 23),
+            f32::from_bits((self.e[2] as u32) << 23),
+        );
+        let extent_rcp = 1.0 / extent;
+        let p = Vec3A::from(self.p);
+
+        // Transform the query aabb into the node's local space
+        let adjusted_aabb = Aabb::new((aabb.min - p) * extent_rcp, (aabb.max - p) * extent_rcp);
+
+        let mut hit_mask = 0;
+
+        for i in 0..2 {
+            let meta4 = extract_u32(&self.child_meta, i == 0);
+            let is_inner4 = (meta4 & (meta4 << 1)) & 0x10101010;
+            let inner_mask4 = (is_inner4 >> 4) * 0xffu32;
+            let bit_index4 = (meta4 ^ (oct_inv4 & inner_mask4)) & 0x1f1f1f1f;
+            let child_bits4 = (meta4 >> 5) & 0x07070707;
+
+            for j in 0..4 {
+                let ch = i * 4 + j;
+                let child_aabb = Aabb::new(
+                    vec3a(
+                        self.child_min_x[ch] as f32,
+                        self.child_min_y[ch] as f32,
+                        self.child_min_z[ch] as f32,
+                    ),
+                    vec3a(
+                        self.child_max_x[ch] as f32,
+                        self.child_max_y[ch] as f32,
+                        self.child_max_z[ch] as f32,
+                    ),
+                );
+
+                if child_aabb.aabb_intersect(&adjusted_aabb) {
+                    let child_bits = extract_byte(child_bits4, j as u32);
+                    let bit_index = extract_byte(bit_index4, j as u32);
+
+                    hit_mask |= child_bits << bit_index;
+                }
+            }
+        }
+
+        hit_mask
+    }
 }
 
 /// A Compressed Wide BVH8
@@ -334,6 +383,77 @@ impl CwBvh {
         // Returns false when there are no more primitives to test.
         // This doesn't mean we never hit one along the way though. (and yielded then)
         false
+    }
+
+    #[inline]
+    pub fn traverse_aabb<F: FnMut(usize) -> bool>(
+        &self,
+        state: &mut Traversal,
+        aabb: &Aabb,
+        mut intersection_fn: F,
+    ) {
+        loop {
+            // While the primitive group is not empty
+            while state.primitive_group.y != 0 {
+                let local_primitive_index = firstbithigh(state.primitive_group.y);
+
+                // Remove primitive from current_group
+                state.primitive_group.y &= !(1u32 << local_primitive_index);
+
+                let global_primitive_index = state.primitive_group.x + local_primitive_index;
+                if !intersection_fn(global_primitive_index as usize) {
+                    return;
+                }
+            }
+            state.primitive_group = UVec2::ZERO;
+
+            // If there's remaining nodes in the current group to check
+            if state.current_group.y & 0xff000000 != 0 {
+                let hits_imask = state.current_group.y;
+
+                let child_index_offset = firstbithigh(hits_imask);
+                let child_index_base = state.current_group.x;
+
+                // Remove node from current_group
+                state.current_group.y &= !(1u32 << child_index_offset);
+
+                // If the node group is not yet empty, push it on the stack
+                if state.current_group.y & 0xff000000 != 0 {
+                    state.stack.push(state.current_group);
+                }
+
+                let slot_index = (child_index_offset - 24) ^ (state.oct_inv4 & 0xff);
+                let relative_index = (hits_imask & !(0xffffffffu32 << slot_index)).count_ones();
+
+                let child_node_index = child_index_base + relative_index;
+
+                let node = &self.nodes[child_node_index as usize];
+
+                let hitmask = node.intersect_aabb(&aabb, state.oct_inv4);
+
+                state.current_group.x = node.child_base_idx;
+                state.primitive_group.x = node.primitive_base_idx;
+
+                state.current_group.y = (hitmask & 0xff000000) | (node.imask as u32);
+                state.primitive_group.y = hitmask & 0x00ffffff;
+            } else
+            // There's no nodes left in the current group
+            {
+                state.primitive_group = state.current_group;
+                state.current_group = UVec2::ZERO;
+            }
+
+            // If there's no remaining nodes in the current group to check, pop it off the stack.
+            if state.primitive_group.y == 0 && (state.current_group.y & 0xff000000) == 0 {
+                // If the stack is empty, end traversal.
+                if state.stack.is_empty() {
+                    state.current_group.y = 0;
+                    break;
+                }
+
+                state.current_group = state.stack.pop_fast();
+            }
+        }
     }
 
     /// This is currently mostly here just for reference. It's setup somewhat similarly to the GPU version,
