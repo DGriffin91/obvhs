@@ -141,16 +141,25 @@ macro_rules! scope {
 
 /// General build parameters for BVH2 & CWBVHs
 pub struct BvhBuildParams {
+    /// Split large tris into multiple AABBs
     pub pre_split: bool,
+    /// In ploc, the number of nodes before and after the current one that are evaluated for pairing. 1 has a
+    /// fast path in building and still results in decent quality BVHs esp. when paired with a bit of reinsertion.
     pub ploc_search_distance: PlocSearchDistance,
+    /// Below this depth a search distance of 1 will be used for ploc.
     pub search_depth_threshold: usize,
+    /// Typically 0..1: ratio of nodes considered as candidates for reinsertion. Above 1 to evaluate the whole set
+    /// multiple times. A little goes a long way. Try 0.01 or even 0.001 before disabling for build performance.
     pub reinsertion_batch_ratio: f32,
     /// For BVH2 only, a second pass of reinsertion after collapse. Since collapse reduces the node count,
     /// this reinsertion pass will be faster. 0 to disable. Relative to the initial reinsertion_batch_ratio.
     pub post_collapse_reinsertion_batch_ratio_multiplier: f32,
+    /// Bits used for ploc radix sort.
     pub sort_precision: SortPrecision,
     /// Min 1 (CwBvh will clamp to max 3)
     pub max_prims_per_leaf: u32,
+    /// Multiplier for traversal cost calculation during collapse. A higher value will result in more primitives
+    /// per leaf.
     pub collapse_traversal_cost: f32,
 }
 
