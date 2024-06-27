@@ -248,7 +248,7 @@ impl Traversal {
         self.stack.clear();
         self.current_group = uvec2(0, 0x80000000);
         self.primitive_group = UVec2::ZERO;
-        self.oct_inv4 = ray_get_octant_inv4(ray.direction);
+        self.oct_inv4 = ray_get_octant_inv4(&ray.direction);
         self.ray = ray;
     }
 }
@@ -264,7 +264,7 @@ impl CwBvh {
             uvec2(0, 0x80000000)
         };
         let primitive_group = UVec2::ZERO;
-        let oct_inv4 = ray_get_octant_inv4(ray.direction);
+        let oct_inv4 = ray_get_octant_inv4(&ray.direction);
 
         Traversal {
             stack,
@@ -385,73 +385,99 @@ impl CwBvh {
         false
     }
 
+    /// Traverses the BVH using custom BVH node and primitive intersection functions.
+    ///
+    /// # Parameters
+    /// - `stack`: Mutable reference to a stack used for traversal.
+    /// - `traversal_direction`: Traversal order direction vector.
+    /// - `node_intersection_fn`: Closure that is called for each node intersection during traversal.
+    ///   - Return a node children hitmask corresponding to which nodes were intersected. See
+    ///     `CwBvhNode::intersect` for example usage.
+    ///   - `node`: `CwBvhNode` The current node to be intersected.
+    ///   - `oct_inv4`: `u32` Ray octant, encoded in 3 bits
+    ///   - `traversal_direction`: `Vec3A` Traversal order direction vector.
+    /// - `primitive_intersection_fn`: Closure that is called for each primitive during traversal.
+    ///   - Return false to halt traversal.
+    ///   - `primitive_index`: `usize` Index of the primitive to be processed.
     #[inline]
-    pub fn traverse_aabb<F: FnMut(usize) -> bool>(
+    pub fn traverse_fn<F, N>(
         &self,
-        state: &mut Traversal,
-        aabb: &Aabb,
-        mut intersection_fn: F,
-    ) {
+        stack: &mut TraversalStack32<UVec2>,
+        traversal_direction: &Vec3A,
+        mut node_intersection_fn: N,
+        mut primitive_intersection_fn: F,
+    ) where
+        F: FnMut(usize) -> bool,
+        N: FnMut(&CwBvhNode, &Vec3A, u32) -> u32,
+    {
+        if self.nodes.is_empty() {
+            return;
+        };
+        stack.clear();
+        let mut current_group = uvec2(0, 0x80000000);
+        let mut primitive_group = UVec2::ZERO;
+        let oct_inv4 = ray_get_octant_inv4(traversal_direction);
+
         loop {
             // While the primitive group is not empty
-            while state.primitive_group.y != 0 {
-                let local_primitive_index = firstbithigh(state.primitive_group.y);
+            while primitive_group.y != 0 {
+                let local_primitive_index = firstbithigh(primitive_group.y);
 
                 // Remove primitive from current_group
-                state.primitive_group.y &= !(1u32 << local_primitive_index);
+                primitive_group.y &= !(1u32 << local_primitive_index);
 
-                let global_primitive_index = state.primitive_group.x + local_primitive_index;
-                if !intersection_fn(global_primitive_index as usize) {
+                let global_primitive_index = primitive_group.x + local_primitive_index;
+                if !primitive_intersection_fn(global_primitive_index as usize) {
                     return;
                 }
             }
-            state.primitive_group = UVec2::ZERO;
+            primitive_group = UVec2::ZERO;
 
             // If there's remaining nodes in the current group to check
-            if state.current_group.y & 0xff000000 != 0 {
-                let hits_imask = state.current_group.y;
+            if current_group.y & 0xff000000 != 0 {
+                let hits_imask = current_group.y;
 
                 let child_index_offset = firstbithigh(hits_imask);
-                let child_index_base = state.current_group.x;
+                let child_index_base = current_group.x;
 
                 // Remove node from current_group
-                state.current_group.y &= !(1u32 << child_index_offset);
+                current_group.y &= !(1u32 << child_index_offset);
 
                 // If the node group is not yet empty, push it on the stack
-                if state.current_group.y & 0xff000000 != 0 {
-                    state.stack.push(state.current_group);
+                if current_group.y & 0xff000000 != 0 {
+                    stack.push(current_group);
                 }
 
-                let slot_index = (child_index_offset - 24) ^ (state.oct_inv4 & 0xff);
+                let slot_index = (child_index_offset - 24) ^ (oct_inv4 & 0xff);
                 let relative_index = (hits_imask & !(0xffffffffu32 << slot_index)).count_ones();
 
                 let child_node_index = child_index_base + relative_index;
 
                 let node = &self.nodes[child_node_index as usize];
 
-                let hitmask = node.intersect_aabb(&aabb, state.oct_inv4);
+                let hitmask = node_intersection_fn(&node, &traversal_direction, oct_inv4);
 
-                state.current_group.x = node.child_base_idx;
-                state.primitive_group.x = node.primitive_base_idx;
+                current_group.x = node.child_base_idx;
+                primitive_group.x = node.primitive_base_idx;
 
-                state.current_group.y = (hitmask & 0xff000000) | (node.imask as u32);
-                state.primitive_group.y = hitmask & 0x00ffffff;
+                current_group.y = (hitmask & 0xff000000) | (node.imask as u32);
+                primitive_group.y = hitmask & 0x00ffffff;
             } else
             // There's no nodes left in the current group
             {
-                state.primitive_group = state.current_group;
-                state.current_group = UVec2::ZERO;
+                primitive_group = current_group;
+                current_group = UVec2::ZERO;
             }
 
             // If there's no remaining nodes in the current group to check, pop it off the stack.
-            if state.primitive_group.y == 0 && (state.current_group.y & 0xff000000) == 0 {
+            if primitive_group.y == 0 && (current_group.y & 0xff000000) == 0 {
                 // If the stack is empty, end traversal.
-                if state.stack.is_empty() {
-                    state.current_group.y = 0;
+                if stack.is_empty() {
+                    current_group.y = 0;
                     break;
                 }
 
-                state.current_group = state.stack.pop_fast();
+                current_group = stack.pop_fast();
             }
         }
     }
@@ -474,7 +500,7 @@ impl CwBvh {
         let mut current_mesh = INVALID;
         let mut bvh = self;
 
-        let oct_inv4 = ray_get_octant_inv4(ray.direction);
+        let oct_inv4 = ray_get_octant_inv4(&ray.direction);
 
         current_group = uvec2(0, 0x80000000);
 
@@ -839,7 +865,7 @@ fn firstbithigh(value: u32) -> u32 {
 }
 
 #[inline(always)]
-fn ray_get_octant_inv4(dir: Vec3A) -> u32 {
+fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
     // Ray octant, encoded in 3 bits
     // const uint oct =
     //    (dir.x < 0.0 ? 0b100 : 0) |
