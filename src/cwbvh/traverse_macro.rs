@@ -3,7 +3,7 @@
 /// both generic node and primitive traversal.
 ///
 /// # Parameters
-/// - `$cwbvh`: `&CwBvh` The complete bounding volume hierarchy to traverse.
+/// - `$cwbvh`: `&CwBvh` The CWBVH to be traversed.
 /// - `$node`: `&CwBvhNode` The current node in the BVH that is being traversed.
 /// - `$state`: `Traversal` Mutable traversal state.
 /// - `$node_intersection`: An expression that is executed for each node intersection during traversal.
@@ -38,7 +38,7 @@
 /// let mut node;
 /// traverse!(bvh, node, state,
 ///     // Node intersection:
-///     CwBvhNode::intersect_ray(node, &traverse_ray, state.oct_inv4),
+///     node.intersect_ray(&traverse_ray, state.oct_inv4),
 ///     // Primitive intersection:
 ///     {
 ///         let t = tris[bvh.primitive_indices[state.primitive_id as usize] as usize].intersect(&traverse_ray);

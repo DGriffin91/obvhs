@@ -5,10 +5,7 @@ mod tests {
     use obvhs::{
         aabb::Aabb,
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
-        cwbvh::{
-            builder::{build_cwbvh, build_cwbvh_from_tris},
-            node::CwBvhNode,
-        },
+        cwbvh::builder::{build_cwbvh, build_cwbvh_from_tris},
         ray::{Ray, RayHit},
         test_util::geometry::{demoscene, height_to_triangles},
         traverse,
@@ -162,7 +159,7 @@ mod tests {
             cwbvh,
             node,
             state,
-            CwBvhNode::intersect_aabb(&node, &aabb, state.oct_inv4),
+            node.intersect_aabb(&aabb, state.oct_inv4),
             {
                 let primitive_id = cwbvh.primitive_indices[state.primitive_id as usize] as usize;
                 let tri = tris[primitive_id];

@@ -195,7 +195,7 @@ impl CwBvh {
             self,
             node,
             state,
-            CwBvhNode::intersect_ray(node, &traverse_ray, state.oct_inv4),
+            node.intersect_ray(&traverse_ray, state.oct_inv4),
             {
                 let t = intersection_fn(&traverse_ray, state.primitive_id as usize);
                 if t < traverse_ray.tmax {
