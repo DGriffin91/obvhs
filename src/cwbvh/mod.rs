@@ -13,20 +13,19 @@ use crate::{
     Boundable, PerComponent,
 };
 
-/// Traverses the BVH using custom BVH node and primitive intersection functions.
-/// Yields at every primitive hit with the primitive id.
-/// Returns with u32::MAX when there are no further primitives to evaluate.
-macro_rules! traverse_fn {
-    ($self:expr, $node:expr, $state:expr, $hitmask:expr, $primitive_id:expr, {$($node_intersection:tt)*}, {$($primitive_intersection:tt)*}) => {{
+// TODO docs. Really didn't want to use a macro but it seems like everything else using closures/yielding is slower.
+#[macro_export]
+macro_rules! traverse {
+    ($self:expr, $node:expr, $state:expr, {$($node_intersection:tt)*}, {$($primitive_intersection:tt)*}) => {{
         loop {
             // While the primitive group is not empty
             while $state.primitive_group.y != 0 {
-                let local_primitive_index = firstbithigh($state.primitive_group.y);
+                let local_primitive_index = $crate::cwbvh::firstbithigh($state.primitive_group.y);
 
                 // Remove primitive from current_group
                 $state.primitive_group.y &= !(1u32 << local_primitive_index);
 
-                $primitive_id = $state.primitive_group.x + local_primitive_index;
+                $state.primitive_id = $state.primitive_group.x + local_primitive_index;
                 $($primitive_intersection)*
 
             }
@@ -36,7 +35,7 @@ macro_rules! traverse_fn {
             if $state.current_group.y & 0xff000000 != 0 {
                 let hits_imask = $state.current_group.y;
 
-                let child_index_offset = firstbithigh(hits_imask);
+                let child_index_offset = $crate::cwbvh::firstbithigh(hits_imask);
                 let child_index_base = $state.current_group.x;
 
                 // Remove node from current_group
@@ -59,8 +58,8 @@ macro_rules! traverse_fn {
                 $state.current_group.x = $node.child_base_idx;
                 $state.primitive_group.x = $node.primitive_base_idx;
 
-                $state.current_group.y = (&$hitmask & 0xff000000u32) | ($node.imask as u32);
-                $state.primitive_group.y = &$hitmask & 0x00ffffffu32;
+                $state.current_group.y = (&$state.hitmask & 0xff000000u32) | ($node.imask as u32);
+                $state.primitive_group.y = &$state.hitmask & 0x00ffffffu32;
             } else {
                 $state.primitive_group = $state.current_group;
                 $state.current_group = UVec2::ZERO;
@@ -323,13 +322,28 @@ impl RayTraversal {
 }
 
 /// Holds traversal state to allow for dynamic traversal (yield on hit)
-#[derive(Default)]
 pub struct Traversal {
     pub stack: TraversalStack32<UVec2>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
     pub oct_inv4: u32,
     pub traversal_direction: Vec3A,
+    pub primitive_id: u32,
+    pub hitmask: u32,
+}
+
+impl Default for Traversal {
+    fn default() -> Self {
+        Self {
+            stack: Default::default(),
+            current_group: uvec2(0, 0x80000000),
+            primitive_group: Default::default(),
+            oct_inv4: Default::default(),
+            traversal_direction: Default::default(),
+            primitive_id: Default::default(),
+            hitmask: Default::default(),
+        }
+    }
 }
 
 impl Traversal {
@@ -341,12 +355,14 @@ impl Traversal {
         self.primitive_group = UVec2::ZERO;
         self.oct_inv4 = ray_get_octant_inv4(&traversal_direction);
         self.traversal_direction = traversal_direction;
+        self.primitive_id = 0;
+        self.hitmask = 0;
     }
 }
 
 impl CwBvh {
     #[inline(always)]
-    pub fn new_traversal(&self, ray: Ray) -> RayTraversal {
+    pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
         let stack = TraversalStack32::default();
         let current_group = if self.nodes.is_empty() {
@@ -366,6 +382,28 @@ impl CwBvh {
         }
     }
 
+    #[inline(always)]
+    pub fn new_traversal(&self, traversal_direction: Vec3A) -> Traversal {
+        //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
+        let stack = TraversalStack32::default();
+        let current_group = if self.nodes.is_empty() {
+            UVec2::ZERO
+        } else {
+            uvec2(0, 0x80000000)
+        };
+        let primitive_group = UVec2::ZERO;
+        let oct_inv4 = ray_get_octant_inv4(&traversal_direction);
+        Traversal {
+            stack,
+            current_group,
+            primitive_group,
+            oct_inv4,
+            traversal_direction,
+            primitive_id: 0,
+            hitmask: 0,
+        }
+    }
+
     /// Traverse the BVH, finding the closest hit.
     /// Returns true if any primitive was hit.
     pub fn traverse<F: FnMut(&Ray, usize) -> f32>(
@@ -380,31 +418,19 @@ impl CwBvh {
 
         let mut traverse_ray = ray.clone();
 
-        let mut state = Traversal {
-            stack: TraversalStack32::default(),
-            current_group: uvec2(0, 0x80000000),
-            primitive_group: UVec2::ZERO,
-            oct_inv4: ray_get_octant_inv4(&ray.direction),
-            traversal_direction: ray.direction,
-        };
-
-        let mut primitive_id;
+        let mut state = self.new_traversal(ray.direction);
         let mut node;
-        let mut hitmask;
-
-        traverse_fn!(
+        traverse!(
             self,
             node,
             state,
-            hitmask,
-            primitive_id,
             {
                 #[cfg(all(
                     any(target_arch = "x86", target_arch = "x86_64"),
                     target_feature = "sse2"
                 ))]
                 {
-                    hitmask = CwBvhNode::intersect_simd(node, &traverse_ray, state.oct_inv4);
+                    state.hitmask = CwBvhNode::intersect_simd(node, &traverse_ray, state.oct_inv4);
                 }
 
                 #[cfg(not(all(
@@ -412,13 +438,13 @@ impl CwBvh {
                     target_feature = "sse2"
                 )))]
                 {
-                    hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4);
+                    state.hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4);
                 }
             },
             {
-                let t = intersection_fn(&traverse_ray, primitive_id as usize);
+                let t = intersection_fn(&traverse_ray, state.primitive_id as usize);
                 if t < traverse_ray.tmax {
-                    hit.primitive_id = primitive_id;
+                    hit.primitive_id = state.primitive_id;
                     hit.t = t;
                     traverse_ray.tmax = t;
                 }
@@ -523,88 +549,6 @@ impl CwBvh {
         // Returns false when there are no more primitives to test.
         // This doesn't mean we never hit one along the way though. (and yielded then)
         false
-    }
-
-    /// Traverses the BVH using custom BVH node and primitive intersection functions.
-    /// Yields at every primitive hit with the primitive id.
-    /// Returns with u32::MAX when there are no further primitives to evaluate.
-    ///
-    /// # Parameters
-    /// - `stack`: Mutable reference to a stack used for traversal.
-    /// - `traversal_direction`: Traversal order direction vector.
-    /// - `node_intersection_fn`: Closure that is called for each node intersection during traversal.
-    ///   - Return a node children hitmask corresponding to which nodes were intersected. See
-    ///     `CwBvhNode::intersect` for example usage.
-    ///   - `node`: `CwBvhNode` The current node to be intersected.
-    ///   - `oct_inv4`: `u32` Ray octant, encoded in 3 bits
-    ///   - `traversal_direction`: `Vec3A` Traversal order direction vector.
-    #[inline(always)]
-    pub fn traverse_fn<F>(&self, state: &mut Traversal, mut node_intersection_fn: F) -> u32
-    where
-        F: FnMut(&CwBvhNode, &Vec3A, u32) -> u32,
-    {
-        loop {
-            // While the primitive group is not empty
-            if state.primitive_group.y != 0 {
-                let local_primitive_index = firstbithigh(state.primitive_group.y);
-
-                // Remove primitive from current_group
-                state.primitive_group.y &= !(1u32 << local_primitive_index);
-
-                let global_primitive_index = state.primitive_group.x + local_primitive_index;
-                return global_primitive_index;
-            }
-            state.primitive_group = UVec2::ZERO;
-
-            // If there's remaining nodes in the current group to check
-            if state.current_group.y & 0xff000000 != 0 {
-                let hits_imask = state.current_group.y;
-
-                let child_index_offset = firstbithigh(hits_imask);
-                let child_index_base = state.current_group.x;
-
-                // Remove node from current_group
-                state.current_group.y &= !(1u32 << child_index_offset);
-
-                // If the node group is not yet empty, push it on the stack
-                if state.current_group.y & 0xff000000 != 0 {
-                    state.stack.push(state.current_group);
-                }
-
-                let slot_index = (child_index_offset - 24) ^ (state.oct_inv4 & 0xff);
-                let relative_index = (hits_imask & !(0xffffffffu32 << slot_index)).count_ones();
-
-                let child_node_index = child_index_base + relative_index;
-
-                let node = &self.nodes[child_node_index as usize];
-
-                let hitmask =
-                    node_intersection_fn(&node, &state.traversal_direction, state.oct_inv4);
-
-                state.current_group.x = node.child_base_idx;
-                state.primitive_group.x = node.primitive_base_idx;
-
-                state.current_group.y = (hitmask & 0xff000000) | (node.imask as u32);
-                state.primitive_group.y = hitmask & 0x00ffffff;
-            } else
-            // There's no nodes left in the current group
-            {
-                state.primitive_group = state.current_group;
-                state.current_group = UVec2::ZERO;
-            }
-
-            // If there's no remaining nodes in the current group to check, pop it off the stack.
-            if state.primitive_group.y == 0 && (state.current_group.y & 0xff000000) == 0 {
-                // If the stack is empty, end traversal.
-                if state.stack.is_empty() {
-                    state.current_group.y = 0;
-                    break;
-                }
-
-                state.current_group = state.stack.pop_fast();
-            }
-        }
-        return INVALID;
     }
 
     /// This is currently mostly here just for reference. It's setup somewhat similarly to the GPU version,
@@ -985,7 +929,7 @@ impl CwBvh {
 }
 
 #[inline(always)]
-fn firstbithigh(value: u32) -> u32 {
+pub fn firstbithigh(value: u32) -> u32 {
     31 - value.leading_zeros()
 }
 
