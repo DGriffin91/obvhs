@@ -153,7 +153,7 @@ impl CwBvhNode {
                     ),
                 );
 
-                if child_aabb.aabb_intersect(&adjusted_aabb) {
+                if child_aabb.intersect_aabb(&adjusted_aabb) {
                     let child_bits = extract_byte(child_bits4, j as u32);
                     let bit_index = extract_byte(bit_index4, j as u32);
 

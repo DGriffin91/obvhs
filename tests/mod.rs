@@ -124,7 +124,7 @@ mod tests {
         let mut refrence_intersect_sum = 0usize;
         let mut refrence_count = 0;
         for (id, tri) in tris.iter().enumerate() {
-            if aabb.aabb_intersect(&tri.aabb()) {
+            if aabb.intersect_aabb(&tri.aabb()) {
                 refrence_intersect_sum = refrence_intersect_sum.wrapping_add(id);
                 refrence_count += 1;
             }
@@ -135,12 +135,12 @@ mod tests {
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
         bvh2.validate(&tris, false, false);
-        bvh2.aabb_intersect(aabb, |bvh, id| {
+        bvh2.intersect_aabb(aabb, |bvh, id| {
             let node = &bvh.nodes[id as usize];
             for i in 0..node.prim_count {
                 let primitive_id = bvh.primitive_indices[(node.first_index + i) as usize] as usize;
                 let tri = tris[primitive_id];
-                if aabb.aabb_intersect(&tri.aabb()) {
+                if aabb.intersect_aabb(&tri.aabb()) {
                     intersect_count += 1;
                     intersect_sum = intersect_sum.wrapping_add(primitive_id);
                 }
@@ -166,7 +166,7 @@ mod tests {
             {
                 let primitive_id = cwbvh.primitive_indices[state.primitive_id as usize] as usize;
                 let tri = tris[primitive_id];
-                if aabb.aabb_intersect(&tri.aabb()) {
+                if aabb.intersect_aabb(&tri.aabb()) {
                     cw_intersect_count += 1;
                     cw_intersect_sum = cw_intersect_sum.wrapping_add(primitive_id);
                 }

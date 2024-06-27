@@ -182,14 +182,14 @@ impl Aabb {
 
     /// Checks if this AABB intersects with another AABB.
     #[inline]
-    pub fn aabb_intersect(&self, other: &Aabb) -> bool {
+    pub fn intersect_aabb(&self, other: &Aabb) -> bool {
         !(self.min.cmpgt(other.max).any() || self.max.cmplt(other.min).any())
     }
 
     /// Checks if this AABB intersects with a ray and returns the distance to the intersection point.
     /// Returns `f32::MAX` if there is no intersection.
     #[inline]
-    pub fn ray_intersect(&self, ray: &Ray) -> f32 {
+    pub fn intersect_ray(&self, ray: &Ray) -> f32 {
         let t1 = (self.min - ray.origin) * ray.inv_direction;
         let t2 = (self.max - ray.origin) * ray.inv_direction;
 
@@ -340,20 +340,20 @@ mod tests {
     }
 
     #[test]
-    fn test_aabb_intersect() {
+    fn test_intersect_aabb() {
         let aabb1 = Aabb::new(Vec3A::ZERO, Vec3A::ONE);
         let aabb2 = Aabb::new(Vec3A::splat(0.5), Vec3A::splat(1.5));
-        assert!(aabb1.aabb_intersect(&aabb2));
+        assert!(aabb1.intersect_aabb(&aabb2));
         let aabb3 = Aabb::new(Vec3A::splat(1.5), Vec3A::splat(2.5));
-        assert!(!aabb1.aabb_intersect(&aabb3));
+        assert!(!aabb1.intersect_aabb(&aabb3));
     }
 
     #[test]
-    fn test_ray_intersect() {
+    fn test_intersect_ray() {
         let aabb = Aabb::new(Vec3A::ZERO, Vec3A::ONE);
         let ray = Ray::new(Vec3A::splat(-1.0), Vec3A::ONE, 0.0, f32::MAX);
-        assert_eq!(aabb.ray_intersect(&ray), 1.0);
+        assert_eq!(aabb.intersect_ray(&ray), 1.0);
         let ray_no_intersect = Ray::new(Vec3A::splat(2.0), Vec3A::ONE, 0.0, f32::MAX);
-        assert_eq!(aabb.ray_intersect(&ray_no_intersect), f32::MAX);
+        assert_eq!(aabb.intersect_ray(&ray_no_intersect), f32::MAX);
     }
 }
