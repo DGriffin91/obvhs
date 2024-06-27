@@ -21,12 +21,12 @@ use crate::{
 /// - `$cwbvh`: `&CwBvh` The complete bounding volume hierarchy to traverse.
 /// - `$node`: `&CwBvhNode` The current node in the BVH that is being traversed.
 /// - `$state`: `Traversal` Mutable traversal state.
-/// - `$node_intersection`: A code block that is executed at for each node intersection during traversal.
+/// - `$node_intersection`: An expression that is executed at for each node intersection during traversal.
 ///     It should test for intersection against use the current `node`, making use of `state.oct_inv4` u32.
-///     It should set `state.hitmask` u32 the node children hitmask corresponding to which nodes were intersected.
+///     It should return a u32 `hitmask` the node children hitmask corresponding to which nodes were intersected.
 /// - `$primitive_intersection`: A code block that is executed for each primitive intersection.
 ///     It should read the current `state.primitive_id` u32. This is the index into the primitive indices for the
-///     current primitive to be tested. Use `break;` halt traversal.
+///     current primitive to be tested. Use `break` to halt traversal.
 ///
 /// # Example: Closest hit ray traversal
 /// ```
@@ -53,7 +53,7 @@ use crate::{
 /// let mut node;
 /// traverse!(bvh, node, state,
 ///     // Node intersection:
-///     { state.hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4); },
+///     CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4),
 ///     // Primitive intersection:
 ///     {
 ///         let t = tris[bvh.primitive_indices[state.primitive_id as usize] as usize].intersect(&traverse_ray);
@@ -71,7 +71,7 @@ use crate::{
 /// ```
 #[macro_export]
 macro_rules! traverse {
-    ($cwbvh:expr, $node:expr, $state:expr, $node_intersection:tt, $primitive_intersection:tt) => {{
+    ($cwbvh:expr, $node:expr, $state:expr, $node_intersection:expr, $primitive_intersection:expr) => {{
         loop {
             // While the primitive group is not empty
             while $state.primitive_group.y != 0 {
@@ -82,7 +82,6 @@ macro_rules! traverse {
 
                 $state.primitive_id = $state.primitive_group.x + local_primitive_index;
                 $primitive_intersection
-
             }
             $state.primitive_group = UVec2::ZERO;
 
@@ -108,7 +107,7 @@ macro_rules! traverse {
 
                 $node = &$cwbvh.nodes[child_node_index as usize];
 
-                $node_intersection
+                $state.hitmask = $node_intersection;
 
                 $state.current_group.x = $node.child_base_idx;
                 $state.primitive_group.x = $node.primitive_base_idx;
@@ -485,7 +484,7 @@ impl CwBvh {
                     target_feature = "sse2"
                 ))]
                 {
-                    state.hitmask = CwBvhNode::intersect_simd(node, &traverse_ray, state.oct_inv4);
+                    CwBvhNode::intersect_simd(node, &traverse_ray, state.oct_inv4)
                 }
 
                 #[cfg(not(all(
@@ -493,7 +492,7 @@ impl CwBvh {
                     target_feature = "sse2"
                 )))]
                 {
-                    state.hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4);
+                    CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4)
                 }
             },
             {

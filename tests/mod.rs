@@ -162,9 +162,7 @@ mod tests {
             cwbvh,
             node,
             state,
-            {
-                state.hitmask = CwBvhNode::intersect_aabb(&node, &aabb, state.oct_inv4);
-            },
+            CwBvhNode::intersect_aabb(&node, &aabb, state.oct_inv4),
             {
                 let primitive_id = cwbvh.primitive_indices[state.primitive_id as usize] as usize;
                 let tri = tris[primitive_id];
