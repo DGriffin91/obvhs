@@ -7,7 +7,7 @@ mod tests {
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
-            CwBvhNode,
+            node::CwBvhNode,
         },
         ray::{Ray, RayHit},
         test_util::geometry::{demoscene, height_to_triangles},

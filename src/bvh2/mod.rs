@@ -271,6 +271,8 @@ impl Bvh2 {
 
     /// Traverse the BVH with an Aabb. fn `eval` is called for nodes that intersect `aabb`
     /// The bvh (self) and the current node index is passed into fn `eval`
+    /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
+    /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
     pub fn aabb_intersect<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
         let mut stack =
