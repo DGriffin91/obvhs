@@ -206,7 +206,7 @@ impl RayTraversal {
 
 impl CwBvh {
     #[inline(always)]
-    pub fn new_traversal(&self, ray: Ray) -> RayTraversal {
+    pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
         let stack = TraversalStack32::default();
         let current_group = if self.nodes.is_empty() {
@@ -234,7 +234,7 @@ impl CwBvh {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut state = self.new_traversal(ray);
+        let mut state = self.new_ray_traversal(ray);
         while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
         hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
     }

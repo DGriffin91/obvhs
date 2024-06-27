@@ -159,7 +159,7 @@ const DEFAULT_MAX_STACK_DEPTH: usize = 96;
 
 impl Bvh2 {
     #[inline(always)]
-    pub fn new_traversal(&self, ray: Ray) -> RayTraversal {
+    pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         let mut stack =
             HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
         if !self.nodes.is_empty() {
@@ -191,7 +191,7 @@ impl Bvh2 {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut state = self.new_traversal(ray);
+        let mut state = self.new_ray_traversal(ray);
         while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
         hit.t < ray.tmax // Note this is valid since traverse_with_stack does not mutate the ray
     }

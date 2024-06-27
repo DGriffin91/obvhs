@@ -118,7 +118,7 @@ fn main() {
                     let fogc = sky.render(fog_dir).min(Vec3A::splat(100.0));
                     let skyc = sky.render(ray.direction);
                     let sunc = sky.render(-sun_direction);
-                    let mut state = bvh.new_traversal(ray);
+                    let mut state = bvh.new_ray_traversal(ray);
                     while bvh.traverse_dynamic(&mut state, &mut hit, intersection_fn) {}
                     if hit.t < f32::MAX {
                         let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
