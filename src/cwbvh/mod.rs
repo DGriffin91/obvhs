@@ -184,7 +184,7 @@ impl<T: Copy + Default> TraversalStack32<T> {
 }
 
 /// Holds traversal state to allow for dynamic traversal (yield on hit)
-pub struct Traversal {
+pub struct RayTraversal {
     pub stack: TraversalStack32<UVec2>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
@@ -192,7 +192,7 @@ pub struct Traversal {
     pub ray: Ray,
 }
 
-impl Traversal {
+impl RayTraversal {
     #[inline(always)]
     /// Reinitialize traversal state with new ray.
     pub fn reinit(&mut self, ray: Ray) {
@@ -206,7 +206,7 @@ impl Traversal {
 
 impl CwBvh {
     #[inline(always)]
-    pub fn new_traversal(&self, ray: Ray) -> Traversal {
+    pub fn new_traversal(&self, ray: Ray) -> RayTraversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
         let stack = TraversalStack32::default();
         let current_group = if self.nodes.is_empty() {
@@ -217,7 +217,7 @@ impl CwBvh {
         let primitive_group = UVec2::ZERO;
         let oct_inv4 = ray_get_octant_inv4(ray.direction);
 
-        Traversal {
+        RayTraversal {
             stack,
             current_group,
             primitive_group,
@@ -249,7 +249,7 @@ impl CwBvh {
     #[inline]
     pub fn traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
         &self,
-        state: &mut Traversal,
+        state: &mut RayTraversal,
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {

@@ -120,14 +120,14 @@ impl Bvh2Node {
 }
 
 /// Holds traversal state to allow for dynamic traversal (yield on hit)
-pub struct Traversal {
+pub struct RayTraversal {
     pub stack: HeapStack<u32>,
     pub ray: Ray,
     pub current_primitive_index: u32,
     pub primitive_count: u32,
 }
 
-impl Traversal {
+impl RayTraversal {
     #[inline(always)]
     /// Reinitialize traversal state with new ray.
     pub fn reinit(&mut self, ray: Ray) {
@@ -159,13 +159,13 @@ const DEFAULT_MAX_STACK_DEPTH: usize = 96;
 
 impl Bvh2 {
     #[inline(always)]
-    pub fn new_traversal(&self, ray: Ray) -> Traversal {
+    pub fn new_traversal(&self, ray: Ray) -> RayTraversal {
         let mut stack =
             HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
         if !self.nodes.is_empty() {
             stack.push(0);
         }
-        Traversal {
+        RayTraversal {
             stack,
             ray,
             current_primitive_index: 0,
@@ -214,7 +214,7 @@ impl Bvh2 {
     #[inline(always)]
     pub fn traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
         &self,
-        state: &mut Traversal,
+        state: &mut RayTraversal,
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
