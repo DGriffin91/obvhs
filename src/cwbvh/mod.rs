@@ -13,6 +13,75 @@ use crate::{
     Boundable, PerComponent,
 };
 
+/// Traverses the BVH using custom BVH node and primitive intersection functions.
+/// Yields at every primitive hit with the primitive id.
+/// Returns with u32::MAX when there are no further primitives to evaluate.
+macro_rules! traverse_fn {
+    ($self:expr, $node:expr, $state:expr, $hitmask:expr, $primitive_id:expr, {$($node_intersection:tt)*}, {$($primitive_intersection:tt)*}) => {{
+        loop {
+            // While the primitive group is not empty
+            while $state.primitive_group.y != 0 {
+                let local_primitive_index = firstbithigh($state.primitive_group.y);
+
+                // Remove primitive from current_group
+                $state.primitive_group.y &= !(1u32 << local_primitive_index);
+
+                $primitive_id = $state.primitive_group.x + local_primitive_index;
+                $($primitive_intersection)*
+
+            }
+            $state.primitive_group = UVec2::ZERO;
+
+            // If there's remaining nodes in the current group to check
+            if $state.current_group.y & 0xff000000 != 0 {
+                let hits_imask = $state.current_group.y;
+
+                let child_index_offset = firstbithigh(hits_imask);
+                let child_index_base = $state.current_group.x;
+
+                // Remove node from current_group
+                $state.current_group.y &= !(1u32 << child_index_offset);
+
+                // If the node group is not yet empty, push it on the stack
+                if $state.current_group.y & 0xff000000 != 0 {
+                    $state.stack.push($state.current_group);
+                }
+
+                let slot_index = (child_index_offset - 24) ^ ($state.oct_inv4 & 0xff);
+                let relative_index = (hits_imask & !(0xffffffffu32 << slot_index)).count_ones();
+
+                let child_node_index = child_index_base + relative_index;
+
+                $node = &$self.nodes[child_node_index as usize];
+
+                $($node_intersection)*
+
+                $state.current_group.x = $node.child_base_idx;
+                $state.primitive_group.x = $node.primitive_base_idx;
+
+                $state.current_group.y = (&$hitmask & 0xff000000u32) | ($node.imask as u32);
+                $state.primitive_group.y = &$hitmask & 0x00ffffffu32;
+            } else {
+                $state.primitive_group = $state.current_group;
+                $state.current_group = UVec2::ZERO;
+            }
+
+            // If there's no remaining nodes in the current group to check, pop it off the stack.
+            if $state.primitive_group.y == 0 && ($state.current_group.y & 0xff000000) == 0 {
+                // If the stack is empty, end traversal.
+                if $state.stack.is_empty() {
+                    $state.current_group.y = 0;
+                    break;
+                }
+
+                $state.current_group = $state.stack.pop_fast();
+            }
+        }
+    }};
+}
+
+//--------------------------------------------
+
 pub const BRANCHING: usize = 8;
 /// A Compressed Wide BVH8 Node
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -308,36 +377,54 @@ impl CwBvh {
         //let mut state = self.new_traversal(ray);
         //while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
         //hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
+
         let mut traverse_ray = ray.clone();
 
         let mut state = Traversal {
             stack: TraversalStack32::default(),
-            current_group: if self.nodes.is_empty() {
-                UVec2::ZERO
-            } else {
-                uvec2(0, 0x80000000)
-            },
+            current_group: uvec2(0, 0x80000000),
             primitive_group: UVec2::ZERO,
             oct_inv4: ray_get_octant_inv4(&ray.direction),
             traversal_direction: ray.direction,
         };
 
-        loop {
-            let primitive_id = self.traverse_fn(
-                &mut state,
-                #[inline(always)]
-                |node, _, oct_inv4| CwBvhNode::intersect(&node, &traverse_ray, oct_inv4),
-            );
-            if primitive_id == INVALID {
-                break;
+        let mut primitive_id;
+        let mut node;
+        let mut hitmask;
+
+        traverse_fn!(
+            self,
+            node,
+            state,
+            hitmask,
+            primitive_id,
+            {
+                #[cfg(all(
+                    any(target_arch = "x86", target_arch = "x86_64"),
+                    target_feature = "sse2"
+                ))]
+                {
+                    hitmask = CwBvhNode::intersect_simd(node, &traverse_ray, state.oct_inv4);
+                }
+
+                #[cfg(not(all(
+                    any(target_arch = "x86", target_arch = "x86_64"),
+                    target_feature = "sse2"
+                )))]
+                {
+                    hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4);
+                }
+            },
+            {
+                let t = intersection_fn(&traverse_ray, primitive_id as usize);
+                if t < traverse_ray.tmax {
+                    hit.primitive_id = primitive_id;
+                    hit.t = t;
+                    traverse_ray.tmax = t;
+                }
             }
-            let t = intersection_fn(&traverse_ray, primitive_id as usize);
-            if t < traverse_ray.tmax {
-                traverse_ray.tmax = t;
-                hit.t = t;
-                hit.primitive_id = primitive_id;
-            }
-        }
+        );
+
         hit.t < ray.tmax
     }
 
