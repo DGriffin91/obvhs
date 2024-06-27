@@ -13,10 +13,65 @@ use crate::{
     Boundable, PerComponent,
 };
 
-// TODO docs. Really didn't want to use a macro but it seems like everything else using closures/yielding is slower.
+/// Traverse the BVH with custom node and primitive intersections.
+/// I really didn't want to use a macro but it seems like everything else using closures/yielding is slower given
+/// both generic node and primitive traversal.
+///
+/// # Parameters
+/// - `$cwbvh`: `&CwBvh` The complete bounding volume hierarchy to traverse.
+/// - `$node`: `&CwBvhNode` The current node in the BVH that is being traversed.
+/// - `$state`: `Traversal` Mutable traversal state.
+/// - `$node_intersection`: A code block that is executed at for each node intersection during traversal.
+///     It should test for intersection against use the current `node`, making use of `state.oct_inv4` u32.
+///     It should set `state.hitmask` u32 the node children hitmask corresponding to which nodes were intersected.
+/// - `$primitive_intersection`: A code block that is executed for each primitive intersection.
+///     It should read the current `state.primitive_id` u32. This is the index into the primitive indices for the
+///     current primitive to be tested. Use `break;` halt traversal.
+///
+/// # Example: Closest hit ray traversal
+/// ```
+/// use obvhs::{
+///     cwbvh::{builder::build_cwbvh_from_tris, CwBvhNode},
+///     ray::{Ray, RayHit},
+///     test_util::geometry::{icosphere, PLANE},
+///     triangle::Triangle,
+///     BvhBuildParams,
+///     traverse,
+/// };
+/// use glam::*;
+///
+/// let mut tris: Vec<Triangle> = Vec::new();
+/// tris.extend(icosphere(1));
+/// tris.extend(PLANE);
+///
+/// let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));
+///
+/// let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::medium_build(), &mut 0.0);
+/// let mut hit = RayHit::none();
+/// let mut traverse_ray = ray.clone();
+/// let mut state = bvh.new_traversal(ray.direction);
+/// let mut node;
+/// traverse!(bvh, node, state,
+///     // Node intersection:
+///     { state.hitmask = CwBvhNode::intersect(node, &traverse_ray, state.oct_inv4); },
+///     // Primitive intersection:
+///     {
+///         let t = tris[bvh.primitive_indices[state.primitive_id as usize] as usize].intersect(&traverse_ray);
+///         if t < traverse_ray.tmax {
+///             hit.primitive_id = state.primitive_id;
+///             hit.t = t;
+///             traverse_ray.tmax = t;
+///         }
+///     }
+/// );
+///
+/// let did_hit = hit.t < ray.tmax;
+/// assert!(did_hit);
+/// assert!(bvh.primitive_indices[hit.primitive_id as usize] == 62);
+/// ```
 #[macro_export]
 macro_rules! traverse {
-    ($self:expr, $node:expr, $state:expr, {$($node_intersection:tt)*}, {$($primitive_intersection:tt)*}) => {{
+    ($cwbvh:expr, $node:expr, $state:expr, $node_intersection:tt, $primitive_intersection:tt) => {{
         loop {
             // While the primitive group is not empty
             while $state.primitive_group.y != 0 {
@@ -26,7 +81,7 @@ macro_rules! traverse {
                 $state.primitive_group.y &= !(1u32 << local_primitive_index);
 
                 $state.primitive_id = $state.primitive_group.x + local_primitive_index;
-                $($primitive_intersection)*
+                $primitive_intersection
 
             }
             $state.primitive_group = UVec2::ZERO;
@@ -51,9 +106,9 @@ macro_rules! traverse {
 
                 let child_node_index = child_index_base + relative_index;
 
-                $node = &$self.nodes[child_node_index as usize];
+                $node = &$cwbvh.nodes[child_node_index as usize];
 
-                $($node_intersection)*
+                $node_intersection
 
                 $state.current_group.x = $node.child_base_idx;
                 $state.primitive_group.x = $node.primitive_base_idx;
