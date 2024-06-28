@@ -7,7 +7,7 @@ mod tests {
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::builder::{build_cwbvh, build_cwbvh_from_tris},
         ray::{Ray, RayHit},
-        test_util::geometry::{demoscene, height_to_triangles},
+        test_util::geometry::{demoscene, height_to_triangles, CUBE},
         traverse,
         triangle::Triangle,
         BvhBuildParams,
@@ -172,5 +172,27 @@ mod tests {
 
         assert_eq!(refrence_count, cw_intersect_count);
         assert_eq!(refrence_intersect_sum, cw_intersect_sum);
+    }
+
+    #[test]
+    pub fn traverse4() {
+        let tris = CUBE;
+
+        // CWBVH
+        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        cwbvh.validate(false, false, &tris);
+
+        let rays = [
+            Ray::new_inf(Vec3A::X * 5.0, -Vec3A::X),
+            Ray::new_inf(-Vec3A::X * 5.0, Vec3A::X),
+            Ray::new_inf(Vec3A::Z * 5.0, -Vec3A::Z),
+            Ray::new_inf(-Vec3A::Z * 5.0, Vec3A::Z),
+        ];
+
+        let mut hits = [RayHit::none(); 4];
+        let did_hit = cwbvh.traverse4(rays, &mut hits, |ray, id| {
+            tris[cwbvh.primitive_indices[id] as usize].intersect(ray)
+        });
+        dbg!(assert_eq!(did_hit, [true; 4]));
     }
 }

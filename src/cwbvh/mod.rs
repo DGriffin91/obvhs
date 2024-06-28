@@ -213,6 +213,39 @@ impl CwBvh {
         hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
     }
 
+    pub fn traverse4<F: FnMut(&Ray, usize) -> f32>(
+        &self,
+        rays: [Ray; 4],
+        hits: &mut [RayHit; 4],
+        mut intersection_fn: F,
+    ) -> [bool; 4] {
+        let mut traverse_rays = rays.clone();
+        let mut state = self.new_traversal(traverse_rays[0].direction);
+        let mut node;
+        crate::traverse!(
+            self,
+            node,
+            state,
+            node.intersect_ray4(&traverse_rays, state.oct_inv4),
+            {
+                for ray_n in 0..4 {
+                    let t = intersection_fn(&traverse_rays[ray_n], state.primitive_id as usize);
+                    if t < traverse_rays[ray_n].tmax {
+                        hits[ray_n].primitive_id = state.primitive_id;
+                        hits[ray_n].t = t;
+                        traverse_rays[ray_n].tmax = t;
+                    }
+                }
+            }
+        );
+        [
+            hits[0].t < rays[0].tmax,
+            hits[1].t < rays[1].tmax,
+            hits[2].t < rays[2].tmax,
+            hits[3].t < rays[3].tmax,
+        ]
+    }
+
     /// Traverse the BVH
     /// Yields at every primitive hit, returning true.
     /// Returns false when no hit is found.
