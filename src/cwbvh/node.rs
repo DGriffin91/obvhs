@@ -46,7 +46,7 @@ impl CwBvhNode {
             target_feature = "sse2"
         )))]
         {
-            self.intersect_basic(ray, oct_inv4)
+            self.intersect_ray_basic(ray, oct_inv4)
         }
     }
 
