@@ -1,11 +1,13 @@
 pub mod builder;
 pub mod bvh2_to_cwbvh;
+pub mod node;
 pub mod simd;
+pub mod traverse_macro;
 
 use std::collections::{HashMap, HashSet};
 
-use bytemuck::{Pod, Zeroable};
-use glam::{uvec2, vec3a, UVec2, UVec3, Vec3, Vec3A};
+use glam::{uvec2, UVec2, UVec3, Vec3A};
+use node::CwBvhNode;
 
 use crate::{
     aabb::Aabb,
@@ -14,118 +16,8 @@ use crate::{
 };
 
 pub const BRANCHING: usize = 8;
-/// A Compressed Wide BVH8 Node
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-#[repr(C)]
-pub struct CwBvhNode {
-    /// Min point
-    pub p: Vec3,
-    /// Exponent of child bounding box compression
-    pub e: [u8; 3],
-    /// Indicates which children are internal nodes
-    pub imask: u8,
-    pub child_base_idx: u32,
-    pub primitive_base_idx: u32,
-    pub child_meta: [u8; 8],
 
-    // Note: deviation from the paper: the min&max are interleaved here.
-    pub child_min_x: [u8; 8],
-    pub child_max_x: [u8; 8],
-    pub child_min_y: [u8; 8],
-    pub child_max_y: [u8; 8],
-    pub child_min_z: [u8; 8],
-    pub child_max_z: [u8; 8],
-}
-
-unsafe impl Pod for CwBvhNode {}
-unsafe impl Zeroable for CwBvhNode {}
-
-#[inline(always)]
-#[allow(dead_code)]
-pub fn extract_byte(x: u32, b: u32) -> u32 {
-    (x >> (b * 8)) & 0xFFu32
-}
-
-#[inline(always)]
-#[allow(dead_code)]
-pub fn extract_byte64(x: u64, b: usize) -> u32 {
-    ((x >> (b * 8)) as u32) & 0xFFu32
-}
-
-#[inline(always)]
-pub fn extract_u32(data: &[u8; 8], second: bool) -> u32 {
-    unsafe { *(data.as_ptr().add(if second { 0 } else { 4 }) as *const u32) }
-}
-
-const EPSILON: f32 = 0.0001;
 const INVALID: u32 = u32::MAX;
-
-impl CwBvhNode {
-    #[inline(always)]
-    pub fn intersect(&self, ray: &Ray, oct_inv4: u32) -> u32 {
-        let adjusted_ray_dir_inv = vec3a(
-            f32::from_bits((self.e[0] as u32) << 23),
-            f32::from_bits((self.e[1] as u32) << 23),
-            f32::from_bits((self.e[2] as u32) << 23),
-        ) * ray.inv_direction;
-        let adjusted_ray_origin = (Vec3A::from(self.p) - ray.origin) * ray.inv_direction;
-
-        let mut hit_mask = 0;
-
-        let rdx = ray.direction.x < 0.0;
-        let rdy = ray.direction.y < 0.0;
-        let rdz = ray.direction.z < 0.0;
-
-        // [unroll]
-        for i in 0..2 {
-            let meta4 = extract_u32(&self.child_meta, i == 0);
-            let is_inner4 = (meta4 & (meta4 << 1)) & 0x10101010;
-            let inner_mask4 = (is_inner4 >> 4) * 0xffu32;
-            let bit_index4 = (meta4 ^ (oct_inv4 & inner_mask4)) & 0x1f1f1f1f;
-            let child_bits4 = (meta4 >> 5) & 0x07070707;
-
-            // [unroll]
-            for j in 0..4 {
-                let ch = i * 4 + j;
-
-                let q_lo_x = self.child_min_x[ch];
-                let q_lo_y = self.child_min_y[ch];
-                let q_lo_z = self.child_min_z[ch];
-
-                let q_hi_x = self.child_max_x[ch];
-                let q_hi_y = self.child_max_y[ch];
-                let q_hi_z = self.child_max_z[ch];
-
-                let x_min = if rdx { q_hi_x } else { q_lo_x };
-                let x_max = if rdx { q_lo_x } else { q_hi_x };
-                let y_min = if rdy { q_hi_y } else { q_lo_y };
-                let y_max = if rdy { q_lo_y } else { q_hi_y };
-                let z_min = if rdz { q_hi_z } else { q_lo_z };
-                let z_max = if rdz { q_lo_z } else { q_hi_z };
-
-                let mut tmin3 = vec3a(x_min as f32, y_min as f32, z_min as f32);
-                let mut tmax3 = vec3a(x_max as f32, y_max as f32, z_max as f32);
-
-                // Account for grid origin and scale
-                tmin3 = tmin3 * adjusted_ray_dir_inv + adjusted_ray_origin;
-                tmax3 = tmax3 * adjusted_ray_dir_inv + adjusted_ray_origin;
-
-                let tmin = tmin3.x.max(tmin3.y).max(tmin3.z).max(EPSILON); //ray.tmin?
-                let tmax = tmax3.x.min(tmax3.y).min(tmax3.z).min(ray.tmax);
-
-                let intersected = tmin <= tmax;
-                if intersected {
-                    let child_bits = extract_byte(child_bits4, j as u32);
-                    let bit_index = extract_byte(bit_index4, j as u32);
-
-                    hit_mask |= child_bits << bit_index;
-                }
-            }
-        }
-
-        hit_mask
-    }
-}
 
 /// A Compressed Wide BVH8
 #[derive(Clone, Default, PartialEq)]
@@ -199,8 +91,47 @@ impl RayTraversal {
         self.stack.clear();
         self.current_group = uvec2(0, 0x80000000);
         self.primitive_group = UVec2::ZERO;
-        self.oct_inv4 = ray_get_octant_inv4(ray.direction);
+        self.oct_inv4 = ray_get_octant_inv4(&ray.direction);
         self.ray = ray;
+    }
+}
+
+/// Holds traversal state to allow for dynamic traversal (yield on hit)
+pub struct Traversal {
+    pub stack: TraversalStack32<UVec2>,
+    pub current_group: UVec2,
+    pub primitive_group: UVec2,
+    pub oct_inv4: u32,
+    pub traversal_direction: Vec3A,
+    pub primitive_id: u32,
+    pub hitmask: u32,
+}
+
+impl Default for Traversal {
+    fn default() -> Self {
+        Self {
+            stack: Default::default(),
+            current_group: uvec2(0, 0x80000000),
+            primitive_group: Default::default(),
+            oct_inv4: Default::default(),
+            traversal_direction: Default::default(),
+            primitive_id: Default::default(),
+            hitmask: Default::default(),
+        }
+    }
+}
+
+impl Traversal {
+    #[inline(always)]
+    /// Reinitialize traversal state with new traversal direction.
+    pub fn reinit(&mut self, traversal_direction: Vec3A) {
+        self.stack.clear();
+        self.current_group = uvec2(0, 0x80000000);
+        self.primitive_group = UVec2::ZERO;
+        self.oct_inv4 = ray_get_octant_inv4(&traversal_direction);
+        self.traversal_direction = traversal_direction;
+        self.primitive_id = 0;
+        self.hitmask = 0;
     }
 }
 
@@ -215,7 +146,7 @@ impl CwBvh {
             uvec2(0, 0x80000000)
         };
         let primitive_group = UVec2::ZERO;
-        let oct_inv4 = ray_get_octant_inv4(ray.direction);
+        let oct_inv4 = ray_get_octant_inv4(&ray.direction);
 
         RayTraversal {
             stack,
@@ -223,6 +154,29 @@ impl CwBvh {
             primitive_group,
             oct_inv4,
             ray,
+        }
+    }
+
+    #[inline(always)]
+    /// traversal_direction is used to determine the order of bvh node child traversal. This would typically be the ray direction.
+    pub fn new_traversal(&self, traversal_direction: Vec3A) -> Traversal {
+        //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
+        let stack = TraversalStack32::default();
+        let current_group = if self.nodes.is_empty() {
+            UVec2::ZERO
+        } else {
+            uvec2(0, 0x80000000)
+        };
+        let primitive_group = UVec2::ZERO;
+        let oct_inv4 = ray_get_octant_inv4(&traversal_direction);
+        Traversal {
+            stack,
+            current_group,
+            primitive_group,
+            oct_inv4,
+            traversal_direction,
+            primitive_id: 0,
+            hitmask: 0,
         }
     }
 
@@ -234,8 +188,28 @@ impl CwBvh {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut state = self.new_ray_traversal(ray);
-        while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
+        let mut traverse_ray = ray.clone();
+        let mut state = self.new_traversal(ray.direction);
+        let mut node;
+        crate::traverse!(
+            self,
+            node,
+            state,
+            node.intersect_ray(&traverse_ray, state.oct_inv4),
+            {
+                let t = intersection_fn(&traverse_ray, state.primitive_id as usize);
+                if t < traverse_ray.tmax {
+                    hit.primitive_id = state.primitive_id;
+                    hit.t = t;
+                    traverse_ray.tmax = t;
+                }
+            }
+        );
+
+        // Alternatively (performance seems slightly slower):
+        // let mut state = self.new_ray_traversal(ray);
+        // while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
+
         hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
     }
 
@@ -295,17 +269,7 @@ impl CwBvh {
 
                 let node = &self.nodes[child_node_index as usize];
 
-                #[cfg(all(
-                    any(target_arch = "x86", target_arch = "x86_64"),
-                    target_feature = "sse2"
-                ))]
-                let hitmask = node.intersect_simd(&state.ray, state.oct_inv4);
-
-                #[cfg(not(all(
-                    any(target_arch = "x86", target_arch = "x86_64"),
-                    target_feature = "sse2"
-                )))]
-                let hitmask = node.intersect(&ray, oct_inv4);
+                let hitmask = node.intersect_ray(&state.ray, state.oct_inv4);
 
                 state.current_group.x = node.child_base_idx;
                 state.primitive_group.x = node.primitive_base_idx;
@@ -354,7 +318,7 @@ impl CwBvh {
         let mut current_mesh = INVALID;
         let mut bvh = self;
 
-        let oct_inv4 = ray_get_octant_inv4(ray.direction);
+        let oct_inv4 = ray_get_octant_inv4(&ray.direction);
 
         current_group = uvec2(0, 0x80000000);
 
@@ -383,17 +347,7 @@ impl CwBvh {
 
                 let node = &bvh.nodes[child_node_index as usize];
 
-                #[cfg(all(
-                    any(target_arch = "x86", target_arch = "x86_64"),
-                    target_feature = "sse2"
-                ))]
-                let hitmask = node.intersect_simd(&ray, oct_inv4);
-
-                #[cfg(not(all(
-                    any(target_arch = "x86", target_arch = "x86_64"),
-                    target_feature = "sse2"
-                )))]
-                let hitmask = node.intersect(&ray, oct_inv4);
+                let hitmask = node.intersect_ray(&ray, oct_inv4);
 
                 current_group.x = node.child_base_idx;
                 primitive_group.x = node.primitive_base_idx;
@@ -714,12 +668,12 @@ impl CwBvh {
 }
 
 #[inline(always)]
-fn firstbithigh(value: u32) -> u32 {
+pub fn firstbithigh(value: u32) -> u32 {
     31 - value.leading_zeros()
 }
 
 #[inline(always)]
-fn ray_get_octant_inv4(dir: Vec3A) -> u32 {
+fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
     // Ray octant, encoded in 3 bits
     // const uint oct =
     //    (dir.x < 0.0 ? 0b100 : 0) |

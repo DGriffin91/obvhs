@@ -5,12 +5,14 @@ use std::arch::x86::*;
 use std::arch::x86_64::*;
 use std::mem::transmute;
 
-use crate::{cwbvh::CwBvhNode, ray::Ray};
-const EPSILON: f32 = 0.0001;
+use crate::{
+    cwbvh::{node::EPSILON, CwBvhNode},
+    ray::Ray,
+};
 
 impl CwBvhNode {
     #[inline(always)]
-    pub fn intersect_simd(&self, ray: &Ray, oct_inv4: u32) -> u32 {
+    pub fn intersect_ray_simd(&self, ray: &Ray, oct_inv4: u32) -> u32 {
         let adj_ray_dir_inv = vec3a(
             f32::from_bits((self.e[0] as u32) << 23),
             f32::from_bits((self.e[1] as u32) << 23),

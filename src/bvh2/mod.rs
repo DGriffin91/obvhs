@@ -234,7 +234,7 @@ impl Bvh2 {
             }
             if let Some(current_node_index) = state.stack.pop() {
                 let node = &self.nodes[*current_node_index as usize];
-                if node.aabb.ray_intersect(&state.ray) >= state.ray.tmax {
+                if node.aabb.intersect_ray(&state.ray) >= state.ray.tmax {
                     continue;
                 }
 
@@ -263,7 +263,7 @@ impl Bvh2 {
         if node.is_leaf() {
             let primitive_id = node.first_index as usize;
             indices.push(primitive_id);
-        } else if node.aabb.ray_intersect(ray) < f32::MAX {
+        } else if node.aabb.intersect_ray(ray) < f32::MAX {
             self.traverse_recursive(ray, node.first_index as usize, indices);
             self.traverse_recursive(ray, node.first_index as usize + 1, indices);
         }
@@ -271,14 +271,16 @@ impl Bvh2 {
 
     /// Traverse the BVH with an Aabb. fn `eval` is called for nodes that intersect `aabb`
     /// The bvh (self) and the current node index is passed into fn `eval`
+    /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
+    /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
-    pub fn aabb_intersect<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
+    pub fn intersect_aabb<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
         let mut stack =
             HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
         stack.push(0);
         while let Some(current_node_index) = stack.pop() {
             let node = &self.nodes[*current_node_index as usize];
-            if !node.aabb.aabb_intersect(&aabb) {
+            if !node.aabb.intersect_aabb(&aabb) {
                 continue;
             }
 

@@ -1,12 +1,14 @@
 #[cfg(test)]
 mod tests {
+
     use glam::*;
     use obvhs::{
         aabb::Aabb,
-        bvh2::builder::build_bvh2,
+        bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::builder::{build_cwbvh, build_cwbvh_from_tris},
         ray::{Ray, RayHit},
-        test_util::geometry::height_to_triangles,
+        test_util::geometry::{demoscene, height_to_triangles},
+        traverse,
         triangle::Triangle,
         BvhBuildParams,
     };
@@ -109,5 +111,66 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    pub fn traverse_aabb() {
+        let tris = demoscene(201, 0);
+        let aabb = Aabb::new(vec3a(0.511, -1.0, 0.511), vec3a(0.611, 1.0, 0.611));
+
+        let mut refrence_intersect_sum = 0usize;
+        let mut refrence_count = 0;
+        for (id, tri) in tris.iter().enumerate() {
+            if aabb.intersect_aabb(&tri.aabb()) {
+                refrence_intersect_sum = refrence_intersect_sum.wrapping_add(id);
+                refrence_count += 1;
+            }
+        }
+
+        // BVH2
+        let bvh2 = build_bvh2_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let mut intersect_sum = 0usize;
+        let mut intersect_count = 0;
+        bvh2.validate(&tris, false, false);
+        bvh2.intersect_aabb(aabb, |bvh, id| {
+            let node = &bvh.nodes[id as usize];
+            for i in 0..node.prim_count {
+                let primitive_id = bvh.primitive_indices[(node.first_index + i) as usize] as usize;
+                let tri = tris[primitive_id];
+                if aabb.intersect_aabb(&tri.aabb()) {
+                    intersect_count += 1;
+                    intersect_sum = intersect_sum.wrapping_add(primitive_id);
+                }
+            }
+            true
+        });
+        assert_eq!(refrence_count, intersect_count);
+        assert_eq!(refrence_intersect_sum, intersect_sum);
+
+        // CWBVH
+        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let mut cw_intersect_count = 0;
+        let mut cw_intersect_sum = 0usize;
+        cwbvh.validate(false, false, &tris);
+
+        let mut state = cwbvh.new_traversal(Vec3A::ZERO);
+        let mut node;
+        traverse!(
+            cwbvh,
+            node,
+            state,
+            node.intersect_aabb(&aabb, state.oct_inv4),
+            {
+                let primitive_id = cwbvh.primitive_indices[state.primitive_id as usize] as usize;
+                let tri = tris[primitive_id];
+                if aabb.intersect_aabb(&tri.aabb()) {
+                    cw_intersect_count += 1;
+                    cw_intersect_sum = cw_intersect_sum.wrapping_add(primitive_id);
+                }
+            }
+        );
+
+        assert_eq!(refrence_count, cw_intersect_count);
+        assert_eq!(refrence_intersect_sum, cw_intersect_sum);
     }
 }
