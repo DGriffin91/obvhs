@@ -7,7 +7,10 @@ mod tests {
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::builder::{build_cwbvh, build_cwbvh_from_tris},
         ray::{Ray, RayHit},
-        test_util::geometry::{demoscene, height_to_triangles},
+        test_util::{
+            geometry::{demoscene, height_to_triangles, icosphere},
+            sampling::{hash_noise, uniform_sample_sphere},
+        },
         traverse,
         triangle::Triangle,
         BvhBuildParams,
@@ -120,9 +123,9 @@ mod tests {
 
         let mut refrence_intersect_sum = 0usize;
         let mut refrence_count = 0;
-        for (id, tri) in tris.iter().enumerate() {
+        for (primitive_id, tri) in tris.iter().enumerate() {
             if aabb.intersect_aabb(&tri.aabb()) {
-                refrence_intersect_sum = refrence_intersect_sum.wrapping_add(id);
+                refrence_intersect_sum = refrence_intersect_sum.wrapping_add(primitive_id);
                 refrence_count += 1;
             }
         }
@@ -172,5 +175,53 @@ mod tests {
 
         assert_eq!(refrence_count, cw_intersect_count);
         assert_eq!(refrence_intersect_sum, cw_intersect_sum);
+    }
+
+    #[test]
+    pub fn traverse_point() {
+        let tris = icosphere(0);
+
+        // TODO BVH2
+
+        // CWBVH
+        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        cwbvh.validate(false, false, &tris);
+
+        for i in 0..512 {
+            let point =
+                uniform_sample_sphere(vec2(hash_noise(uvec2(0, 0), i), hash_noise(uvec2(0, 1), i)));
+
+            let mut refrence_intersect_sum = 0usize;
+            let mut refrence_count = 0;
+            for (primitive_id, tri) in tris.iter().enumerate() {
+                if tri.aabb().contains_point(point) {
+                    refrence_intersect_sum = refrence_intersect_sum.wrapping_add(primitive_id);
+                    refrence_count += 1;
+                }
+            }
+
+            let mut cw_intersect_count = 0;
+            let mut cw_intersect_sum = 0usize;
+            let mut state = cwbvh.new_traversal(Vec3A::ZERO);
+            let mut node;
+            traverse!(
+                cwbvh,
+                node,
+                state,
+                node.contains_point(&point, state.oct_inv4),
+                {
+                    let primitive_id =
+                        cwbvh.primitive_indices[state.primitive_id as usize] as usize;
+                    let tri = tris[primitive_id];
+                    if tri.aabb().contains_point(point) {
+                        cw_intersect_count += 1;
+                        cw_intersect_sum = cw_intersect_sum.wrapping_add(primitive_id);
+                    }
+                }
+            );
+
+            assert_eq!(refrence_count, cw_intersect_count);
+            assert_eq!(refrence_intersect_sum, cw_intersect_sum);
+        }
     }
 }

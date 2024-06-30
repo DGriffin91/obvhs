@@ -164,6 +164,55 @@ impl CwBvhNode {
 
         hit_mask
     }
+
+    #[inline(always)]
+    pub fn contains_point(&self, point: &Vec3A, oct_inv4: u32) -> u32 {
+        let extent = vec3a(
+            f32::from_bits((self.e[0] as u32) << 23),
+            f32::from_bits((self.e[1] as u32) << 23),
+            f32::from_bits((self.e[2] as u32) << 23),
+        );
+        let extent_rcp = 1.0 / extent;
+        let p = Vec3A::from(self.p);
+
+        // Transform the query point into the node's local space
+        let adjusted_point = (*point - p) * extent_rcp;
+
+        let mut hit_mask = 0;
+
+        for i in 0..2 {
+            let meta4 = extract_u32(&self.child_meta, i == 0);
+            let is_inner4 = (meta4 & (meta4 << 1)) & 0x10101010;
+            let inner_mask4 = (is_inner4 >> 4) * 0xffu32;
+            let bit_index4 = (meta4 ^ (oct_inv4 & inner_mask4)) & 0x1f1f1f1f;
+            let child_bits4 = (meta4 >> 5) & 0x07070707;
+
+            for j in 0..4 {
+                let ch = i * 4 + j;
+                let child_aabb = Aabb::new(
+                    vec3a(
+                        self.child_min_x[ch] as f32,
+                        self.child_min_y[ch] as f32,
+                        self.child_min_z[ch] as f32,
+                    ),
+                    vec3a(
+                        self.child_max_x[ch] as f32,
+                        self.child_max_y[ch] as f32,
+                        self.child_max_z[ch] as f32,
+                    ),
+                );
+
+                if child_aabb.contains_point(adjusted_point) {
+                    let child_bits = extract_byte(child_bits4, j as u32);
+                    let bit_index = extract_byte(bit_index4, j as u32);
+
+                    hit_mask |= child_bits << bit_index;
+                }
+            }
+        }
+
+        hit_mask
+    }
 }
 
 #[inline(always)]
