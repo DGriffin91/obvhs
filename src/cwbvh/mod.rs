@@ -279,7 +279,8 @@ impl CwBvh {
             } else
             // There's no nodes left in the current group
             {
-                state.primitive_group = state.current_group;
+                // Other implementations have this, but assigning the node group to the triangle group when the node group is empty seems incorrect.
+                // state.primitive_group = state.current_group;
                 state.current_group = UVec2::ZERO;
             }
 
@@ -357,7 +358,8 @@ impl CwBvh {
             } else
             // There's no nodes left in the current group
             {
-                primitive_group = current_group;
+                // Other implementations have this, but assigning the node group to the triangle group when the node group is empty seems incorrect.
+                // primitive_group = current_group;
                 current_group = UVec2::ZERO;
             }
 
