@@ -3,21 +3,19 @@ use glam::*;
 use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
-use std::mem::transmute;
 
 use crate::{
-    cwbvh::{node::EPSILON, CwBvhNode},
+    cwbvh::{
+        node::{extract_byte64, EPSILON},
+        CwBvhNode,
+    },
     ray::Ray,
 };
 
 impl CwBvhNode {
     #[inline(always)]
     pub fn intersect_ray_simd(&self, ray: &Ray, oct_inv4: u32) -> u32 {
-        let adj_ray_dir_inv = vec3a(
-            f32::from_bits((self.e[0] as u32) << 23),
-            f32::from_bits((self.e[1] as u32) << 23),
-            f32::from_bits((self.e[2] as u32) << 23),
-        ) * ray.inv_direction;
+        let adj_ray_dir_inv = self.compute_extent() * ray.inv_direction;
         let adj_ray_origin = (Vec3A::from(self.p) - ray.origin) * ray.inv_direction;
         let mut hit_mask = 0u32;
         unsafe {
@@ -33,13 +31,7 @@ impl CwBvhNode {
             let rdy = ray.direction.y < 0.0;
             let rdz = ray.direction.z < 0.0;
 
-            let mut oct_inv8 = oct_inv4 as u64;
-            oct_inv8 |= oct_inv8 << 32;
-            let meta8 = transmute::<[u8; 8], u64>(self.child_meta);
-            let is_inner8 = (meta8 & (meta8 << 1)) & 0x1010101010101010;
-            let inner_mask8 = (is_inner8 >> 4) * 0xffu64;
-            let bit_index8 = (meta8 ^ (oct_inv8 & inner_mask8)) & 0x1f1f1f1f1f1f1f1f;
-            let child_bits8 = (meta8 >> 5) & 0x0707070707070707;
+            let (child_bits8, bit_index8) = self.get_child_and_index_bits(oct_inv4);
 
             #[inline(always)]
             fn get_q(v: &[u8; 8], i: usize) -> __m128 {
@@ -92,9 +84,8 @@ impl CwBvhNode {
                 for j in 0..4 {
                     let offset = i * 4 + j;
                     if (mask & (1 << j)) != 0 {
-                        let child_bits = ((child_bits8 >> (offset * 8)) as u32) & 0xFF;
-                        let bit_index = ((bit_index8 >> (offset * 8)) as u32) & 0xFF;
-
+                        let child_bits = extract_byte64(child_bits8, offset);
+                        let bit_index = extract_byte64(bit_index8, offset);
                         hit_mask |= child_bits << bit_index;
                     }
                 }
