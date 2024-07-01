@@ -100,7 +100,8 @@ macro_rules! traverse {
                 $state.current_group.y = (&$state.hitmask & 0xff000000u32) | ($node.imask as u32);
                 $state.primitive_group.y = &$state.hitmask & 0x00ffffffu32;
             } else {
-                // Other implementations have this, but assigning the node group to the triangle group when the node group is empty seems incorrect.
+                // Below is only needed when using triangle postponing, which would only be helpful on the
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
                 // $state.primitive_group = $state.current_group;
                 $state.current_group = UVec2::ZERO;
             }

@@ -39,7 +39,7 @@ pub struct TraversalStack32<T: Copy + Default> {
 // TODO allow the user to provide their own stack impl via a Trait.
 // BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no TLAS.
 // A BVH that deep would perform very slowly and would likely indicate that the geometry is degenerate in some way.
-// validate() will assert the CWBVH depth is less than TRAVERSAL_STACK_SIZE
+// CwBvh::validate() will assert the CWBVH depth is less than TRAVERSAL_STACK_SIZE
 impl<T: Copy + Default> TraversalStack32<T> {
     #[inline(always)]
     pub fn push(&mut self, v: T) {
@@ -279,7 +279,8 @@ impl CwBvh {
             } else
             // There's no nodes left in the current group
             {
-                // Other implementations have this, but assigning the node group to the triangle group when the node group is empty seems incorrect.
+                // Below is only needed when using triangle postponing, which would only be helpful on the
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
                 // state.primitive_group = state.current_group;
                 state.current_group = UVec2::ZERO;
             }
@@ -358,7 +359,8 @@ impl CwBvh {
             } else
             // There's no nodes left in the current group
             {
-                // Other implementations have this, but assigning the node group to the triangle group when the node group is empty seems incorrect.
+                // Below is only needed when using triangle postponing, which would only be helpful on the
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
                 // primitive_group = current_group;
                 current_group = UVec2::ZERO;
             }
