@@ -150,6 +150,10 @@ impl CwBvhNode {
         hit_mask
     }
 
+    // TODO intersect frustum
+    // https://github.com/zeux/niagara/blob/bf90aa8c78e352d3b753b35553a3bcc8c65ef7a0/src/shaders/drawcull.comp.glsl#L71
+    // https://iquilezles.org/articles/frustumcorrect/
+
     #[inline(always)]
     pub fn get_child_and_index_bits(&self, oct_inv4: u32) -> (u64, u64) {
         let mut oct_inv8 = oct_inv4 as u64;
@@ -191,13 +195,11 @@ impl CwBvhNode {
 }
 
 #[inline(always)]
-#[allow(dead_code)]
 pub fn extract_byte(x: u32, b: u32) -> u32 {
     (x >> (b * 8)) & 0xFFu32
 }
 
 #[inline(always)]
-#[allow(dead_code)]
 pub fn extract_byte64(x: u64, b: usize) -> u32 {
     ((x >> (b * 8)) as u32) & 0xFFu32
 }
