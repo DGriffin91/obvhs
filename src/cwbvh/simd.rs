@@ -51,11 +51,14 @@ impl CwBvhNode {
             // Intersect 4 aabbs at a time:
             for i in 0..2 {
                 // It's possible to select hi/lo outside the loop with child_min_x, etc... but that seems quite a bit slower
-                // Interleaving these like this is slightly faster.
+                // using _mm_blendv_ps or similar instead of `if rdx`, etc... is slower
+
+                // Interleaving x, y, z like this is slightly faster than loading all at once. Tried using _mm_prefetch without luck
                 let q_lo_x = get_q(&self.child_min_x, i);
                 let q_hi_x = get_q(&self.child_max_x, i);
                 let x_min = if rdx { q_hi_x } else { q_lo_x };
                 let x_max = if rdx { q_lo_x } else { q_hi_x };
+                // Tried using _mm_fmadd_ps, it was a lot slower
                 let tmin_x = _mm_add_ps(_mm_mul_ps(x_min, adj_ray_dir_inv_x), adj_ray_orig_x);
                 let tmax_x = _mm_add_ps(_mm_mul_ps(x_max, adj_ray_dir_inv_x), adj_ray_orig_x);
 
