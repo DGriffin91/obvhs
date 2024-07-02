@@ -159,10 +159,13 @@ impl CwBvhNode {
         let mut oct_inv8 = oct_inv4 as u64;
         oct_inv8 |= oct_inv8 << 32;
         let meta8 = unsafe { transmute::<[u8; 8], u64>(self.child_meta) };
-        let is_inner8 = (meta8 & (meta8 << 1)) & 0x1010101010101010;
+        let inner_mask = 0b0001000000010000000100000001000000010000000100000001000000010000;
+        let is_inner8 = (meta8 & (meta8 << 1)) & inner_mask;
         let inner_mask8 = (is_inner8 >> 4) * 0xffu64;
-        let bit_index8 = (meta8 ^ (oct_inv8 & inner_mask8)) & 0x1f1f1f1f1f1f1f1f;
-        let child_bits8 = (meta8 >> 5) & 0x0707070707070707;
+        let index_mask = 0b0001111100011111000111110001111100011111000111110001111100011111;
+        let bit_index8 = (meta8 ^ (oct_inv8 & inner_mask8)) & index_mask;
+        let child_mask = 0b0000011100000111000001110000011100000111000001110000011100000111;
+        let child_bits8 = (meta8 >> 5) & child_mask;
         (child_bits8, bit_index8)
     }
 
