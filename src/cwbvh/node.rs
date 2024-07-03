@@ -183,11 +183,23 @@ impl CwBvhNode {
         let mut oct_inv8 = oct_inv4 as u64;
         oct_inv8 |= oct_inv8 << 32;
         let meta8 = unsafe { transmute::<[u8; 8], u64>(self.child_meta) };
+
+        // (meta8 & (meta8 << 1)) takes advantage of the offset indexing for inner nodes [24..32)
+        // [0b00011000..=0b00011111). For leaf nodes [0..24) these two bits (0b00011000) are never both set.
         let inner_mask = 0b0001000000010000000100000001000000010000000100000001000000010000;
         let is_inner8 = (meta8 & (meta8 << 1)) & inner_mask;
+
+        // 00010000 >> 4: 00000001, then 00000001 * 0xff: 11111111
         let inner_mask8 = (is_inner8 >> 4) * 0xffu64;
+
+        // Each byte of bit_index8 contains the traversal priority, biased by 24, for internal nodes, and
+        // the triangle offset for leaf nodes. The bit index will later be used to shift the child bits.
         let index_mask = 0b0001111100011111000111110001111100011111000111110001111100011111;
         let bit_index8 = (meta8 ^ (oct_inv8 & inner_mask8)) & index_mask;
+
+        // For internal nodes child_bits8 will just be 1 in each byte, so that bit will then be shifted into the high
+        // byte of the node hit_mask (see CwBvhNode::intersect_ray). For leaf nodes it will have the unary encoded
+        // leaf primitive count and that will be shifted into the lower 24 bits of node hit_mask.
         let child_mask = 0b0000011100000111000001110000011100000111000001110000011100000111;
         let child_bits8 = (meta8 >> 5) & child_mask;
         (child_bits8, bit_index8)

@@ -679,11 +679,9 @@ pub fn firstbithigh(value: u32) -> u32 {
 #[inline(always)]
 fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
     // Ray octant, encoded in 3 bits
-    // const uint oct =
-    //    (dir.x < 0.0 ? 0b100 : 0) |
-    //    (dir.y < 0.0 ? 0b010 : 0) |
-    //    (dir.z < 0.0 ? 0b001 : 0);
-    //
+    // let oct = (if dir.x < 0.0 { 0b100 } else { 0 })
+    //     | (if dir.y < 0.0 { 0b010 } else { 0 })
+    //     | (if dir.z < 0.0 { 0b001 } else { 0 });
     // return (7 - oct) * 0x01010101;
     (if dir.x < 0.0 { 0 } else { 0x04040404 }
         | if dir.y < 0.0 { 0 } else { 0x02020202 }
