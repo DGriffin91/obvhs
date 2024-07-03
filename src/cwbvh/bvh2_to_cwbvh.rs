@@ -67,7 +67,7 @@ impl<'a> Bvh2Converter<'a> {
         let aabb = self.bvh2.nodes[node_index_bvh2].aabb;
 
         const NQ: u32 = 8;
-        const DENOM: f32 = 1.0 / ((1 << NQ) - 1) as f32;
+        const DENOM: f32 = 1.0 / ((1 << NQ) - 1) as f32; // 1.0 / 255.0
 
         let node_p = aabb.min;
         node.p = node_p.into();

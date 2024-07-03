@@ -5,21 +5,44 @@ use glam::{vec3a, Vec3, Vec3A};
 
 use crate::{aabb::Aabb, ray::Ray};
 
-/// A Compressed Wide BVH8 Node
+/// A Compressed Wide BVH8 Node. repr(C), Pod, 80 bytes.
+// https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[repr(C)]
 pub struct CwBvhNode {
-    /// Min point
+    /// Min point of node AABB
     pub p: Vec3,
+
     /// Exponent of child bounding box compression
+    /// Max point of node AABB could be calculated ex: p.x + bitcast<f32>(e[0] << 23) * 255.0
     pub e: [u8; 3],
-    /// Indicates which children are internal nodes
+
+    /// Bitmask indicating which children are internal nodes. 1 for internal, 0 for leaf
     pub imask: u8,
+
+    /// Index of first child into `Vec<CwBvhNode>`
     pub child_base_idx: u32,
+
+    /// Index of first primitive into primitive_indices `Vec<u32>`
     pub primitive_base_idx: u32,
+
+    /// Meta data for each child
+    /// Empty child slot: The field is set to 00000000
+    ///
+    /// For leafs nodes: the low 5 bits store the primitive offset [0..24) from primitive_base_idx. And the high
+    /// 3 bits store the number of primitives in that leaf in a unary encoding.
+    /// A child leaf with 2 primitives with the first primitive starting at primitive_base_idx would be 0b01100000
+    /// A child leaf with 3 primitives with the first primitive starting at primitive_base_idx + 2 would be 0b11100010
+    /// A child leaf with 1 primitive with the first primitive starting at primitive_base_idx + 1 would be 0b00100001
+    ///
+    /// For internal nodes: The high 3 bits are set to 001 while the low 5 bits store the child slot index plus 24
+    /// i.e., the values range [24..32)
     pub child_meta: [u8; 8],
 
     // Note: deviation from the paper: the min&max are interleaved here.
+    /// Axis planes for each child.
+    /// The plane position could be calculated, for example, with p.x + bitcast<f32>(e[0] << 23) * child_min_x[0]
+    /// But in the actual intersection implementation the ray is transformed instead.
     pub child_min_x: [u8; 8],
     pub child_max_x: [u8; 8],
     pub child_min_y: [u8; 8],
@@ -28,9 +51,10 @@ pub struct CwBvhNode {
     pub child_max_z: [u8; 8],
 }
 
-pub(crate) const EPSILON: f32 = 0.0001;
 unsafe impl Pod for CwBvhNode {}
 unsafe impl Zeroable for CwBvhNode {}
+
+pub(crate) const EPSILON: f32 = 0.0001;
 
 impl CwBvhNode {
     #[inline(always)]
