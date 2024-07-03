@@ -356,6 +356,36 @@ impl Bvh2 {
         }
     }
 
+    /// Refit the BVH working up the tree from this node.
+    /// This recomputes the Aabbs for the parents of the given node index.
+    /// Halts if the parents are the same size. Panics in debug if some parents still needed to be resized.
+    pub fn refit_from_fast(&mut self, mut index: usize, parents: &[u32]) {
+        let mut same_count = 0;
+        loop {
+            let node = &self.nodes[index];
+            if !node.is_leaf() {
+                let first_child_bbox = self.nodes[node.first_index as usize].aabb;
+                let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
+                let new_aabb = first_child_bbox.union(&second_child_bbox);
+                let node = &mut self.nodes[index].aabb;
+                if node == &new_aabb {
+                    same_count += 1;
+                    #[cfg(not(debug_assertions))]
+                    if same_count == 2 {
+                        return;
+                    }
+                } else {
+                    debug_assert!(same_count < 2, "Some parents still needed refitting. Unideal fitting is occurring somewhere.");
+                }
+                *node = new_aabb;
+            }
+            if index == 0 {
+                break;
+            }
+            index = parents[index] as usize;
+        }
+    }
+
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
     pub fn validate<T: Boundable>(&self, primitives: &[T], direct_layout: bool, splits: bool) {
         if !splits {

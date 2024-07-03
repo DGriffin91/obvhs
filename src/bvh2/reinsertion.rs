@@ -267,8 +267,8 @@ impl ReinsertionOptimizer<'_> {
 
         self.parents[sibling_id] = to as u32;
         self.parents[from] = to as u32;
-        self.bvh.refit_from(to, &self.parents);
-        self.bvh.refit_from(parent_id, &self.parents);
+        self.bvh.refit_from_fast(to, &self.parents);
+        self.bvh.refit_from_fast(parent_id, &self.parents);
     }
 
     #[inline(always)]
