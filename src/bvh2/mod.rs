@@ -344,7 +344,7 @@ impl Bvh2 {
     pub fn refit_from(&mut self, mut index: usize, parents: &[u32]) {
         loop {
             let node = &self.nodes[index];
-            if !self.nodes[index].is_leaf() {
+            if !node.is_leaf() {
                 let first_child_bbox = self.nodes[node.first_index as usize].aabb;
                 let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
                 self.nodes[index].aabb = first_child_bbox.union(&second_child_bbox);
