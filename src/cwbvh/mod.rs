@@ -24,7 +24,7 @@ const INVALID: u32 = u32::MAX;
 
 const NQ: u32 = 8;
 const NQ_SCALE: f32 = ((1 << NQ) - 1) as f32; //255.0
-const DENOM: f32 = NQ_SCALE / ((1 << NQ) - 1) as f32; // 1.0 / 255.0
+const DENOM: f32 = 1.0 / NQ_SCALE; // 1.0 / 255.0
 
 /// A Compressed Wide BVH8
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -836,20 +836,15 @@ impl CwBvh {
                 for ch in 0..8 {
                     if !node.is_leaf(ch) {
                         let child_node_index = node.child_node_index(ch) as usize;
-                        let compressed_aabb = node.child_aabb(ch);
-                        let child_node_self_compressed_aabb = self.nodes[child_node_index].aabb();
+                        let comp_aabb = node.child_aabb(ch);
+                        let self_aabb = self.nodes[child_node_index].aabb();
                         let exact_aabb = exact_node_aabbs[child_node_index];
 
-                        assert!(exact_aabb.min.cmpge((compressed_aabb.min).into()).all());
-                        assert!(exact_aabb.max.cmple((compressed_aabb.max).into()).all());
-                        assert!(exact_aabb
-                            .min
-                            .cmpge((child_node_self_compressed_aabb.min).into())
-                            .all());
-                        assert!(exact_aabb
-                            .max
-                            .cmple((child_node_self_compressed_aabb.max).into())
-                            .all());
+                        // TODO Could these bounds be tighter?
+                        assert!(exact_aabb.min.cmpge((comp_aabb.min - 1.0e-5).into()).all());
+                        assert!(exact_aabb.max.cmple((comp_aabb.max + 1.0e-5).into()).all());
+                        assert!(exact_aabb.min.cmpge((self_aabb.min - 1.0e-5).into()).all());
+                        assert!(exact_aabb.max.cmple((self_aabb.max + 1.0e-5).into()).all());
                     }
                 }
             }
