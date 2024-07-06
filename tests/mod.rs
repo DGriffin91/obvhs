@@ -287,7 +287,7 @@ mod tests {
             config.sort_precision,
             config.search_depth_threshold,
         );
-        let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true);
+        let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
         cwbvh.validate(false, false, &tris);
         for node in 0..cwbvh.nodes.len() {
@@ -296,6 +296,70 @@ mod tests {
         cwbvh.validate(false, false, &tris);
         for node in 0..cwbvh.nodes.len() {
             cwbvh.order_children(node, false, &aabbs);
+        }
+        cwbvh.validate(false, false, &tris);
+    }
+
+    #[test]
+    pub fn exact_aabbs_cwbvh() {
+        let tris = demoscene(100, 0);
+        let triangles: &[Triangle] = &tris;
+        let mut aabbs = Vec::with_capacity(triangles.len());
+
+        let config = BvhBuildParams::very_fast_build();
+        let mut indices = Vec::with_capacity(triangles.len());
+        for (i, tri) in triangles.iter().enumerate() {
+            let a = tri.v0;
+            let b = tri.v1;
+            let c = tri.v2;
+            let mut aabb = Aabb::empty();
+            aabb.extend(a).extend(b).extend(c);
+            aabbs.push(aabb);
+            indices.push(i as u32);
+        }
+
+        let bvh2 = config.ploc_search_distance.build(
+            &aabbs,
+            indices,
+            config.sort_precision,
+            config.search_depth_threshold,
+        );
+        let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, true);
+
+        if let Some(exact_node_aabbs) = &cwbvh.exact_node_aabbs {
+            for node in &cwbvh.nodes {
+                for ch in 0..8 {
+                    if !node.is_leaf(ch) {
+                        let child_node_index = node.child_node_index(ch) as usize;
+                        let compressed_aabb = node.child_aabb(ch);
+                        let child_node_self_compressed_aabb = cwbvh.nodes[child_node_index].aabb();
+                        let exact_aabb = &exact_node_aabbs[child_node_index];
+
+                        assert!(exact_aabb.min.cmpge((compressed_aabb.min).into()).all());
+                        assert!(exact_aabb.max.cmple((compressed_aabb.max).into()).all());
+                        assert!(exact_aabb
+                            .min
+                            .cmpge((child_node_self_compressed_aabb.min).into())
+                            .all());
+                        assert!(exact_aabb
+                            .max
+                            .cmple((child_node_self_compressed_aabb.max).into())
+                            .all());
+                    }
+                }
+            }
+        }
+
+        for node in 0..cwbvh.nodes.len() {
+            // This will use the exact aabb if they are included
+            cwbvh.order_children(node, false, &aabbs);
+        }
+        cwbvh.validate(false, false, &tris);
+        let parents = cwbvh.compute_parents();
+        // You wouldn't usually refit from every node, just doing this for the test.
+        for (child, _parent) in parents.iter().enumerate().skip(1) {
+            // This will use the exact aabb if they are included
+            cwbvh.refit_from(child, &parents, false, true, &tris);
         }
         cwbvh.validate(false, false, &tris);
     }

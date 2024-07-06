@@ -33,6 +33,7 @@ pub struct CwBvh {
     pub nodes: Vec<CwBvhNode>,
     pub primitive_indices: Vec<u32>,
     pub total_aabb: Aabb,
+    pub exact_node_aabbs: Option<Vec<Aabb>>,
 }
 
 const TRAVERSAL_STACK_SIZE: usize = 32;
@@ -517,9 +518,18 @@ impl CwBvh {
                     }
                     aabb = aabb.union(&children_aabbs[ch]);
                 } else {
-                    children_aabbs[ch] = self.nodes[node.child_node_index(ch) as usize].aabb();
+                    let child_node_index = node.child_node_index(ch) as usize;
+                    children_aabbs[ch] = if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
+                        exact_node_aabbs[child_node_index]
+                    } else {
+                        self.nodes[child_node_index].aabb()
+                    };
                     aabb = aabb.union(&children_aabbs[ch]);
                 }
+            }
+
+            if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
+                exact_node_aabbs[node_index] = aabb;
             }
 
             // TODO see if we can remove code duplication with bvh2_to_cwbvh
@@ -639,6 +649,13 @@ impl CwBvh {
                 old_child_centers[ch] = self.nodes[old_node.child_node_index(ch) as usize]
                     .aabb()
                     .center();
+                let child_node_index = old_node.child_node_index(ch) as usize;
+                old_child_centers[ch] = if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
+                    exact_node_aabbs[child_node_index]
+                } else {
+                    self.nodes[child_node_index].aabb()
+                }
+                .center();
             }
         }
 
@@ -745,6 +762,23 @@ impl CwBvh {
             old_child_nodes[ch] = self.nodes[old_node.child_node_index(ch) as usize]
         }
 
+        let old_child_exact_aabbs = if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
+            let mut old_child_exact_aabbs = [Aabb::empty(); 8];
+            for ch in 0..BRANCHING {
+                if old_node.is_child_empty(ch) {
+                    continue;
+                }
+                if old_node.is_leaf(ch) {
+                    continue;
+                }
+                old_child_exact_aabbs[ch] =
+                    exact_node_aabbs[old_node.child_node_index(ch) as usize];
+            }
+            Some(old_child_exact_aabbs)
+        } else {
+            None
+        };
+
         // check if this is really needed or if we can specify the offset in the child_meta out of order
         for ch in 0..BRANCHING {
             if old_node.is_child_empty(ch) {
@@ -763,6 +797,11 @@ impl CwBvh {
             }
             let new_idx = new_node.child_node_index(new_ch) as usize;
             self.nodes[new_idx] = old_child_nodes[ch];
+            if let Some(old_child_exact_aabbs) = &old_child_exact_aabbs {
+                if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
+                    exact_node_aabbs[new_idx] = old_child_exact_aabbs[ch];
+                }
+            }
             assert!(new_idx >= old_node.child_base_idx as usize);
             assert!(new_idx < old_node.child_base_idx as usize + child_inner_count);
         }
@@ -791,6 +830,30 @@ impl CwBvh {
         //self.print_nodes();
 
         ctx.max_depth = self.caclulate_max_depth(0, &mut ctx, 0);
+
+        if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
+            for node in &self.nodes {
+                for ch in 0..8 {
+                    if !node.is_leaf(ch) {
+                        let child_node_index = node.child_node_index(ch) as usize;
+                        let compressed_aabb = node.child_aabb(ch);
+                        let child_node_self_compressed_aabb = self.nodes[child_node_index].aabb();
+                        let exact_aabb = exact_node_aabbs[child_node_index];
+
+                        assert!(exact_aabb.min.cmpge((compressed_aabb.min).into()).all());
+                        assert!(exact_aabb.max.cmple((compressed_aabb.max).into()).all());
+                        assert!(exact_aabb
+                            .min
+                            .cmpge((child_node_self_compressed_aabb.min).into())
+                            .all());
+                        assert!(exact_aabb
+                            .max
+                            .cmple((child_node_self_compressed_aabb.max).into())
+                            .all());
+                    }
+                }
+            }
+        }
 
         assert_eq!(ctx.discovered_nodes.len(), self.nodes.len());
         assert_eq!(

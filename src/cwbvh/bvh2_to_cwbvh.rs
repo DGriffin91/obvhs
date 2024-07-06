@@ -3,6 +3,7 @@
 use glam::{vec3a, UVec3, Vec3A};
 
 use crate::{
+    aabb::Aabb,
     bvh2::Bvh2,
     cwbvh::{CwBvh, CwBvhNode, BRANCHING, DENOM},
     PerComponent, VecExt,
@@ -17,6 +18,8 @@ pub struct Bvh2Converter<'a> {
     pub primitive_indices: Vec<u32>,
     pub decisions: Vec<Decision>,
     pub order_children_during_build: bool,
+    pub include_exact_node_aabbs: bool,
+    pub exact_node_aabbs: Option<Vec<Aabb>>,
     direction_lut: [Vec3A; 8],
 }
 
@@ -28,7 +31,7 @@ const PRIM_COST: f32 = 0.3;
 
 impl<'a> Bvh2Converter<'a> {
     /// Initialize the Bvh2 to CwBvh converter.
-    pub fn new(bvh2: &'a Bvh2, order_children: bool) -> Self {
+    pub fn new(bvh2: &'a Bvh2, order_children: bool, include_exact_node_aabbs: bool) -> Self {
         let capacity = bvh2.primitive_indices.len();
 
         let mut nodes = Vec::with_capacity(capacity);
@@ -53,6 +56,12 @@ impl<'a> Bvh2Converter<'a> {
             decisions: vec![Decision::default(); bvh2.nodes.len() * 7],
             order_children_during_build: order_children,
             direction_lut,
+            include_exact_node_aabbs,
+            exact_node_aabbs: if include_exact_node_aabbs {
+                Some(vec![Aabb::empty(); bvh2.nodes.len()])
+            } else {
+                None
+            },
         }
     }
 
@@ -66,6 +75,9 @@ impl<'a> Bvh2Converter<'a> {
     pub fn convert_to_cwbvh_impl(&mut self, node_index_bvh8: usize, node_index_bvh2: usize) {
         let mut node = self.nodes[node_index_bvh8];
         let aabb = self.bvh2.nodes[node_index_bvh2].aabb;
+        if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
+            exact_node_aabbs[node_index_bvh8] = aabb;
+        }
 
         let node_p = aabb.min;
         node.p = node_p.into();
@@ -474,11 +486,16 @@ pub struct Decision {
 /// # Arguments
 /// * `bvh2` - Source BVH
 /// * `max_prims_per_leaf` - 0..=3 The maximum number of primitives per leaf.
-pub fn bvh2_to_cwbvh(bvh2: &Bvh2, max_prims_per_leaf: u32, order_children: bool) -> CwBvh {
+pub fn bvh2_to_cwbvh(
+    bvh2: &Bvh2,
+    max_prims_per_leaf: u32,
+    order_children: bool,
+    include_exact_node_aabbs: bool,
+) -> CwBvh {
     if bvh2.nodes.is_empty() {
         return CwBvh::default();
     }
-    let mut converter = Bvh2Converter::new(bvh2, order_children);
+    let mut converter = Bvh2Converter::new(bvh2, order_children, include_exact_node_aabbs);
     converter.calculate_cost(max_prims_per_leaf);
     converter.convert_to_cwbvh();
 
@@ -486,5 +503,6 @@ pub fn bvh2_to_cwbvh(bvh2: &Bvh2, max_prims_per_leaf: u32, order_children: bool)
         nodes: converter.nodes,
         primitive_indices: converter.primitive_indices,
         total_aabb: bvh2.nodes[0].aabb,
+        exact_node_aabbs: converter.exact_node_aabbs,
     }
 }
