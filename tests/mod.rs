@@ -5,7 +5,10 @@ mod tests {
     use obvhs::{
         aabb::Aabb,
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
-        cwbvh::builder::{build_cwbvh, build_cwbvh_from_tris},
+        cwbvh::{
+            builder::{build_cwbvh, build_cwbvh_from_tris},
+            bvh2_to_cwbvh::bvh2_to_cwbvh,
+        },
         ray::{Ray, RayHit},
         test_util::{
             geometry::{demoscene, height_to_triangles, icosphere},
@@ -223,5 +226,77 @@ mod tests {
             assert_eq!(refrence_count, cw_intersect_count);
             assert_eq!(refrence_intersect_sum, cw_intersect_sum);
         }
+    }
+
+    #[test]
+    pub fn compute_parents_cwbvh() {
+        let tris = demoscene(100, 0);
+        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        cwbvh.validate(false, false, &tris);
+        let parents = cwbvh.compute_parents();
+        for (child, parent) in parents.iter().enumerate().skip(1) {
+            let node = cwbvh.nodes[*parent as usize];
+            let mut found_child = false;
+            for ch in 0..8 {
+                if !node.is_leaf(ch) {
+                    let child_index = node.child_node_index(ch);
+                    if child_index as usize == child {
+                        found_child = true;
+                        break;
+                    }
+                }
+            }
+            assert!(found_child, "child{}, parent{}", child, parent);
+        }
+    }
+
+    #[test]
+    pub fn refit_cwbvh() {
+        let tris = demoscene(100, 0);
+        let mut cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        cwbvh.validate(false, false, &tris);
+        let parents = cwbvh.compute_parents();
+        // You wouldn't usually refit from every node, just doing this for the test.
+        for (child, _parent) in parents.iter().enumerate().skip(1) {
+            cwbvh.refit_from(child, &parents, false, true, &tris);
+        }
+        cwbvh.validate(false, false, &tris);
+    }
+
+    #[test]
+    pub fn order_children_cwbvh() {
+        let tris = demoscene(100, 0);
+        let triangles: &[Triangle] = &tris;
+        let mut aabbs = Vec::with_capacity(triangles.len());
+
+        let config = BvhBuildParams::very_fast_build();
+        let mut indices = Vec::with_capacity(triangles.len());
+        for (i, tri) in triangles.iter().enumerate() {
+            let a = tri.v0;
+            let b = tri.v1;
+            let c = tri.v2;
+            let mut aabb = Aabb::empty();
+            aabb.extend(a).extend(b).extend(c);
+            aabbs.push(aabb);
+            indices.push(i as u32);
+        }
+
+        let bvh2 = config.ploc_search_distance.build(
+            &aabbs,
+            indices,
+            config.sort_precision,
+            config.search_depth_threshold,
+        );
+        let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true);
+
+        cwbvh.validate(false, false, &tris);
+        for node in 0..cwbvh.nodes.len() {
+            cwbvh.order_children(node, false, &aabbs);
+        }
+        cwbvh.validate(false, false, &tris);
+        for node in 0..cwbvh.nodes.len() {
+            cwbvh.order_children(node, false, &aabbs);
+        }
+        cwbvh.validate(false, false, &tris);
     }
 }

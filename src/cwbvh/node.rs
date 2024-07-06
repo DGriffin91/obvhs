@@ -1,13 +1,18 @@
-use std::mem::transmute;
-
-use bytemuck::{Pod, Zeroable};
-use glam::{vec3a, Vec3, Vec3A};
+use std::{
+    fmt::{self, Formatter},
+    mem::transmute,
+};
 
 use crate::{aabb::Aabb, ray::Ray};
+use bytemuck::{Pod, Zeroable};
+use glam::{vec3a, Vec3, Vec3A};
+use std::fmt::Debug;
+
+use super::NQ_SCALE;
 
 /// A Compressed Wide BVH8 Node. repr(C), Pod, 80 bytes.
 // https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
 pub struct CwBvhNode {
     /// Min point of node AABB
@@ -49,6 +54,32 @@ pub struct CwBvhNode {
     pub child_max_y: [u8; 8],
     pub child_min_z: [u8; 8],
     pub child_max_z: [u8; 8],
+}
+
+impl Debug for CwBvhNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CwBvhNode")
+            .field("p", &self.p)
+            .field("e", &self.e)
+            .field("imask", &format!("{:#010b}", &self.imask))
+            .field("child_base_idx", &self.child_base_idx)
+            .field("primitive_base_idx", &self.primitive_base_idx)
+            .field(
+                "child_meta",
+                &self
+                    .child_meta
+                    .iter()
+                    .map(|c| format!("{:#010b}", c))
+                    .collect::<Vec<_>>(),
+            )
+            .field("child_min_x", &self.child_min_x)
+            .field("child_max_x", &self.child_max_x)
+            .field("child_min_y", &self.child_min_y)
+            .field("child_max_y", &self.child_max_y)
+            .field("child_min_z", &self.child_min_z)
+            .field("child_max_z", &self.child_max_z)
+            .finish()
+    }
 }
 
 unsafe impl Pod for CwBvhNode {}
@@ -222,6 +253,23 @@ impl CwBvhNode {
         )
     }
 
+    #[inline(always)]
+    pub fn child_aabb(&self, child: usize) -> Aabb {
+        let e = self.compute_extent();
+        let p: Vec3A = self.p.into();
+        let mut local_aabb = self.local_child_aabb(child);
+        local_aabb.min = local_aabb.min * e + p;
+        local_aabb.max = local_aabb.max * e + p;
+        local_aabb
+    }
+
+    #[inline(always)]
+    pub fn aabb(&self) -> Aabb {
+        let e = self.compute_extent();
+        let p: Vec3A = self.p.into();
+        Aabb::new(p, p + e * NQ_SCALE)
+    }
+
     /// Convert stored extent exponent into float vector
     #[inline(always)]
     pub fn compute_extent(&self) -> Vec3A {
@@ -230,6 +278,35 @@ impl CwBvhNode {
             f32::from_bits((self.e[1] as u32) << 23),
             f32::from_bits((self.e[2] as u32) << 23),
         )
+    }
+
+    // If the child is empty this will also return true. If needed also use CwBvh::is_child_empty().
+    #[inline(always)]
+    pub fn is_leaf(&self, child: usize) -> bool {
+        (self.imask & (1 << child)) == 0
+    }
+
+    #[inline(always)]
+    pub fn is_child_empty(&self, child: usize) -> bool {
+        self.child_meta[child] == 0
+    }
+
+    /// Returns the primitive starting index and primitive count for the given child.
+    #[inline(always)]
+    pub fn child_primitives(&self, child: usize) -> (u32, u32) {
+        let child_meta = self.child_meta[child];
+        let starting_index = self.primitive_base_idx + (self.child_meta[child] & 0b11111) as u32;
+        let primitive_count = (child_meta & 0b11100000).count_ones();
+        (starting_index, primitive_count)
+    }
+
+    /// Returns the node index of the given child.
+    #[inline(always)]
+    pub fn child_node_index(&self, child: usize) -> u32 {
+        let child_meta = self.child_meta[child];
+        let slot_index = (child_meta & 0b11111) as usize - 24;
+        let relative_index = (self.imask as u32 & !(0xffffffffu32 << slot_index)).count_ones();
+        self.child_base_idx + relative_index
     }
 }
 

@@ -12,15 +12,22 @@ use node::CwBvhNode;
 use crate::{
     aabb::Aabb,
     ray::{Ray, RayHit},
-    Boundable, PerComponent,
+    Boundable, PerComponent, VecExt,
 };
 
 pub const BRANCHING: usize = 8;
 
+// Corresponds directly to the number of bit patterns created for child ordering
+const DIRECTIONS: usize = 8;
+
 const INVALID: u32 = u32::MAX;
 
+const NQ: u32 = 8;
+const NQ_SCALE: f32 = ((1 << NQ) - 1) as f32; //255.0
+const DENOM: f32 = NQ_SCALE / ((1 << NQ) - 1) as f32; // 1.0 / 255.0
+
 /// A Compressed Wide BVH8
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, Debug)]
 #[repr(C)]
 pub struct CwBvh {
     pub nodes: Vec<CwBvhNode>,
@@ -456,6 +463,312 @@ impl CwBvh {
         false
     }
 
+    /// Returns the list of parents where `parent_index = parents[node_index]`
+    pub fn compute_parents(&self) -> Vec<u32> {
+        let mut parents = vec![0; self.nodes.len()];
+        parents[0] = 0;
+        self.nodes.iter().enumerate().for_each(|(i, node)| {
+            for ch in 0..8 {
+                if node.is_child_empty(ch) {
+                    continue;
+                }
+                if !node.is_leaf(ch) {
+                    parents[node.child_node_index(ch) as usize] = i as u32;
+                }
+            }
+        });
+        parents
+    }
+
+    /// Refit the BVH working up the tree from this node.
+    /// This recomputes the Aabbs for all the parents of the given node index.
+    ///
+    /// # Arguments
+    /// * `node_index` - Node index to start refitting up the tree from.
+    /// * `parents` - List of parents where `parent_index = parents[node_index]`
+    /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
+    /// * `primitives` - List of BVH primitives, implementing Boundable.
+    /// * `reorder` - reorder children for nodes that are refit.
+    pub fn refit_from<T: Boundable>(
+        &mut self,
+        mut node_index: usize,
+        parents: &[u32],
+        direct_layout: bool,
+        reorder: bool,
+        primitives: &[T],
+    ) {
+        loop {
+            let mut node = self.nodes[node_index];
+            let mut aabb = Aabb::empty();
+            let mut children_aabbs = [Aabb::empty(); 8];
+            for ch in 0..8 {
+                if node.is_child_empty(ch) {
+                    continue;
+                }
+                if node.is_leaf(ch) {
+                    let (child_prim_start, count) = node.child_primitives(ch);
+                    for i in 0..count {
+                        let mut prim_index = (child_prim_start + i) as usize;
+                        if !direct_layout {
+                            prim_index = self.primitive_indices[prim_index] as usize;
+                        }
+                        children_aabbs[ch] =
+                            children_aabbs[ch].union(&primitives[prim_index].aabb());
+                    }
+                    aabb = aabb.union(&children_aabbs[ch]);
+                } else {
+                    children_aabbs[ch] = self.nodes[node.child_node_index(ch) as usize].aabb();
+                    aabb = aabb.union(&children_aabbs[ch]);
+                }
+            }
+
+            // TODO see if we can remove code duplication with bvh2_to_cwbvh
+
+            let node_p = aabb.min;
+            node.p = node_p.into();
+
+            let e = ((aabb.max - aabb.min).max(Vec3A::splat(1e-20)) * DENOM)
+                .log2()
+                .ceil()
+                .exp2();
+            debug_assert!(e.cmpgt(Vec3A::ZERO).all(), "aabb: {:?} e: {}", aabb, e);
+
+            let rcp_e = 1.0 / e;
+            let e: UVec3 = e.per_comp(|c: f32| {
+                let bits = c.to_bits();
+                // Only the exponent bits can be non-zero
+                debug_assert_eq!(bits & 0b10000000011111111111111111111111, 0);
+                bits >> 23
+            });
+            node.e = [e.x as u8, e.y as u8, e.z as u8];
+
+            for ch in 0..8 {
+                if node.is_child_empty(ch) {
+                    continue;
+                }
+
+                let child_aabb = children_aabbs[ch];
+
+                // const PAD: f32 = 1e-20;
+                // Use to force non-zero volumes.
+                const PAD: f32 = 0.0;
+
+                let mut child_min = ((child_aabb.min - node_p - PAD) * rcp_e).floor();
+                let mut child_max = ((child_aabb.max - node_p + PAD) * rcp_e).ceil();
+
+                child_min = child_min.clamp(Vec3A::ZERO, Vec3A::splat(255.0));
+                child_max = child_max.clamp(Vec3A::ZERO, Vec3A::splat(255.0));
+
+                debug_assert!(
+                    (child_min.cmple(child_max)).all(),
+                    "{:?}, {}",
+                    child_aabb,
+                    ch
+                );
+
+                node.child_min_x[ch] = child_min.x as u8;
+                node.child_min_y[ch] = child_min.y as u8;
+                node.child_min_z[ch] = child_min.z as u8;
+                node.child_max_x[ch] = child_max.x as u8;
+                node.child_max_y[ch] = child_max.y as u8;
+                node.child_max_z[ch] = child_max.z as u8;
+            }
+            self.nodes[node_index] = node;
+            if reorder {
+                self.order_children(node_index, direct_layout, primitives);
+            }
+            if node_index == 0 {
+                break;
+            }
+            node_index = parents[node_index] as usize;
+        }
+    }
+
+    /// Reorder the children of the given node_idx. This results in a slightly different order since the normal reordering during
+    /// building is using the aabb's from the BVH2 and this uses the children node.p and node.e to compute the aabb. Traversal
+    /// seems to be a bit slower on some scenes and a bit faster on others.
+    ///
+    /// # Arguments
+    /// * `node_idx` - Node index to start refitting up the tree from.
+    /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
+    /// * `primitives` - List of BVH primitives, implementing Boundable.
+    pub fn order_children<T: Boundable>(
+        &mut self,
+        node_index: usize,
+        direct_layout: bool,
+        primitives: &[T],
+    ) {
+        // TODO could this use ints and work in local node grid space?
+
+        let old_node = self.nodes[node_index];
+
+        const INVALID32: u32 = u32::MAX;
+        const INVALID_USIZE: usize = INVALID32 as usize;
+        let center = old_node.aabb().center();
+
+        let mut cost = [[f32::MAX; DIRECTIONS]; BRANCHING];
+
+        let mut child_count = 0;
+        let mut child_inner_count = 0;
+        for ch in 0..BRANCHING {
+            if !old_node.is_child_empty(ch) {
+                child_count += 1;
+                if !old_node.is_leaf(ch) {
+                    child_inner_count += 1;
+                }
+            }
+        }
+
+        let mut old_child_centers = [Vec3A::default(); 8];
+        for ch in 0..BRANCHING {
+            if old_node.is_child_empty(ch) {
+                continue;
+            }
+            if old_node.is_leaf(ch) {
+                let (child_prim_start, count) = old_node.child_primitives(ch);
+                let mut aabb = Aabb::empty();
+                for i in 0..count {
+                    let mut prim_index = (child_prim_start + i) as usize;
+                    if !direct_layout {
+                        prim_index = self.primitive_indices[prim_index] as usize;
+                    }
+                    aabb = aabb.union(&primitives[prim_index].aabb());
+                }
+                old_child_centers[ch] = aabb.center();
+            } else {
+                old_child_centers[ch] = self.nodes[old_node.child_node_index(ch) as usize]
+                    .aabb()
+                    .center();
+            }
+        }
+
+        assert!(child_count <= BRANCHING);
+        assert!(cost.len() >= child_count);
+        // Fill cost table
+        // TODO parallel: check to see if this is faster w/ par_iter
+        for s in 0..DIRECTIONS {
+            let d = Vec3A::new(
+                if (s & 0b100) != 0 { -1.0 } else { 1.0 },
+                if (s & 0b010) != 0 { -1.0 } else { 1.0 },
+                if (s & 0b001) != 0 { -1.0 } else { 1.0 },
+            );
+            // We have to use BRANCHING here instead of child_count because the first slots wont be children if it was already reordered.
+            for ch in 0..BRANCHING {
+                if old_node.is_child_empty(ch) {
+                    continue;
+                }
+                let v = old_child_centers[ch] - center; //old_node.child_aabb(c).center() - center;
+                let cost_slot = unsafe { cost.get_unchecked_mut(ch).get_unchecked_mut(s) };
+                *cost_slot = d.dot(v); // No benefit from normalizing
+            }
+        }
+
+        let mut assignment = [INVALID_USIZE; BRANCHING];
+        let mut slot_filled = [false; DIRECTIONS];
+
+        // The paper suggests the auction method, but greedy is almost as good.
+        loop {
+            let mut min_cost = f32::MAX;
+
+            let mut min_slot = INVALID_USIZE;
+            let mut min_index = INVALID_USIZE;
+
+            // Find cheapest unfilled slot of any unassigned child
+            // We have to use BRANCHING here instead of child_count because the first slots wont be children if it was already reordered.
+            for ch in 0..BRANCHING {
+                if old_node.is_child_empty(ch) {
+                    continue;
+                }
+                if assignment[ch] == INVALID_USIZE {
+                    for (s, &slot_filled) in slot_filled.iter().enumerate() {
+                        let cost = unsafe { *cost.get_unchecked(ch).get_unchecked(s) };
+                        if !slot_filled && cost < min_cost {
+                            min_cost = cost;
+
+                            min_slot = s;
+                            min_index = ch;
+                        }
+                    }
+                }
+            }
+
+            if min_slot == INVALID_USIZE {
+                break;
+            }
+
+            slot_filled[min_slot] = true;
+            assignment[min_index] = min_slot;
+        }
+
+        let mut new_node = old_node.clone();
+        new_node.imask = 0;
+
+        for ch in 0..BRANCHING {
+            new_node.child_meta[ch] = 0;
+        }
+
+        for ch in 0..BRANCHING {
+            if old_node.is_child_empty(ch) {
+                continue;
+            }
+            if assignment[ch] == INVALID_USIZE {
+                continue;
+            }
+            let new_ch = assignment[ch];
+            if old_node.is_leaf(ch) {
+                new_node.child_meta[new_ch] = old_node.child_meta[ch];
+            } else {
+                new_node.imask |= 1 << new_ch;
+                new_node.child_meta[new_ch] = (24 + new_ch as u8) | 0b0010_0000;
+            }
+            new_node.child_min_x[new_ch] = old_node.child_min_x[ch];
+            new_node.child_max_x[new_ch] = old_node.child_max_x[ch];
+            new_node.child_min_y[new_ch] = old_node.child_min_y[ch];
+            new_node.child_max_y[new_ch] = old_node.child_max_y[ch];
+            new_node.child_min_z[new_ch] = old_node.child_min_z[ch];
+            new_node.child_max_z[new_ch] = old_node.child_max_z[ch];
+        }
+
+        if child_inner_count == 0 {
+            self.nodes[node_index] = new_node;
+            return;
+        }
+
+        let mut old_child_nodes = [CwBvhNode::default(); 8];
+        for ch in 0..BRANCHING {
+            if old_node.is_child_empty(ch) {
+                continue;
+            }
+            if old_node.is_leaf(ch) {
+                continue;
+            }
+            old_child_nodes[ch] = self.nodes[old_node.child_node_index(ch) as usize]
+        }
+
+        // check if this is really needed or if we can specify the offset in the child_meta out of order
+        for ch in 0..BRANCHING {
+            if old_node.is_child_empty(ch) {
+                continue;
+            }
+            if assignment[ch] == INVALID_USIZE {
+                continue;
+            }
+            let new_ch = assignment[ch];
+            assert_eq!(
+                !new_node.is_leaf(new_ch),
+                (new_node.child_meta[new_ch] & 0b11111) >= 24
+            );
+            if old_node.is_leaf(ch) {
+                continue;
+            }
+            let new_idx = new_node.child_node_index(new_ch) as usize;
+            self.nodes[new_idx] = old_child_nodes[ch];
+            assert!(new_idx >= old_node.child_base_idx as usize);
+            assert!(new_idx < old_node.child_base_idx as usize + child_inner_count);
+        }
+        self.nodes[node_index] = new_node;
+    }
+
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
     pub fn validate<T: Boundable>(
         &self,
@@ -472,7 +785,9 @@ impl CwBvh {
             direct_layout,
             ..Default::default()
         };
-        self.validate_impl(0, Aabb::LARGEST, &mut ctx, primitives);
+        if self.nodes.len() != 0 {
+            self.validate_impl(0, Aabb::LARGEST, &mut ctx, primitives);
+        }
         //self.print_nodes();
 
         ctx.max_depth = self.caclulate_max_depth(0, &mut ctx, 0);
@@ -517,9 +832,11 @@ impl CwBvh {
         for ch in 0..8 {
             let child_meta = node.child_meta[ch];
             if child_meta == 0 {
+                assert!(node.is_child_empty(ch));
                 // Empty
                 continue;
             }
+            assert!(!node.is_child_empty(ch));
 
             ctx.child_count += 1;
 
@@ -534,14 +851,22 @@ impl CwBvh {
                 node.child_max_z[ch] as u32,
             );
 
+            assert_eq!(
+                Aabb::new(quantized_min.as_vec3a(), quantized_max.as_vec3a()),
+                node.local_child_aabb(ch)
+            );
+
             let p = Vec3A::from(node.p);
             let quantized_min = quantized_min.as_vec3a() * e + p;
             let quantized_max = quantized_max.as_vec3a() * e + p;
+
+            assert_eq!(Aabb::new(quantized_min, quantized_max), node.child_aabb(ch));
 
             let is_child_inner = (node.imask & (1 << ch)) != 0;
             assert_eq!(is_child_inner, (child_meta & 0b11111) >= 24);
 
             if is_child_inner {
+                assert!(!node.is_leaf(ch));
                 let slot_index = (child_meta & 0b11111) as usize - 24;
                 let relative_index =
                     (node.imask as u32 & !(0xffffffffu32 << slot_index)).count_ones();
@@ -557,13 +882,17 @@ impl CwBvh {
                     primitives,
                 );
             } else {
+                assert!(node.is_leaf(ch));
                 ctx.leaf_count += 1;
 
                 let first_prim = node.primitive_base_idx + (child_meta & 0b11111) as u32;
+                assert_eq!(first_prim, node.child_primitives(ch).0);
+                let mut prim_count = 0;
                 for i in 0..3 {
                     if (child_meta & (0b1_00000 << i)) != 0 {
                         ctx.discovered_primitives.insert(first_prim + i);
                         ctx.prim_count += 1;
+                        prim_count += 1;
                         let mut prim_index = (first_prim + i) as usize;
                         if !ctx.direct_layout {
                             prim_index = self.primitive_indices[prim_index] as usize;
@@ -586,6 +915,7 @@ impl CwBvh {
                         }
                     }
                 }
+                assert_eq!(prim_count, node.child_primitives(ch).1);
             }
         }
     }
@@ -597,6 +927,9 @@ impl CwBvh {
         ctx: &mut CwBvhValidateCtx,
         current_depth: usize,
     ) -> usize {
+        if self.nodes.len() == 0 {
+            return 0;
+        }
         let node = &self.nodes[node_idx];
         let mut max_depth = current_depth;
 
@@ -643,7 +976,7 @@ impl CwBvh {
     #[allow(dead_code)]
     fn print_nodes(&self) {
         for (i, node) in self.nodes.iter().enumerate() {
-            dbg!(i);
+            println!("node: {}", i);
             for ch in 0..8 {
                 let child_meta = node.child_meta[ch];
                 if child_meta == 0 {

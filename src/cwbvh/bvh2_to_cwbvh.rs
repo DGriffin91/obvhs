@@ -4,9 +4,11 @@ use glam::{vec3a, UVec3, Vec3A};
 
 use crate::{
     bvh2::Bvh2,
-    cwbvh::{CwBvh, CwBvhNode, BRANCHING},
+    cwbvh::{CwBvh, CwBvhNode, BRANCHING, DENOM},
     PerComponent, VecExt,
 };
+
+use super::DIRECTIONS;
 
 /// Convert a bvh2 to CwBvh
 pub struct Bvh2Converter<'a> {
@@ -14,6 +16,7 @@ pub struct Bvh2Converter<'a> {
     pub nodes: Vec<CwBvhNode>,
     pub primitive_indices: Vec<u32>,
     pub decisions: Vec<Decision>,
+    pub order_children_during_build: bool,
     direction_lut: [Vec3A; 8],
 }
 
@@ -23,12 +26,9 @@ const INVALID_USIZE: usize = INVALID32 as usize;
 
 const PRIM_COST: f32 = 0.3;
 
-// Corresponds directly to the number of bit patterns we're creating
-const DIRECTIONS: usize = 8;
-
 impl<'a> Bvh2Converter<'a> {
     /// Initialize the Bvh2 to CwBvh converter.
-    pub fn new(bvh2: &'a Bvh2) -> Self {
+    pub fn new(bvh2: &'a Bvh2, order_children: bool) -> Self {
         let capacity = bvh2.primitive_indices.len();
 
         let mut nodes = Vec::with_capacity(capacity);
@@ -51,6 +51,7 @@ impl<'a> Bvh2Converter<'a> {
             nodes,
             primitive_indices: Vec::with_capacity(capacity),
             decisions: vec![Decision::default(); bvh2.nodes.len() * 7],
+            order_children_during_build: order_children,
             direction_lut,
         }
     }
@@ -65,9 +66,6 @@ impl<'a> Bvh2Converter<'a> {
     pub fn convert_to_cwbvh_impl(&mut self, node_index_bvh8: usize, node_index_bvh2: usize) {
         let mut node = self.nodes[node_index_bvh8];
         let aabb = self.bvh2.nodes[node_index_bvh2].aabb;
-
-        const NQ: u32 = 8;
-        const DENOM: f32 = 1.0 / ((1 << NQ) - 1) as f32; // 1.0 / 255.0
 
         let node_p = aabb.min;
         node.p = node_p.into();
@@ -92,7 +90,9 @@ impl<'a> Bvh2Converter<'a> {
         let child_count = &mut 0;
         self.get_children(node_index_bvh2, children, child_count, 0);
 
-        self.order_children(node_index_bvh2, children, *child_count as usize);
+        if self.order_children_during_build {
+            self.order_children(node_index_bvh2, children, *child_count as usize);
+        }
 
         node.imask = 0;
 
@@ -391,7 +391,7 @@ impl<'a> Bvh2Converter<'a> {
         children: &mut [u32; 8],
         child_count: usize,
     ) {
-        let node = self.bvh2.nodes[node_index];
+        let node = &self.bvh2.nodes[node_index];
         let p = node.aabb.center();
 
         let mut cost = [[f32::MAX; DIRECTIONS]; BRANCHING];
@@ -474,11 +474,11 @@ pub struct Decision {
 /// # Arguments
 /// * `bvh2` - Source BVH
 /// * `max_prims_per_leaf` - 0..=3 The maximum number of primitives per leaf.
-pub fn bvh2_to_cwbvh(bvh2: &Bvh2, max_prims_per_leaf: u32) -> CwBvh {
+pub fn bvh2_to_cwbvh(bvh2: &Bvh2, max_prims_per_leaf: u32, order_children: bool) -> CwBvh {
     if bvh2.nodes.is_empty() {
         return CwBvh::default();
     }
-    let mut converter = Bvh2Converter::new(bvh2);
+    let mut converter = Bvh2Converter::new(bvh2, order_children);
     converter.calculate_cost(max_prims_per_leaf);
     converter.convert_to_cwbvh();
 

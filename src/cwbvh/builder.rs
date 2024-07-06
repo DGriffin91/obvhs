@@ -53,12 +53,12 @@ pub fn build_cwbvh_from_tris(
         config.search_depth_threshold,
     );
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
-    let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3));
+    let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
 
+    #[cfg(debug_assertions)]
     {
-        #[cfg(debug_assertions)]
         bvh2.validate(triangles, false, config.pre_split);
         cwbvh.validate(config.pre_split, false, triangles);
     }
@@ -91,7 +91,13 @@ pub fn build_cwbvh<T: Boundable>(
         config.search_depth_threshold,
     );
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
-    let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3));
+    let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true);
+
+    #[cfg(debug_assertions)]
+    {
+        bvh2.validate(&aabbs, false, config.pre_split);
+        cwbvh.validate(config.pre_split, false, &aabbs);
+    }
 
     *core_build_time += start_time.elapsed().as_secs_f32();
 

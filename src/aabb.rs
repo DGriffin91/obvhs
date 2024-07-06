@@ -79,6 +79,7 @@ impl Aabb {
 
     /// Returns the union of this AABB and another AABB.
     #[inline]
+    #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         Aabb {
             min: self.min.min(other.min),

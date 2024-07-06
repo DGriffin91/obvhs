@@ -339,7 +339,7 @@ impl Bvh2 {
         parents
     }
 
-    /// Refit the BVH working up the tree from this node.
+    /// Refit the BVH working up the tree from this node, ignoring leaves. (TODO add a version that checks leaves)
     /// This recomputes the Aabbs for all the parents of the given node index.
     pub fn refit_from(&mut self, mut index: usize, parents: &[u32]) {
         loop {
@@ -356,7 +356,7 @@ impl Bvh2 {
         }
     }
 
-    /// Refit the BVH working up the tree from this node.
+    /// Refit the BVH working up the tree from this node, ignoring leaves. (TODO add a version that checks leaves)
     /// This recomputes the Aabbs for the parents of the given node index.
     /// Halts if the parents are the same size. Panics in debug if some parents still needed to be resized.
     pub fn refit_from_fast(&mut self, mut index: usize, parents: &[u32]) {
@@ -397,7 +397,10 @@ impl Bvh2 {
             direct_layout,
             ..Default::default()
         };
-        self.validate_impl::<T>(primitives, &mut ctx, 0, 0, 0);
+
+        if self.nodes.len() != 0 {
+            self.validate_impl::<T>(primitives, &mut ctx, 0, 0, 0);
+        }
         assert_eq!(ctx.discovered_nodes.len(), self.nodes.len());
         assert_eq!(
             ctx.discovered_primitives.len(),
