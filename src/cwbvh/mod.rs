@@ -801,7 +801,7 @@ impl CwBvh {
 
     /// Tries to use the exact node aabb if it is available, otherwise computes it from the compressed node min P and extent exponent.
     #[inline(always)]
-    fn node_aabb(&mut self, node_index: usize) -> Aabb {
+    fn node_aabb(&self, node_index: usize) -> Aabb {
         if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
             exact_node_aabbs[node_index]
         } else {
