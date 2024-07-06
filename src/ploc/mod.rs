@@ -10,7 +10,8 @@ use rdst::{RadixKey, RadixSort};
 
 #[cfg(feature = "parallel")]
 use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+    IntoParallelRefMutIterator, ParallelIterator,
 };
 
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
@@ -160,18 +161,21 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
             merge[current_nodes.len() - 1] = -1;
         } else {
             #[cfg(feature = "parallel")]
-            let iter = (0..current_nodes.len()).into_par_iter();
+            let iter = merge.par_iter_mut();
             #[cfg(not(feature = "parallel"))]
-            let iter = 0..current_nodes.len();
-            merge = iter
-                .map(|index| {
+            let iter = merge.iter_mut();
+            iter.enumerate()
+                .take(current_nodes.len())
+                .for_each(|(index, best)| {
                     #[cfg(feature = "parallel")]
-                    let best = find_best_node_basic(index, &current_nodes, SEARCH_DISTANCE);
+                    {
+                        *best = find_best_node_basic(index, &current_nodes, SEARCH_DISTANCE);
+                    }
                     #[cfg(not(feature = "parallel"))]
-                    let best = cache.find_best_node(index, &current_nodes);
-                    best
-                })
-                .collect()
+                    {
+                        *best = cache.find_best_node(index, &current_nodes);
+                    }
+                });
         };
 
         let mut index = 0;
