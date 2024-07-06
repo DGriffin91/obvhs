@@ -519,11 +519,7 @@ impl CwBvh {
                     aabb = aabb.union(&children_aabbs[ch]);
                 } else {
                     let child_node_index = node.child_node_index(ch) as usize;
-                    children_aabbs[ch] = if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
-                        exact_node_aabbs[child_node_index]
-                    } else {
-                        self.nodes[child_node_index].aabb()
-                    };
+                    children_aabbs[ch] = self.node_aabb(child_node_index);
                     aabb = aabb.union(&children_aabbs[ch]);
                 }
             }
@@ -650,12 +646,7 @@ impl CwBvh {
                     .aabb()
                     .center();
                 let child_node_index = old_node.child_node_index(ch) as usize;
-                old_child_centers[ch] = if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
-                    exact_node_aabbs[child_node_index]
-                } else {
-                    self.nodes[child_node_index].aabb()
-                }
-                .center();
+                old_child_centers[ch] = self.node_aabb(child_node_index).center();
             }
         }
 
@@ -806,6 +797,16 @@ impl CwBvh {
             assert!(new_idx < old_node.child_base_idx as usize + child_inner_count);
         }
         self.nodes[node_index] = new_node;
+    }
+
+    /// Tries to use the exact node aabb if it is available, otherwise computes it from the compressed node min P and extent exponent.
+    #[inline(always)]
+    fn node_aabb(&mut self, node_index: usize) -> Aabb {
+        if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
+            exact_node_aabbs[node_index]
+        } else {
+            self.nodes[node_index].aabb()
+        }
     }
 
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
