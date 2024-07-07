@@ -12,7 +12,7 @@ use node::CwBvhNode;
 use crate::{
     aabb::Aabb,
     ray::{Ray, RayHit},
-    Boundable, PerComponent, VecExt,
+    Boundable, PerComponent,
 };
 
 pub const BRANCHING: usize = 8;
@@ -481,124 +481,30 @@ impl CwBvh {
         parents
     }
 
-    /// Refit the BVH working up the tree from this node.
-    /// This recomputes the Aabbs for all the parents of the given node index.
+    /// Reorder the children of every BVH node. This results in a slightly different order since the normal reordering during
+    /// building is using the aabb's from the BVH2 and this uses the children node.p and node.e to compute the aabb. Traversal
+    /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
+    /// depends on the order of self.nodes will need to be updated.
     ///
     /// # Arguments
-    /// * `node_index` - Node index to start refitting up the tree from.
-    /// * `parents` - List of parents where `parent_index = parents[node_index]`
     /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
     /// * `primitives` - List of BVH primitives, implementing Boundable.
-    /// * `reorder` - reorder children for nodes that are refit.
-    pub fn refit_from<T: Boundable>(
-        &mut self,
-        mut node_index: usize,
-        parents: &[u32],
-        direct_layout: bool,
-        reorder: bool,
-        primitives: &[T],
-    ) {
-        loop {
-            let mut node = self.nodes[node_index];
-            let mut aabb = Aabb::empty();
-            let mut children_aabbs = [Aabb::empty(); 8];
-            for ch in 0..8 {
-                if node.is_child_empty(ch) {
-                    continue;
-                }
-                if node.is_leaf(ch) {
-                    let (child_prim_start, count) = node.child_primitives(ch);
-                    for i in 0..count {
-                        let mut prim_index = (child_prim_start + i) as usize;
-                        if !direct_layout {
-                            prim_index = self.primitive_indices[prim_index] as usize;
-                        }
-                        children_aabbs[ch] =
-                            children_aabbs[ch].union(&primitives[prim_index].aabb());
-                    }
-                    aabb = aabb.union(&children_aabbs[ch]);
-                } else {
-                    let child_node_index = node.child_node_index(ch) as usize;
-                    children_aabbs[ch] = self.node_aabb(child_node_index);
-                    aabb = aabb.union(&children_aabbs[ch]);
-                }
-            }
-
-            if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
-                exact_node_aabbs[node_index] = aabb;
-            }
-
-            // TODO see if we can remove code duplication with bvh2_to_cwbvh
-
-            let node_p = aabb.min;
-            node.p = node_p.into();
-
-            let e = ((aabb.max - aabb.min).max(Vec3A::splat(1e-20)) * DENOM)
-                .log2()
-                .ceil()
-                .exp2();
-            debug_assert!(e.cmpgt(Vec3A::ZERO).all(), "aabb: {:?} e: {}", aabb, e);
-
-            let rcp_e = 1.0 / e;
-            let e: UVec3 = e.per_comp(|c: f32| {
-                let bits = c.to_bits();
-                // Only the exponent bits can be non-zero
-                debug_assert_eq!(bits & 0b10000000011111111111111111111111, 0);
-                bits >> 23
-            });
-            node.e = [e.x as u8, e.y as u8, e.z as u8];
-
-            for ch in 0..8 {
-                if node.is_child_empty(ch) {
-                    continue;
-                }
-
-                let child_aabb = children_aabbs[ch];
-
-                // const PAD: f32 = 1e-20;
-                // Use to force non-zero volumes.
-                const PAD: f32 = 0.0;
-
-                let mut child_min = ((child_aabb.min - node_p - PAD) * rcp_e).floor();
-                let mut child_max = ((child_aabb.max - node_p + PAD) * rcp_e).ceil();
-
-                child_min = child_min.clamp(Vec3A::ZERO, Vec3A::splat(255.0));
-                child_max = child_max.clamp(Vec3A::ZERO, Vec3A::splat(255.0));
-
-                debug_assert!(
-                    (child_min.cmple(child_max)).all(),
-                    "{:?}, {}",
-                    child_aabb,
-                    ch
-                );
-
-                node.child_min_x[ch] = child_min.x as u8;
-                node.child_min_y[ch] = child_min.y as u8;
-                node.child_min_z[ch] = child_min.z as u8;
-                node.child_max_x[ch] = child_max.x as u8;
-                node.child_max_y[ch] = child_max.y as u8;
-                node.child_max_z[ch] = child_max.z as u8;
-            }
-            self.nodes[node_index] = node;
-            if reorder {
-                self.order_children(node_index, direct_layout, primitives);
-            }
-            if node_index == 0 {
-                break;
-            }
-            node_index = parents[node_index] as usize;
+    pub fn order_children<T: Boundable>(&mut self, direct_layout: bool, primitives: &[T]) {
+        for i in 0..self.nodes.len() {
+            self.order_node_children(i, direct_layout, primitives);
         }
     }
 
     /// Reorder the children of the given node_idx. This results in a slightly different order since the normal reordering during
     /// building is using the aabb's from the BVH2 and this uses the children node.p and node.e to compute the aabb. Traversal
-    /// seems to be a bit slower on some scenes and a bit faster on others.
+    /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
+    /// depends on the order of self.nodes will need to be updated.
     ///
     /// # Arguments
     /// * `node_idx` - Node index to start refitting up the tree from.
     /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
     /// * `primitives` - List of BVH primitives, implementing Boundable.
-    pub fn order_children<T: Boundable>(
+    pub fn order_node_children<T: Boundable>(
         &mut self,
         node_index: usize,
         direct_layout: bool,
@@ -719,10 +625,8 @@ impl CwBvh {
             if old_node.is_child_empty(ch) {
                 continue;
             }
-            if assignment[ch] == INVALID_USIZE {
-                continue;
-            }
             let new_ch = assignment[ch];
+            assert!(new_ch < BRANCHING);
             if old_node.is_leaf(ch) {
                 new_node.child_meta[new_ch] = old_node.child_meta[ch];
             } else {

@@ -251,19 +251,6 @@ mod tests {
     }
 
     #[test]
-    pub fn refit_cwbvh() {
-        let tris = demoscene(100, 0);
-        let mut cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
-        cwbvh.validate(false, false, &tris);
-        let parents = cwbvh.compute_parents();
-        // You wouldn't usually refit from every node, just doing this for the test.
-        for (child, _parent) in parents.iter().enumerate().skip(1) {
-            cwbvh.refit_from(child, &parents, false, true, &tris);
-        }
-        cwbvh.validate(false, false, &tris);
-    }
-
-    #[test]
     pub fn order_children_cwbvh() {
         let tris = demoscene(100, 0);
         let triangles: &[Triangle] = &tris;
@@ -291,12 +278,10 @@ mod tests {
 
         cwbvh.validate(false, false, &tris);
         for node in 0..cwbvh.nodes.len() {
-            cwbvh.order_children(node, false, &aabbs);
+            cwbvh.order_node_children(node, false, &aabbs);
         }
         cwbvh.validate(false, false, &tris);
-        for node in 0..cwbvh.nodes.len() {
-            cwbvh.order_children(node, false, &aabbs);
-        }
+        cwbvh.order_children(false, &aabbs);
         cwbvh.validate(false, false, &tris);
     }
 
@@ -350,17 +335,9 @@ mod tests {
             }
         }
 
-        for node in 0..cwbvh.nodes.len() {
-            // This will use the exact aabb if they are included
-            cwbvh.order_children(node, false, &aabbs);
-        }
+        cwbvh.order_children(false, &aabbs);
         cwbvh.validate(false, false, &tris);
-        let parents = cwbvh.compute_parents();
-        // You wouldn't usually refit from every node, just doing this for the test.
-        for (child, _parent) in parents.iter().enumerate().skip(1) {
-            // This will use the exact aabb if they are included
-            cwbvh.refit_from(child, &parents, false, true, &tris);
-        }
+        cwbvh.order_children(false, &aabbs);
         cwbvh.validate(false, false, &tris);
     }
 }
