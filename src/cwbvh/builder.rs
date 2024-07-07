@@ -9,6 +9,8 @@ use crate::{
     Boundable, BvhBuildParams,
 };
 
+use super::reinsertion::cwbvh_reinsertion;
+
 /// Build a cwbvh from the given list of Triangles.
 pub fn build_cwbvh_from_tris(
     triangles: &[Triangle],
@@ -53,10 +55,23 @@ pub fn build_cwbvh_from_tris(
         config.search_depth_threshold,
     );
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
-    let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
+    let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, true);
+
+    cwbvh_reinsertion(&mut cwbvh, false, &triangles);
+
+    dbg!("compute_parents");
+    let parents = cwbvh.compute_parents();
+    //dbg!("after compute_parents");
+    //// You wouldn't usually refit from every node, just doing this for the test.
+    //for (child, _parent) in parents.iter().enumerate().take(1) {
+    //    // This will use the exact aabb if they are included
+    //    cwbvh.refit_from(child, &parents, false, true, &triangles);
+    //}
+    //dbg!("refit_from");
+    //cwbvh.validate(config.pre_split, false, triangles);
+    cwbvh.refit(&parents, false, &triangles);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
-
     #[cfg(debug_assertions)]
     {
         bvh2.validate(triangles, false, config.pre_split);

@@ -1,5 +1,7 @@
 // http://www.graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN
-// TODO evaluate: https://www.highperformancegraphics.org/wp-content/uploads/2017/Papers-Session3/HPG207_ExtendedMortonCodes.pdf
+// TODO evaluate Extended Morton Codes for High Performance Bounding Volume Hierarchy Construction:
+// https://www.dcgi.fel.cvut.cz/projects/emc/emc2017.pdf
+// https://www.highperformancegraphics.org/wp-content/uploads/2017/Papers-Session3/HPG207_ExtendedMortonCodes.pdf
 
 //---------------------------------------------------
 // --- 10 bit resolution per channel morton curve ---
