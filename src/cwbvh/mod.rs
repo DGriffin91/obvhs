@@ -594,6 +594,8 @@ impl CwBvh {
     /// * `primitives` - List of BVH primitives, implementing Boundable.
     /// * `reorder` - reorder children for nodes that are refit.
     pub fn refit<T: Boundable>(&mut self, parents: &[u32], direct_layout: bool, primitives: &[T]) {
+        // TODO: make version that traverses bottom up like this but takes a list of starting nodes.
+        // Also make CwBvh fitting code reusable and use it here, refit_from, and bvh2_to_cwbvh
         #[cfg(debug_assertions)]
         let mut seen = vec![false; self.nodes.len()];
 

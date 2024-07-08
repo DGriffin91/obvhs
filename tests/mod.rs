@@ -372,7 +372,7 @@ mod tests {
         //let tris = icosphere(0);
         let mut cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fastest_build(), &mut 0.0);
 
-        cwbvh_reinsertion(&mut cwbvh, false, &tris);
+        cwbvh_reinsertion(&mut cwbvh, false, &tris, 1);
         cwbvh.order_children(false, &tris);
 
         cwbvh.validate(false, false, &tris);

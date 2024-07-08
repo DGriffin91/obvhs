@@ -2,8 +2,13 @@ use crate::{aabb::Aabb, Boundable};
 
 use super::CwBvh;
 
-pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, primitives: &[T]) {
-    let ratio = 2;
+pub fn cwbvh_reinsertion<T: Boundable>(
+    cwbvh: &mut CwBvh,
+    direct_layout: bool,
+    primitives: &[T],
+    ratio: usize,
+) {
+    let mut swaps = 0;
     let mut parents = cwbvh.compute_parents();
     let mut touched = vec![false; cwbvh.nodes.len()];
     for a_parent_idx in 1..cwbvh.nodes.len() {
@@ -40,6 +45,9 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                 if b_parent_idx == a_parent_idx {
                     continue;
                 }
+                if b_parent_idx == a_child_node_index {
+                    continue;
+                }
                 let mut hierarchy_test_index = b_parent_idx;
                 loop {
                     hierarchy_test_index = parents[hierarchy_test_index] as usize;
@@ -62,7 +70,7 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                 }
                 let b_parent_aabb = cwbvh.node_aabb(b_parent_idx);
                 let b_parent_cost = b_parent_aabb.half_area();
-                'b_child: for b_node_ch in 0..8 {
+                for b_node_ch in 0..8 {
                     let b_parent_minus_this_ch = get_total_aabb_minus_one(
                         cwbvh,
                         b_parent_idx,
@@ -84,26 +92,6 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                         continue;
                     }
 
-                    let mut hierarchy_test_index = b_child_node_index;
-                    loop {
-                        hierarchy_test_index = parents[hierarchy_test_index] as usize;
-                        if hierarchy_test_index == 0 {
-                            break;
-                        }
-                        if hierarchy_test_index == a_child_node_index {
-                            continue 'b_child;
-                        }
-                    }
-                    let mut hierarchy_test_index = a_child_node_index;
-                    loop {
-                        hierarchy_test_index = parents[hierarchy_test_index] as usize;
-                        if hierarchy_test_index == 0 {
-                            break;
-                        }
-                        if hierarchy_test_index == b_child_node_index {
-                            continue 'b_child;
-                        }
-                    }
                     let b_child_aabb = cwbvh.node_aabb(b_child_node_index);
 
                     let b_eval_aabb = b_parent_minus_this_ch.union(&a_child_aabb);
@@ -120,7 +108,7 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                     }
                 }
             }
-            if best_cost_diff > 0.0 {
+            if best_cost_diff > a_parent_cost * 0.01 {
                 assert!(!cwbvh.nodes[best_swap_parent].is_leaf(best_swap_child_inside));
                 assert!(!cwbvh.nodes[a_parent_idx].is_leaf(a_node_ch));
                 assert!(a_child_node_index != best_swap_child);
@@ -159,6 +147,7 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                     }
                 }
 
+                // TODO refit bottom up but only from changed nodes
                 cwbvh.refit(&parents, false, &primitives);
                 //cwbvh.refit_from(a_child_node_index, &parents, false, true, &primitives);
                 //cwbvh.refit_from(best_swap_child, &parents, false, true, &primitives);
@@ -172,19 +161,21 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                 let node_b = cwbvh.nodes[a_child_node_index];
                 let parent_a = cwbvh.nodes[parents[best_swap_child] as usize];
                 let parent_b = cwbvh.nodes[parents[a_child_node_index] as usize];
-                dbg!(a_child_node_index, best_swap_child);
+                //dbg!(a_child_node_index, best_swap_child);
 
                 assert!(parent_a.aabb().contains_point(node_a.p.into()));
                 assert!(parent_b.aabb().contains_point(node_b.p.into()));
 
                 touched[a_child_node_index] = true;
                 touched[best_swap_child] = true;
-                dbg!(a_parent_idx);
-                dbg!("SWAP!");
+                //dbg!(a_parent_idx);
+                //dbg!("SWAP!");
                 //return;
+                swaps += 1;
             }
         }
     }
+    dbg!(swaps);
     dbg!("END cwbvh_reinsertion");
 }
 

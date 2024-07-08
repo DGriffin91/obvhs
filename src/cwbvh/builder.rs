@@ -55,7 +55,10 @@ pub fn build_cwbvh_from_tris(
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
     let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, true);
 
-    cwbvh_reinsertion(&mut cwbvh, false, &triangles);
+    cwbvh_reinsertion(&mut cwbvh, false, &triangles, 6);
+    cwbvh_reinsertion(&mut cwbvh, false, &triangles, 12);
+    cwbvh_reinsertion(&mut cwbvh, false, &triangles, 18);
+    cwbvh_reinsertion(&mut cwbvh, false, &triangles, 24);
     //
     //dbg!("compute_parents");
     //let parents = cwbvh.compute_parents();
@@ -68,7 +71,7 @@ pub fn build_cwbvh_from_tris(
     ////dbg!("refit_from");
     ////cwbvh.validate(config.pre_split, false, triangles);
     //cwbvh.refit(&parents, false, &triangles);
-    cwbvh.order_children(true, &triangles);
+    cwbvh.order_children(true, &aabbs);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
     #[cfg(debug_assertions)]
