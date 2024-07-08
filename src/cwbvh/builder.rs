@@ -3,13 +3,11 @@ use std::time::Instant;
 use crate::{
     aabb::Aabb,
     bvh2::reinsertion::ReinsertionOptimizer,
-    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
+    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, reinsertion::cwbvh_reinsertion, CwBvh},
     splits::split_aabbs_preset,
     triangle::Triangle,
     Boundable, BvhBuildParams,
 };
-
-use super::reinsertion::cwbvh_reinsertion;
 
 /// Build a cwbvh from the given list of Triangles.
 pub fn build_cwbvh_from_tris(
@@ -58,18 +56,19 @@ pub fn build_cwbvh_from_tris(
     let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, true);
 
     cwbvh_reinsertion(&mut cwbvh, false, &triangles);
-
-    dbg!("compute_parents");
-    let parents = cwbvh.compute_parents();
-    //dbg!("after compute_parents");
-    //// You wouldn't usually refit from every node, just doing this for the test.
-    //for (child, _parent) in parents.iter().enumerate().take(1) {
-    //    // This will use the exact aabb if they are included
-    //    cwbvh.refit_from(child, &parents, false, true, &triangles);
-    //}
-    //dbg!("refit_from");
-    //cwbvh.validate(config.pre_split, false, triangles);
-    cwbvh.refit(&parents, false, &triangles);
+    //
+    //dbg!("compute_parents");
+    //let parents = cwbvh.compute_parents();
+    ////dbg!("after compute_parents");
+    ////// You wouldn't usually refit from every node, just doing this for the test.
+    ////for (child, _parent) in parents.iter().enumerate().take(1) {
+    ////    // This will use the exact aabb if they are included
+    ////    cwbvh.refit_from(child, &parents, false, &triangles);
+    ////}
+    ////dbg!("refit_from");
+    ////cwbvh.validate(config.pre_split, false, triangles);
+    //cwbvh.refit(&parents, false, &triangles);
+    cwbvh.order_children(true, &triangles);
 
     *core_build_time += start_time.elapsed().as_secs_f32();
     #[cfg(debug_assertions)]

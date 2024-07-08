@@ -362,11 +362,7 @@ mod tests {
         }
         cwbvh.validate(false, false, &tris);
         let parents = cwbvh.compute_parents();
-        // You wouldn't usually refit from every node, just doing this for the test.
-        for (child, _parent) in parents.iter().enumerate().skip(1) {
-            // This will use the exact aabb if they are included
-            cwbvh.refit_from(child, &parents, false, &tris);
-        }
+        cwbvh.refit(&parents, false, &tris);
         cwbvh.validate(false, false, &tris);
     }
 

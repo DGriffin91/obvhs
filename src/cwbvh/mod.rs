@@ -497,16 +497,7 @@ impl CwBvh {
         direct_layout: bool,
         primitives: &[T],
     ) {
-        //dbg!("refit_from");
-        //let mut hits = 0;
         loop {
-            //dbg!(node_index, parents[node_index]);
-            //if node_index == 233 {
-            //    hits += 1;
-            //    if hits == 10 {
-            //        break;
-            //    }
-            //}
             let mut node = self.nodes[node_index];
             let mut aabb = Aabb::empty();
             let mut children_aabbs = [Aabb::empty(); 8];
@@ -603,7 +594,9 @@ impl CwBvh {
     /// * `primitives` - List of BVH primitives, implementing Boundable.
     /// * `reorder` - reorder children for nodes that are refit.
     pub fn refit<T: Boundable>(&mut self, parents: &[u32], direct_layout: bool, primitives: &[T]) {
+        #[cfg(debug_assertions)]
         let mut seen = vec![false; self.nodes.len()];
+
         let mut stack = VecDeque::new();
         // Push on the to stack all the nodes that only contain leaves
         for (i, node) in self.nodes.iter().enumerate() {
@@ -620,10 +613,15 @@ impl CwBvh {
                 stack.push_back(i);
             }
         }
-        dbg!(stack.len(), self.nodes.len());
+
         while !stack.is_empty() {
             let node_index = stack.pop_front().unwrap();
-            seen[node_index] = true;
+
+            #[cfg(debug_assertions)]
+            {
+                seen[node_index] = true;
+            }
+
             let mut node = self.nodes[node_index];
             let mut aabb = Aabb::empty();
             let mut children_aabbs = [Aabb::empty(); 8];
@@ -710,24 +708,21 @@ impl CwBvh {
             }
             stack.push_back(parents[node_index] as usize);
         }
-        let mut not_seen = false;
-        for (i, s) in seen.iter().enumerate() {
-            if !s {
-                dbg!(i);
-                not_seen = true;
-                //for ch in 0..8 {
-                //    let node = &self.nodes[i];
-                //    if node.is_child_empty(ch) {
-                //        continue;
-                //    }
-                //    println!("{} is leaf {}", ch, node.is_leaf(ch));
-                //}
+
+        #[cfg(debug_assertions)]
+        {
+            let mut not_seen = false;
+            for (i, s) in seen.iter().enumerate() {
+                if !s {
+                    dbg!(i);
+                    not_seen = true;
+                    println!("Refit: Node {} not seen", i);
+                }
+                if not_seen {
+                    panic!("SOME NODES WERE NOT SEEN DURING REFIT");
+                }
             }
-            //assert!(s, "not seen {}", i);
         }
-        //if not_seen {
-        //    panic!("NOT SEEN");
-        //}
     }
 
     /// Reorder the children of every BVH node. This results in a slightly different order since the normal reordering during

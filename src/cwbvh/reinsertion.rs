@@ -50,6 +50,16 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                         continue 'b_parent;
                     }
                 }
+                let mut hierarchy_test_index = a_parent_idx;
+                loop {
+                    hierarchy_test_index = parents[hierarchy_test_index] as usize;
+                    if hierarchy_test_index == 0 {
+                        break;
+                    }
+                    if hierarchy_test_index == b_parent_idx {
+                        continue 'b_parent;
+                    }
+                }
                 let b_parent_aabb = cwbvh.node_aabb(b_parent_idx);
                 let b_parent_cost = b_parent_aabb.half_area();
                 'b_child: for b_node_ch in 0..8 {
@@ -110,7 +120,7 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                     }
                 }
             }
-            if best_cost_diff > 1.0 {
+            if best_cost_diff > 0.0 {
                 assert!(!cwbvh.nodes[best_swap_parent].is_leaf(best_swap_child_inside));
                 assert!(!cwbvh.nodes[a_parent_idx].is_leaf(a_node_ch));
                 assert!(a_child_node_index != best_swap_child);
@@ -132,6 +142,22 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                 }
                 //assert!(!cwbvh.nodes[a_parent_idx].is_leaf(a_node_ch));
                 //assert!(!cwbvh.nodes[best_swap_parent].is_leaf(best_swap_child_inside));
+                // TODO don't compute_parents, instead go to the children of each nodes in the parents list and update
+                //parents = cwbvh.compute_parents();
+
+                for ch in 0..8 {
+                    if !node_a.is_child_empty(ch) {
+                        if !node_a.is_leaf(ch) {
+                            parents[node_a.child_node_index(ch) as usize] = best_swap_child as u32;
+                        }
+                    }
+                    if !node_b.is_child_empty(ch) {
+                        if !node_b.is_leaf(ch) {
+                            parents[node_b.child_node_index(ch) as usize] =
+                                a_child_node_index as u32;
+                        }
+                    }
+                }
 
                 cwbvh.refit(&parents, false, &primitives);
                 //cwbvh.refit_from(a_child_node_index, &parents, false, true, &primitives);
@@ -156,7 +182,6 @@ pub fn cwbvh_reinsertion<T: Boundable>(cwbvh: &mut CwBvh, direct_layout: bool, p
                 dbg!(a_parent_idx);
                 dbg!("SWAP!");
                 //return;
-                parents = cwbvh.compute_parents();
             }
         }
     }
