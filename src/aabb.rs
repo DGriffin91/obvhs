@@ -203,7 +203,7 @@ impl Aabb {
         if tmax_n >= tmin_n && tmax_n >= 0.0 {
             tmin_n
         } else {
-            f32::MAX
+            f32::INFINITY
         }
     }
 }
@@ -355,6 +355,6 @@ mod tests {
         let ray = Ray::new(Vec3A::splat(-1.0), Vec3A::ONE, 0.0, f32::MAX);
         assert_eq!(aabb.intersect_ray(&ray), 1.0);
         let ray_no_intersect = Ray::new(Vec3A::splat(2.0), Vec3A::ONE, 0.0, f32::MAX);
-        assert_eq!(aabb.intersect_ray(&ray_no_intersect), f32::MAX);
+        assert_eq!(aabb.intersect_ray(&ray_no_intersect), f32::INFINITY);
     }
 }

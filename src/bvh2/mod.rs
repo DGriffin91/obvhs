@@ -263,7 +263,7 @@ impl Bvh2 {
         if node.is_leaf() {
             let primitive_id = node.first_index as usize;
             indices.push(primitive_id);
-        } else if node.aabb.intersect_ray(ray) < f32::MAX {
+        } else if node.aabb.intersect_ray(ray) < f32::INFINITY {
             self.traverse_recursive(ray, node.first_index as usize, indices);
             self.traverse_recursive(ray, node.first_index as usize + 1, indices);
         }
