@@ -9,15 +9,15 @@ use crate::{aabb::Aabb, ray::Ray, triangle::Triangle, Boundable};
 #[repr(C)]
 pub struct RtCompressedTriangle {
     pub v0: [f32; 3],
-    pub e0_e1: [u32; 3],
+    pub e1_e2: [u16; 6],
 }
 
 unsafe impl Pod for RtCompressedTriangle {}
 unsafe impl Zeroable for RtCompressedTriangle {}
 
-impl From<Triangle> for RtCompressedTriangle {
+impl From<&Triangle> for RtCompressedTriangle {
     #[inline(always)]
-    fn from(tri: Triangle) -> Self {
+    fn from(tri: &Triangle) -> Self {
         RtCompressedTriangle::new(tri.v0, tri.v1, tri.v2)
     }
 }
@@ -25,27 +25,27 @@ impl From<Triangle> for RtCompressedTriangle {
 impl RtCompressedTriangle {
     #[inline(always)]
     pub fn new(v0: Vec3A, v1: Vec3A, v2: Vec3A) -> Self {
-        let e0 = v1 - v0;
-        let e1 = v2 - v0;
+        let e1 = v1 - v0;
+        let e2 = v2 - v0;
 
         Self {
             v0: [v0.x, v0.y, v0.z],
-            e0_e1: [
-                ((f16::from_f32(e0.x).to_bits() as u32) << 16)
-                    | (f16::from_f32(e1.x).to_bits() as u32),
-                ((f16::from_f32(e0.y).to_bits() as u32) << 16)
-                    | (f16::from_f32(e1.y).to_bits() as u32),
-                ((f16::from_f32(e0.z).to_bits() as u32) << 16)
-                    | (f16::from_f32(e1.z).to_bits() as u32),
+            e1_e2: [
+                f16::from_f32(e1.x).to_bits() as u16,
+                f16::from_f32(e2.x).to_bits() as u16,
+                f16::from_f32(e1.y).to_bits() as u16,
+                f16::from_f32(e2.y).to_bits() as u16,
+                f16::from_f32(e1.z).to_bits() as u16,
+                f16::from_f32(e2.z).to_bits() as u16,
             ],
         }
     }
 
     #[inline(always)]
     pub fn vertices(&self) -> [Vec3A; 3] {
-        let (v0, e0, e1) = self.unpack();
-        let v1 = v0 + e0;
-        let v2 = v0 + e1;
+        let (v0, e1, e2) = self.unpack();
+        let v1 = v0 + e1;
+        let v2 = v0 + e2;
         [v0, v1, v2]
     }
 
@@ -56,37 +56,52 @@ impl RtCompressedTriangle {
 
     #[inline(always)]
     pub fn compute_normal(&self) -> Vec3A {
-        let (_v0, e0, e1) = self.unpack();
-        ((e0).cross(e1)).normalize_or_zero()
+        let (_v0, e1, e2) = self.unpack();
+        ((e1).cross(e2)).normalize_or_zero()
     }
 
+    /// Find the distance (t) of the intersection of the `Ray` and this Triangle.
+    /// Returns f32::INFINITY for miss.
     #[inline(always)]
     pub fn intersect(&self, ray: &Ray) -> f32 {
-        let (v0, e0, e1) = self.unpack();
+        // TODO not very water tight from the back side in some contexts (tris with edges at 0,0,0 show 1px gap)
+        // Find out if this is typical of Möller
+        // Based on Fast Minimum Storage Ray Triangle Intersection by T. Möller and B. Trumbore
+        // https://madmann91.github.io/2021/04/29/an-introduction-to-bvhs.html
 
-        let pv = ray.direction.cross(e1);
-        let det = e0.dot(pv);
+        let (v0, e1, e2) = self.unpack();
+        let ng = (-e1).cross(e2);
 
         let cull_backface = false;
-        let passed_face_culling = !cull_backface || det > 1e-10;
 
-        {
-            let tv = ray.origin - v0;
-            let qv = tv.cross(e0);
+        let c = v0 - ray.origin;
+        let r = ray.direction.cross(c);
+        let inv_det = 1.0 / ng.dot(ray.direction);
 
-            let hit_t = e1.dot(qv) / det;
-            if hit_t >= 0.0 && hit_t < ray.tmax && passed_face_culling {
-                let mut uvw = Vec3::ZERO;
-                uvw.x = tv.dot(pv) / det;
-                uvw.y = ray.direction.dot(qv) / det;
-                uvw.z = 1.0 - uvw.x - uvw.y;
+        let u = r.dot(e2) * inv_det;
+        let v = r.dot(-e1) * inv_det;
+        let w = 1.0 - u - v;
 
-                let barycentric_eps = -1e-4;
+        // Original:
+        //let hit = u >= 0.0 && v >= 0.0 && w >= 0.0;
+        //let valid = if cull_backface {
+        //    inv_det > 0.0 && hit
+        //} else {
+        //    inv_det != 0.0 && hit
+        //};
 
-                if uvw.x >= barycentric_eps && uvw.y >= barycentric_eps && uvw.z >= barycentric_eps
-                {
-                    return hit_t;
-                }
+        // Note: differs in that if v == -0.0, for example will cause valid to be false
+        let hit = u.to_bits() | v.to_bits() | w.to_bits();
+        let valid = if cull_backface {
+            (inv_det.to_bits() | hit) & 0x8000_0000 == 0
+        } else {
+            inv_det != 0.0 && hit & 0x8000_0000 == 0
+        };
+
+        if valid {
+            let t = ng.dot(c) * inv_det;
+            if t >= ray.tmin && t <= ray.tmax {
+                return t;
             }
         }
 
@@ -95,24 +110,23 @@ impl RtCompressedTriangle {
 
     pub fn unpack(&self) -> (Vec3A, Vec3A, Vec3A) {
         let v0: Vec3A = self.v0.into();
-        let e0x = f16::from_bits((self.e0_e1[0] >> 16) as u16).to_f32();
-        let e1x = f16::from_bits(self.e0_e1[0] as u16).to_f32();
-        let e0y = f16::from_bits((self.e0_e1[1] >> 16) as u16).to_f32();
-        let e1y = f16::from_bits(self.e0_e1[1] as u16).to_f32();
-        let e0z = f16::from_bits((self.e0_e1[2] >> 16) as u16).to_f32();
-        let e1z = f16::from_bits(self.e0_e1[2] as u16).to_f32();
-        let e0 = Vec3A::new(e0x, e0y, e0z);
+        let e1x = f16::from_bits(self.e1_e2[0]).to_f32();
+        let e2x = f16::from_bits(self.e1_e2[1]).to_f32();
+        let e1y = f16::from_bits(self.e1_e2[2]).to_f32();
+        let e2y = f16::from_bits(self.e1_e2[3]).to_f32();
+        let e1z = f16::from_bits(self.e1_e2[4]).to_f32();
+        let e2z = f16::from_bits(self.e1_e2[5]).to_f32();
         let e1 = Vec3A::new(e1x, e1y, e1z);
-        (v0, e0, e1)
+        let e2 = Vec3A::new(e2x, e2y, e2z);
+        (v0, e1, e2)
     }
 
     #[inline(always)]
     pub fn compute_barycentric(&self, ray: &Ray) -> Vec2 {
-        let (v0, e0, e1) = self.unpack();
-        let pv = ray.direction.cross(e1);
-        let det = e0.dot(pv);
-        let tv = ray.origin - v0;
-        vec2(tv.dot(pv), ray.direction.dot(tv.cross(e0))) / det
+        let (v0, e1, e2) = self.unpack();
+        let ng = (-e1).cross(e2);
+        let r = ray.direction.cross(v0 - ray.origin);
+        vec2(r.dot(e2), r.dot(-e1)) / ng.dot(ray.direction)
     }
 }
 
@@ -138,7 +152,7 @@ impl From<&Triangle> for RtTriangle {
 }
 
 // Uses layout from https://github.com/madmann91/bvh/blob/master/src/bvh/v2/tri.h#L36
-// to optimize for intersection
+// to optimize for intersection. On the CPU this is a bit faster than e1 = v1 - v0; e2 = v2 - v0;
 impl RtTriangle {
     #[inline(always)]
     pub fn new(v0: Vec3A, v1: Vec3A, v2: Vec3A) -> Self {
