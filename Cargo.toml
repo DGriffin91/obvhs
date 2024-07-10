@@ -10,7 +10,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = { version = "0.25", features = ["bytemuck"] }
+glam = { version = "0.27", features = ["bytemuck"] }
 half = "2.3.1"
 bytemuck = "1.15"
 rdst = { version = "0.20.14", default-features = false }
