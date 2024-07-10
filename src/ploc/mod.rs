@@ -353,7 +353,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
 
 // TODO find a not terrible way to make this less repetitive
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum SortPrecision {
     U128,
     U64,
