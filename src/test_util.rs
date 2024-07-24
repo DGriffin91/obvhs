@@ -1,4 +1,4 @@
-// These meshes, generators, sampling functions, etc.. are only here for basic testing & examples.
+//! Meshes, generators, sampling functions, etc.. for basic testing & examples.
 
 pub mod sampling {
     use std::f32::consts::TAU;

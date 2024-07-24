@@ -1,3 +1,5 @@
+//! Triangle types optimized for ray intersection performance.
+
 use bytemuck::{Pod, Zeroable};
 use glam::*;
 

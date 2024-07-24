@@ -1,3 +1,5 @@
+//! Triangle representation in 3D space.
+
 use bytemuck::{Pod, Zeroable};
 use glam::{vec2, Mat4, Vec2, Vec3A};
 

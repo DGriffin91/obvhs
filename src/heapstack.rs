@@ -1,3 +1,5 @@
+//! A stack data structure implemented on the heap with adjustable capacity.
+
 /// A stack data structure implemented on the heap with adjustable capacity.
 ///
 /// This structure allows pushing and popping elements and will never automatically

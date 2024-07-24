@@ -1,3 +1,5 @@
+//! A ray in 3D space.
+
 use glam::{vec3a, Vec3A};
 
 /// Computes the inverse of `x` avoiding division by zero.

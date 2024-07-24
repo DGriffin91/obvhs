@@ -1,3 +1,5 @@
+//! An eight-way compressed wide BVH8 builder.
+
 pub mod builder;
 pub mod bvh2_to_cwbvh;
 pub mod node;
@@ -37,29 +39,33 @@ pub struct CwBvh {
 }
 
 const TRAVERSAL_STACK_SIZE: usize = 32;
+/// A stack data structure implemented on the stack with fixed capacity.
 #[derive(Default)]
 pub struct TraversalStack32<T: Copy + Default> {
     data: [T; TRAVERSAL_STACK_SIZE],
     index: usize,
 }
 
-// TODO: check bounds in debug.
+// TODO: possibly check bounds in debug.
 // TODO allow the user to provide their own stack impl via a Trait.
 // BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no TLAS.
 // A BVH that deep would perform very slowly and would likely indicate that the geometry is degenerate in some way.
 // CwBvh::validate() will assert the CWBVH depth is less than TRAVERSAL_STACK_SIZE
 impl<T: Copy + Default> TraversalStack32<T> {
+    /// Pushes a value onto the stack. If the stack is full it will overwrite the value in the last position.
     #[inline(always)]
     pub fn push(&mut self, v: T) {
         *unsafe { self.data.get_unchecked_mut(self.index) } = v;
         self.index = (self.index + 1).min(TRAVERSAL_STACK_SIZE - 1);
     }
+    /// Pops a value from the stack without checking bounds. If the stack is empty it will return the value in the first position.
     #[inline(always)]
     pub fn pop_fast(&mut self) -> T {
         self.index = self.index.saturating_sub(1);
         let v = *unsafe { self.data.get_unchecked(self.index) };
         v
     }
+    /// Pops a value from the stack.
     #[inline(always)]
     pub fn pop(&mut self) -> Option<&T> {
         if self.index > 0 {
@@ -69,21 +75,24 @@ impl<T: Copy + Default> TraversalStack32<T> {
             None
         }
     }
+    /// Returns the number of elements in the stack.
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.index
     }
+    /// Returns true if the stack is empty.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.index == 0
     }
+    /// Clears the stack, removing all elements.
     #[inline(always)]
     pub fn clear(&mut self) {
         self.index = 0;
     }
 }
 
-/// Holds traversal state to allow for dynamic traversal (yield on hit)
+/// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
 pub struct RayTraversal {
     pub stack: TraversalStack32<UVec2>,
     pub current_group: UVec2,
@@ -224,7 +233,7 @@ impl CwBvh {
     /// Traverse the BVH
     /// Yields at every primitive hit, returning true.
     /// Returns false when no hit is found.
-    /// For any hit, just run until the first time it yields true.
+    /// For basic miss test, just run until the first time it yields true.
     /// For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
     /// For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
     ///     and then manually setting ray.tmax to that closest opaque hit at each iteration.

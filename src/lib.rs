@@ -21,7 +21,7 @@ pub trait Boundable {
     fn aabb(&self) -> Aabb;
 }
 
-/// A trait for types that can have a matrix transform applied. Primarily here for testing/examples.
+/// A trait for types that can have a matrix transform applied. Primarily for testing/examples.
 pub trait Transformable {
     fn transform(&mut self, matrix: &Mat4);
 }
@@ -43,6 +43,7 @@ where
     }
 }
 
+#[doc(hidden)]
 pub trait VecExt {
     /// Computes the base 2 logarithm of each component of the vector.
     fn log2(self) -> Self;
@@ -94,6 +95,7 @@ impl VecExt for glam::Vec3A {
 ///
 /// This macro only measures time when the `timeit` feature is enabled.
 #[macro_export]
+#[doc(hidden)]
 macro_rules! timeit {
     [$label:expr, $($code:tt)*] => {
         #[cfg(feature = "timeit")]
@@ -105,6 +107,7 @@ macro_rules! timeit {
 }
 
 /// A wrapper struct for `std::time::Duration` to provide pretty-printing of durations.
+#[doc(hidden)]
 pub struct PrettyDuration(pub Duration);
 
 impl std::fmt::Display for PrettyDuration {
@@ -131,6 +134,7 @@ impl std::fmt::Display for PrettyDuration {
 }
 
 /// Add profile scope. Nesting the macro allows us to make the profiling crate optional.
+#[doc(hidden)]
 #[macro_export]
 macro_rules! scope {
     [$label:expr] => {
@@ -158,8 +162,8 @@ pub struct BvhBuildParams {
     pub sort_precision: SortPrecision,
     /// Min 1 (CwBvh will clamp to max 3)
     pub max_prims_per_leaf: u32,
-    /// Multiplier for traversal cost calculation during collapse. A higher value will result in more primitives
-    /// per leaf.
+    /// Multiplier for traversal cost calculation during BVH2 collapse (Does not affect CwBvh). A higher value will
+    /// result in more primitives per leaf.
     pub collapse_traversal_cost: f32,
 }
 

@@ -1,3 +1,5 @@
+//! Split large triangles into multiple smaller Aabbs.
+
 use glam::Vec3A;
 
 use crate::{aabb::Aabb, triangle::Triangle};

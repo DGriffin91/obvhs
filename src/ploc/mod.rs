@@ -1,3 +1,5 @@
+//! PLOC (Parallel, Locally Ordered Clustering) BVH 2 Builder.
+
 pub mod morton;
 
 // https://madmann91.github.io/2021/05/05/ploc-revisited.html

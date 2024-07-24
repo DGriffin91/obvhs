@@ -1,3 +1,5 @@
+//! A binary BVH
+
 pub mod builder;
 pub mod leaf_collapser;
 pub mod reinsertion;
@@ -28,7 +30,7 @@ pub struct Bvh2Node {
     /// If prim_count > 0 this node is a leaf node.
     pub prim_count: u32,
     /// The index of the first child Aabb or primitive.
-    /// If this node is an inner node the first child will be at nodes[first_index], and the second at nodes[first_index + 1].
+    /// If this node is an inner node the first child will be at `nodes[first_index]`, and the second at `nodes[first_index + 1]`.
     /// If this node is a leaf node the first index typically indexes into a primitive_indices list that contains the actual index of the primitive.
     /// The reason for this mapping is that if multiple primitives are contained in this node, they need to have their indices layed out contiguously.
     /// To avoid this indirection we have two options:
@@ -119,7 +121,7 @@ impl Bvh2Node {
     }
 }
 
-/// Holds traversal state to allow for dynamic traversal (yield on hit)
+/// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
 pub struct RayTraversal {
     pub stack: HeapStack<u32>,
     pub ray: Ray,

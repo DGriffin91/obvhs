@@ -1,3 +1,5 @@
+//! An Axis-Aligned Bounding Box (AABB) represented by its minimum and maximum points.
+
 use std::ops::BitAnd;
 
 use bytemuck::{Pod, Zeroable};

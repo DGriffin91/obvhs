@@ -19,7 +19,7 @@ pub struct CwBvhNode {
     pub p: Vec3,
 
     /// Exponent of child bounding box compression
-    /// Max point of node AABB could be calculated ex: p.x + bitcast<f32>(e[0] << 23) * 255.0
+    /// Max point of node AABB could be calculated ex: `p.x + bitcast<f32>(e[0] << 23) * 255.0`
     pub e: [u8; 3],
 
     /// Bitmask indicating which children are internal nodes. 1 for internal, 0 for leaf
@@ -46,7 +46,7 @@ pub struct CwBvhNode {
 
     // Note: deviation from the paper: the min&max are interleaved here.
     /// Axis planes for each child.
-    /// The plane position could be calculated, for example, with p.x + bitcast<f32>(e[0] << 23) * child_min_x[0]
+    /// The plane position could be calculated, for example, with `p.x + bitcast<f32>(e[0] << 23) * child_min_x[0]`
     /// But in the actual intersection implementation the ray is transformed instead.
     pub child_min_x: [u8; 8],
     pub child_max_x: [u8; 8],
