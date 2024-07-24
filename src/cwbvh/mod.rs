@@ -320,10 +320,10 @@ impl CwBvh {
     }
 
     /// This is currently mostly here just for reference. It's setup somewhat similarly to the GPU version,
-    /// reusing the same stack for both BLAS and TLAS traversal. It might be better to traverse separately
-    /// on the CPU using two instances of `Traversal` with `CwBvh::traverse_dynamic()`. I haven't benchmarked this
-    /// comparison yet. This example also does not take into account transforming the ray into the local
-    /// space of the blas instance. (but has comments denoting where this would happen)
+    /// reusing the same stack for both BLAS and TLAS traversal. It might be better to traverse separately on
+    /// the CPU using two instances of `Traversal` with `CwBvh::traverse_dynamic()` or the `traverse!` macro.
+    /// I haven't benchmarked this comparison yet. This example also does not take into account transforming
+    /// the ray into the local space of the blas instance. (but has comments denoting where this would happen)
     pub fn traverse_tlas_blas<F: FnMut(&Ray, usize, usize) -> f32>(
         &self,
         blas: &[CwBvh],
@@ -510,7 +510,7 @@ impl CwBvh {
     /// depends on the order of self.nodes will need to be updated.
     ///
     /// # Arguments
-    /// * `node_idx` - Node index to start refitting up the tree from.
+    /// * `node_idx` - Index of node to be reordered.
     /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
     /// * `primitives` - List of BVH primitives, implementing Boundable.
     pub fn order_node_children<T: Boundable>(
