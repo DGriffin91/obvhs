@@ -104,7 +104,7 @@ fn main() {
         let ray = Ray::new(eye, direction, 0.0, f32::MAX);
 
         let mut hit = RayHit::none();
-        if bvh.traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
+        if bvh.ray_traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
             let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
             normal *= normal.dot(-ray.direction).signum(); // Double sided
             let c = (normal * 255.0).as_uvec3();

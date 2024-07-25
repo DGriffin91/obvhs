@@ -202,7 +202,7 @@ impl CwBvh {
 
     /// Traverse the BVH, finding the closest hit.
     /// Returns true if any primitive was hit.
-    pub fn traverse<F: FnMut(&Ray, usize) -> f32>(
+    pub fn ray_traverse<F: FnMut(&Ray, usize) -> f32>(
         &self,
         ray: Ray,
         hit: &mut RayHit,
@@ -228,7 +228,7 @@ impl CwBvh {
 
         // Alternatively (performance seems slightly slower):
         // let mut state = self.new_ray_traversal(ray);
-        // while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
+        // while self.ray_traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
 
         hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
     }
@@ -240,8 +240,9 @@ impl CwBvh {
     /// For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
     /// For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
     ///     and then manually setting ray.tmax to that closest opaque hit at each iteration.
+    /// For best performance & customizability use the traverse! macro instead.
     #[inline]
-    pub fn traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
+    pub fn ray_traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
         &self,
         state: &mut RayTraversal,
         hit: &mut RayHit,
@@ -327,7 +328,7 @@ impl CwBvh {
     /// the CPU using two instances of `Traversal` with `CwBvh::traverse_dynamic()` or the `traverse!` macro.
     /// I haven't benchmarked this comparison yet. This example also does not take into account transforming
     /// the ray into the local space of the blas instance. (but has comments denoting where this would happen)
-    pub fn traverse_tlas_blas<F: FnMut(&Ray, usize, usize) -> f32>(
+    pub fn ray_traverse_tlas_blas<F: FnMut(&Ray, usize, usize) -> f32>(
         &self,
         blas: &[CwBvh],
         mut ray: Ray,

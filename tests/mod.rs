@@ -29,7 +29,7 @@ mod tests {
             &mut Duration::default(),
         );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
 
     #[test]
@@ -40,7 +40,7 @@ mod tests {
             &mut Duration::default(),
         );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
 
     #[test]
@@ -52,7 +52,7 @@ mod tests {
             &mut Duration::default(),
         );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
 
     #[test]
@@ -64,7 +64,7 @@ mod tests {
             &mut Duration::default(),
         );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
 
     #[test]
@@ -134,7 +134,7 @@ mod tests {
                 let ray = Ray::new(eye, direction, 0.0, f32::MAX);
 
                 let mut hit = RayHit::none();
-                if cwbvh.traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
+                if cwbvh.ray_traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
                     eval(x, y, hit);
                 }
             }
@@ -164,7 +164,7 @@ mod tests {
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
         bvh2.validate(&tris, false, false);
-        bvh2.intersect_aabb(aabb, |bvh, id| {
+        bvh2.aabb_traverse(aabb, |bvh, id| {
             let node = &bvh.nodes[id as usize];
             for i in 0..node.prim_count {
                 let primitive_id = bvh.primitive_indices[(node.first_index + i) as usize] as usize;

@@ -119,7 +119,7 @@ fn main() {
                     let skyc = sky.render(ray.direction);
                     let sunc = sky.render(-sun_direction);
                     let mut state = bvh.new_ray_traversal(ray);
-                    while bvh.traverse_dynamic(&mut state, &mut hit, intersection_fn) {}
+                    while bvh.ray_traverse_dynamic(&mut state, &mut hit, intersection_fn) {}
                     if hit.t < f32::MAX {
                         let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
                         normal *= normal.dot(-ray.direction).signum(); // Double sided
@@ -136,7 +136,7 @@ fn main() {
                         let diff_ray = Ray::new_inf(hit_p, ao_ray_dir);
                         let mut diff_hit = RayHit::none();
                         state.reinit(diff_ray);
-                        while bvh.traverse_dynamic(&mut state, &mut diff_hit, intersection_fn) {}
+                        while bvh.ray_traverse_dynamic(&mut state, &mut diff_hit, intersection_fn) {}
                         if diff_hit.t < f32::MAX {
                             let mut diff_hit_normal =
                                 bvh_tris[diff_hit.primitive_id as usize].compute_normal();
@@ -149,7 +149,7 @@ fn main() {
                             // anyhit
 
                             state.reinit(sun_ray);
-                            if !bvh.traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
+                            if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
                                 // xD
                                 color += material_color * material_color * nee * sunc * 4.0;
                             }
@@ -176,7 +176,7 @@ fn main() {
                         let sun_ray = Ray::new_inf(hit_p, -sun_dir);
 
                         state.reinit(sun_ray); // anyhit
-                        if !bvh.traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
+                        if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
                             color += material_color
                                 * nee
                                 * normal.dot(-sun_dir).max(0.00001)
@@ -192,11 +192,11 @@ fn main() {
                         let mut sun_hit = RayHit::none();
 
                         state.reinit(sun_ray); // anyhit
-                        if !bvh.traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
+                        if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
                             color += nee * sunc * fog_t * 0.2;
                         }
                         state.reinit(Ray::new_inf(fog_p, fog_dir)); // anyhit
-                        if !bvh.traverse_dynamic(&mut state, &mut RayHit::none(), intersection_fn) {
+                        if !bvh.ray_traverse_dynamic(&mut state, &mut RayHit::none(), intersection_fn) {
                             color += fog_t * 0.2 * fogc;
                         }
                     } else {

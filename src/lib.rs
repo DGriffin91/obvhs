@@ -27,6 +27,7 @@ pub trait Transformable {
 }
 
 /// Apply a function to each component of a type.
+#[doc(hidden)]
 pub trait PerComponent<C1, C2 = C1, Output = Self> {
     fn per_comp(self, f: impl Fn(C1) -> C2) -> Output;
 }

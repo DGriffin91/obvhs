@@ -191,21 +191,21 @@ impl Bvh2 {
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
     #[inline(always)]
-    pub fn traverse<F: FnMut(&Ray, usize) -> f32>(
+    pub fn ray_traverse<F: FnMut(&Ray, usize) -> f32>(
         &self,
         ray: Ray,
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
         let mut state = self.new_ray_traversal(ray);
-        while self.traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
+        while self.ray_traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
         hit.t < ray.tmax // Note this is valid since traverse_with_stack does not mutate the ray
     }
 
     /// Traverse the BVH
     /// Yields at every primitive hit, returning true.
     /// Returns false when no hit is found.
-    /// For any hit, just run until the first time it yields true.
+    /// For basic miss test, just run until the first time it yields true.
     /// For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
     /// For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
     ///     and then manually setting ray.tmax to that closest opaque hit at each iteration.
@@ -218,7 +218,7 @@ impl Bvh2 {
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
     #[inline(always)]
-    pub fn traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
+    pub fn ray_traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
         &self,
         state: &mut RayTraversal,
         hit: &mut RayHit,
@@ -263,15 +263,15 @@ impl Bvh2 {
     /// On completion, `indices` will contain a list of the intersected leaf nodes.
     /// This method is slower than stack traversal and only exists as a reference.
     /// This method does not check if the primitive was intersected, only the leaf node.
-    pub fn traverse_recursive(&self, ray: &Ray, node_index: usize, indices: &mut Vec<usize>) {
+    pub fn ray_traverse_recursive(&self, ray: &Ray, node_index: usize, indices: &mut Vec<usize>) {
         let node = &self.nodes[node_index];
 
         if node.is_leaf() {
             let primitive_id = node.first_index as usize;
             indices.push(primitive_id);
         } else if node.aabb.intersect_ray(ray) < f32::INFINITY {
-            self.traverse_recursive(ray, node.first_index as usize, indices);
-            self.traverse_recursive(ray, node.first_index as usize + 1, indices);
+            self.ray_traverse_recursive(ray, node.first_index as usize, indices);
+            self.ray_traverse_recursive(ray, node.first_index as usize + 1, indices);
         }
     }
 
@@ -280,7 +280,7 @@ impl Bvh2 {
     /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
     /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
-    pub fn intersect_aabb<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
+    pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
         let mut stack =
             HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
         stack.push(0);
@@ -347,6 +347,7 @@ impl Bvh2 {
 
     /// Refit the BVH working up the tree from this node, ignoring leaves. (TODO add a version that checks leaves)
     /// This recomputes the Aabbs for all the parents of the given node index.
+    /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from(&mut self, mut index: usize, parents: &[u32]) {
         loop {
             let node = &self.nodes[index];
@@ -362,9 +363,10 @@ impl Bvh2 {
         }
     }
 
-    /// Refit the BVH working up the tree from this node, ignoring leaves. (TODO add a version that checks leaves)
+    /// Refit the BVH working up the tree from this node, ignoring leaves.
     /// This recomputes the Aabbs for the parents of the given node index.
     /// Halts if the parents are the same size. Panics in debug if some parents still needed to be resized.
+    /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from_fast(&mut self, mut index: usize, parents: &[u32]) {
         let mut same_count = 0;
         loop {
@@ -409,7 +411,7 @@ impl Bvh2 {
             ..Default::default()
         };
 
-        if self.nodes.len() != 0 {
+        if !self.nodes.is_empty() {
             self.validate_impl::<T>(primitives, &mut result, 0, 0, 0);
         }
         assert_eq!(result.discovered_nodes.len(), self.nodes.len());

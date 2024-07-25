@@ -32,7 +32,7 @@ fn main() {
 
     // Traverse the BVH, finding the closest hit.
     let mut ray_hit = RayHit::none();
-    if bvh.traverse(ray, &mut ray_hit, |ray, id| {
+    if bvh.ray_traverse(ray, &mut ray_hit, |ray, id| {
         // Use primitive_indices to look up the original primitive id.
         // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see cornell_box_cwbvh example)
         tris[bvh.primitive_indices[id] as usize].intersect(ray)
