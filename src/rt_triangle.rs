@@ -9,8 +9,11 @@ use crate::{aabb::Aabb, ray::Ray, triangle::Triangle, Boundable};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
+/// A compressed 3D triangle optimized for GPU ray intersection performance.
 pub struct RtCompressedTriangle {
+    /// Base vertex
     pub v0: [f32; 3],
+    /// Edges 1 & 2 encoded as IEEE 754 f16 `v1 - v0, v2 - v0`
     pub e1_e2: [u16; 6],
 }
 
@@ -139,10 +142,17 @@ impl Boundable for RtCompressedTriangle {
 }
 
 #[derive(Clone, Copy, Default, PartialEq)]
+/// A 3D triangle optimized for CPU ray intersection performance.
 pub struct RtTriangle {
+    /// Base vertex
     pub v0: Vec3A,
+    /// Edge 1 `v0 - v1`
     pub e1: Vec3A,
+    /// Edge 2 `v2 - v0`
     pub e2: Vec3A,
+    /// Geometric normal `e1.cross(e2)`.
+    /// Optimized for intersection.
+    /// Needs to be inverted for typical normal.
     pub ng: Vec3A,
 }
 
