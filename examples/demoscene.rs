@@ -15,7 +15,7 @@ use obvhs::{
     },
     timeit, BvhBuildParams,
 };
-use std::io::Write;
+use std::{io::Write, time::Duration};
 pub const SUN_ANGULAR_DIAMETER: f32 = 0.00933;
 
 #[cfg(feature = "parallel")]
@@ -32,7 +32,7 @@ fn main() {
     ];
     println!("{} triangles, {} AA samples", tris.len(), total_aa_samples);
     timeit!["generate bvh",
-    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut 0.0);
+    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut Duration::default());
     ];
 
     let bvh_tris = bvh

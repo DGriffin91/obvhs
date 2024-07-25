@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use glam::*;
 use obvhs::{
     cwbvh::builder::build_cwbvh_from_tris,
@@ -19,7 +21,11 @@ fn main() {
     // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the respective presets.
     // Feel free to copy the contents of build_cwbvh_from_tris or build_cwbvh. They are very straightforward.
     // If you don't want to use Triangles as the primitive, use build_cwbvh instead. build_cwbvh_from_tris just adds support for splitting tris.
-    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::medium_build(), &mut 0.0);
+    let bvh = build_cwbvh_from_tris(
+        &tris,
+        BvhBuildParams::medium_build(),
+        &mut Duration::default(),
+    );
 
     // Create a new ray
     let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));

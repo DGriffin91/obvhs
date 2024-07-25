@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
 
+    use std::time::Duration;
+
     use glam::*;
     use obvhs::{
         aabb::Aabb,
@@ -21,14 +23,22 @@ mod tests {
 
     #[test]
     pub fn build_bvh2_with_empty_aabb() {
-        let bvh = build_bvh2(&[Aabb::empty()], BvhBuildParams::medium_build(), &mut 0.0);
+        let bvh = build_bvh2(
+            &[Aabb::empty()],
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
         assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
 
     #[test]
     pub fn build_cwbvh_with_empty_aabb() {
-        let bvh = build_cwbvh(&[Aabb::empty()], BvhBuildParams::medium_build(), &mut 0.0);
+        let bvh = build_cwbvh(
+            &[Aabb::empty()],
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
         assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
@@ -36,7 +46,11 @@ mod tests {
     #[test]
     pub fn build_bvh2_with_nothing() {
         let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_bvh2(&aabbs, BvhBuildParams::medium_build(), &mut 0.0);
+        let bvh = build_bvh2(
+            &aabbs,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
         assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
@@ -44,7 +58,11 @@ mod tests {
     #[test]
     pub fn build_cwbvh_with_nothing() {
         let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_cwbvh(&aabbs, BvhBuildParams::medium_build(), &mut 0.0);
+        let bvh = build_cwbvh(
+            &aabbs,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
         let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
         assert!(!bvh.traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
     }
@@ -83,7 +101,11 @@ mod tests {
     ) where
         F: FnMut(u32, u32, RayHit),
     {
-        let cwbvh = build_cwbvh_from_tris(tris, BvhBuildParams::medium_build(), &mut 0.0);
+        let cwbvh = build_cwbvh_from_tris(
+            tris,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
 
         let bvh_tris = cwbvh
             .primitive_indices
@@ -134,7 +156,11 @@ mod tests {
         }
 
         // BVH2
-        let bvh2 = build_bvh2_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let bvh2 = build_bvh2_from_tris(
+            &tris,
+            BvhBuildParams::fast_build(),
+            &mut Duration::default(),
+        );
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
         bvh2.validate(&tris, false, false);
@@ -154,7 +180,11 @@ mod tests {
         assert_eq!(refrence_intersect_sum, intersect_sum);
 
         // CWBVH
-        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let cwbvh = build_cwbvh_from_tris(
+            &tris,
+            BvhBuildParams::fast_build(),
+            &mut Duration::default(),
+        );
         let mut cw_intersect_count = 0;
         let mut cw_intersect_sum = 0usize;
         cwbvh.validate(false, false, &tris);
@@ -187,7 +217,11 @@ mod tests {
         // TODO BVH2
 
         // CWBVH
-        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let cwbvh = build_cwbvh_from_tris(
+            &tris,
+            BvhBuildParams::fast_build(),
+            &mut Duration::default(),
+        );
         cwbvh.validate(false, false, &tris);
 
         for i in 0..512 {
@@ -231,7 +265,11 @@ mod tests {
     #[test]
     pub fn compute_parents_cwbvh() {
         let tris = demoscene(100, 0);
-        let cwbvh = build_cwbvh_from_tris(&tris, BvhBuildParams::fast_build(), &mut 0.0);
+        let cwbvh = build_cwbvh_from_tris(
+            &tris,
+            BvhBuildParams::fast_build(),
+            &mut Duration::default(),
+        );
         cwbvh.validate(false, false, &tris);
         let parents = cwbvh.compute_parents();
         for (child, parent) in parents.iter().enumerate().skip(1) {

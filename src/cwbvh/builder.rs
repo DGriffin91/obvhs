@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{
     aabb::Aabb,
@@ -10,10 +10,17 @@ use crate::{
 };
 
 /// Build a cwbvh from the given list of Triangles.
+/// Just a helper function / example, feel free to reimplement for your specific use case.
+///
+/// # Arguments
+/// * `triangles` - A list of Triangles.
+/// * `config` - Parameters for configuring the BVH building.
+/// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
+/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 pub fn build_cwbvh_from_tris(
     triangles: &[Triangle],
     config: BvhBuildParams,
-    core_build_time: &mut f32,
+    core_build_time: &mut Duration,
 ) -> CwBvh {
     let mut aabbs = Vec::with_capacity(triangles.len());
     let mut indices = Vec::with_capacity(triangles.len());
@@ -55,7 +62,7 @@ pub fn build_cwbvh_from_tris(
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
     let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
-    *core_build_time += start_time.elapsed().as_secs_f32();
+    *core_build_time += start_time.elapsed();
 
     #[cfg(debug_assertions)]
     {
@@ -68,11 +75,18 @@ pub fn build_cwbvh_from_tris(
 
 /// Build a cwbvh from the given list of Boundable primitives.
 /// `pre_split` in BvhBuildParams is ignored in this case.
+/// Just a helper function / example, feel free to reimplement for your specific use case.
+///
+/// # Arguments
+/// * `primitives` - A list of Primitives that implement Boundable.
+/// * `config` - Parameters for configuring the BVH building.
+/// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
+/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 // TODO: we could optionally do imprecise basic Aabb splits.
 pub fn build_cwbvh<T: Boundable>(
     primitives: &[T],
     config: BvhBuildParams,
-    core_build_time: &mut f32,
+    core_build_time: &mut Duration,
 ) -> CwBvh {
     let mut aabbs = Vec::with_capacity(primitives.len());
     let mut indices = Vec::with_capacity(primitives.len());
@@ -99,7 +113,7 @@ pub fn build_cwbvh<T: Boundable>(
         cwbvh.validate(config.pre_split, false, &aabbs);
     }
 
-    *core_build_time += start_time.elapsed().as_secs_f32();
+    *core_build_time += start_time.elapsed();
 
     cwbvh
 }

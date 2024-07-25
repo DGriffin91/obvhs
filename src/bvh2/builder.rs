@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{
     aabb::Aabb, splits::split_aabbs_preset, triangle::Triangle, Boundable, BvhBuildParams,
@@ -7,10 +7,17 @@ use crate::{
 use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
 
 /// Build a bvh2 from the given list of Triangles.
+/// Just a helper function / example, feel free to reimplement for your specific use case.
+///
+/// # Arguments
+/// * `triangles` - A list of Triangles.
+/// * `config` - Parameters for configuring the BVH building.
+/// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
+/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 pub fn build_bvh2_from_tris(
     triangles: &[Triangle],
     config: BvhBuildParams,
-    core_build_time: &mut f32,
+    core_build_time: &mut Duration,
 ) -> Bvh2 {
     let mut aabbs = Vec::with_capacity(triangles.len());
     let mut indices = Vec::with_capacity(triangles.len());
@@ -61,18 +68,30 @@ pub fn build_bvh2_from_tris(
         None,
     );
 
-    *core_build_time += start_time.elapsed().as_secs_f32();
+    *core_build_time += start_time.elapsed();
+
+    #[cfg(debug_assertions)]
+    {
+        bvh2.validate(triangles, false, config.pre_split);
+    }
 
     bvh2
 }
 
 /// Build a bvh2 from the given list of Boundable primitives.
 /// `pre_split` in BvhBuildParams is ignored in this case.
+/// Just a helper function / example, feel free to reimplement for your specific use case.
+///
+/// # Arguments
+/// * `primitives` - A list of Primitives that implement Boundable.
+/// * `config` - Parameters for configuring the BVH building.
+/// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
+/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 // TODO: we could optionally do imprecise basic Aabb splits.
 pub fn build_bvh2<T: Boundable>(
     primitives: &[T],
     config: BvhBuildParams,
-    core_build_time: &mut f32,
+    core_build_time: &mut Duration,
 ) -> Bvh2 {
     let mut aabbs = Vec::with_capacity(primitives.len());
     let mut indices = Vec::with_capacity(primitives.len());
@@ -102,7 +121,12 @@ pub fn build_bvh2<T: Boundable>(
         None,
     );
 
-    *core_build_time += start_time.elapsed().as_secs_f32();
+    *core_build_time += start_time.elapsed();
+
+    #[cfg(debug_assertions)]
+    {
+        bvh2.validate(primitives, false, config.pre_split);
+    }
 
     bvh2
 }

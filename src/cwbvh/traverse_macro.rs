@@ -24,6 +24,7 @@
 ///     traverse,
 /// };
 /// use glam::*;
+/// use std::time::Duration;
 ///
 /// let mut tris: Vec<Triangle> = Vec::new();
 /// tris.extend(icosphere(1));
@@ -31,7 +32,7 @@
 ///
 /// let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));
 ///
-/// let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::medium_build(), &mut 0.0);
+/// let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::medium_build(), &mut Duration::default());
 /// let mut hit = RayHit::none();
 /// let mut traverse_ray = ray.clone();
 /// let mut state = bvh.new_traversal(ray.direction);
