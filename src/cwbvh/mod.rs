@@ -6,7 +6,10 @@ pub mod node;
 pub mod simd;
 pub mod traverse_macro;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use glam::{uvec2, UVec2, UVec3, Vec3A};
 use node::CwBvhNode;
@@ -496,11 +499,11 @@ impl CwBvh {
     /// depends on the order of self.nodes will need to be updated.
     ///
     /// # Arguments
-    /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
     /// * `primitives` - List of BVH primitives, implementing Boundable.
-    pub fn order_children<T: Boundable>(&mut self, direct_layout: bool, primitives: &[T]) {
+    /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
+    pub fn order_children<T: Boundable>(&mut self, primitives: &[T], direct_layout: bool) {
         for i in 0..self.nodes.len() {
-            self.order_node_children(i, direct_layout, primitives);
+            self.order_node_children(primitives, i, direct_layout);
         }
     }
 
@@ -510,14 +513,14 @@ impl CwBvh {
     /// depends on the order of self.nodes will need to be updated.
     ///
     /// # Arguments
+    /// * `primitives` - List of BVH primitives, implementing Boundable.
     /// * `node_idx` - Index of node to be reordered.
     /// * `direct_layout` - The primitives are already laid out in bvh.primitive_indices order.
-    /// * `primitives` - List of BVH primitives, implementing Boundable.
     pub fn order_node_children<T: Boundable>(
         &mut self,
+        primitives: &[T],
         node_index: usize,
         direct_layout: bool,
-        primitives: &[T],
     ) {
         // TODO could this use ints and work in local node grid space?
 
@@ -725,25 +728,25 @@ impl CwBvh {
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
     pub fn validate<T: Boundable>(
         &self,
+        primitives: &[T],
         splits: bool,
         direct_layout: bool,
-        primitives: &[T],
-    ) -> CwBvhValidateCtx {
+    ) -> CwBvhValidationResult {
         if !splits {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());
         }
-        let mut ctx = CwBvhValidateCtx {
+        let mut result = CwBvhValidationResult {
             splits,
             direct_layout,
             ..Default::default()
         };
         if !self.nodes.is_empty() {
-            self.validate_impl(0, Aabb::LARGEST, &mut ctx, primitives);
+            self.validate_impl(0, Aabb::LARGEST, &mut result, primitives);
         }
         //self.print_nodes();
 
-        ctx.max_depth = self.caclulate_max_depth(0, &mut ctx, 0);
+        result.max_depth = self.caclulate_max_depth(0, &mut result, 0);
 
         if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
             for node in &self.nodes {
@@ -764,25 +767,25 @@ impl CwBvh {
             }
         }
 
-        assert_eq!(ctx.discovered_nodes.len(), self.nodes.len());
+        assert_eq!(result.discovered_nodes.len(), self.nodes.len());
         assert_eq!(
-            ctx.discovered_primitives.len(),
+            result.discovered_primitives.len(),
             self.primitive_indices.len()
         );
-        assert!(ctx.max_depth < TRAVERSAL_STACK_SIZE);
+        assert!(result.max_depth < TRAVERSAL_STACK_SIZE as u32);
 
-        ctx
+        result
     }
 
     fn validate_impl<T: Boundable>(
         &self,
         node_idx: usize,
         parent_bounds: Aabb,
-        ctx: &mut CwBvhValidateCtx,
+        result: &mut CwBvhValidationResult,
         primitives: &[T],
     ) {
-        ctx.discovered_nodes.insert(node_idx as u32);
-        ctx.node_count += 1;
+        result.discovered_nodes.insert(node_idx as u32);
+        result.node_count += 1;
 
         let node = &self.nodes[node_idx];
 
@@ -810,7 +813,7 @@ impl CwBvh {
             }
             assert!(!node.is_child_empty(ch));
 
-            ctx.child_count += 1;
+            result.child_count += 1;
 
             let quantized_min = UVec3::new(
                 node.child_min_x[ch] as u32,
@@ -850,28 +853,28 @@ impl CwBvh {
                         max: quantized_max,
                     }
                     .intersection(&parent_bounds),
-                    ctx,
+                    result,
                     primitives,
                 );
             } else {
                 assert!(node.is_leaf(ch));
-                ctx.leaf_count += 1;
+                result.leaf_count += 1;
 
                 let first_prim = node.primitive_base_idx + (child_meta & 0b11111) as u32;
                 assert_eq!(first_prim, node.child_primitives(ch).0);
                 let mut prim_count = 0;
                 for i in 0..3 {
                     if (child_meta & (0b1_00000 << i)) != 0 {
-                        ctx.discovered_primitives.insert(first_prim + i);
-                        ctx.prim_count += 1;
+                        result.discovered_primitives.insert(first_prim + i);
+                        result.prim_count += 1;
                         prim_count += 1;
                         let mut prim_index = (first_prim + i) as usize;
-                        if !ctx.direct_layout {
+                        if !result.direct_layout {
                             prim_index = self.primitive_indices[prim_index] as usize;
                         }
                         let prim_aabb = primitives[prim_index].aabb();
 
-                        if !ctx.splits {
+                        if !result.splits {
                             // TODO: option that correctly takes into account error of compressed triangle.
                             // Maybe Boundable can return an epsilon, and for compressed triangles it
                             // can take into account the edge length
@@ -896,19 +899,19 @@ impl CwBvh {
     fn caclulate_max_depth(
         &self,
         node_idx: usize,
-        ctx: &mut CwBvhValidateCtx,
-        current_depth: usize,
-    ) -> usize {
+        result: &mut CwBvhValidationResult,
+        current_depth: u32,
+    ) -> u32 {
         if self.nodes.is_empty() {
             return 0;
         }
         let node = &self.nodes[node_idx];
         let mut max_depth = current_depth;
 
-        if let Some(count) = ctx.nodes_at_depth.get(&current_depth) {
-            ctx.nodes_at_depth.insert(current_depth, count + 1);
+        if let Some(count) = result.nodes_at_depth.get(&current_depth) {
+            result.nodes_at_depth.insert(current_depth, count + 1);
         } else {
-            ctx.nodes_at_depth.insert(current_depth, 1);
+            result.nodes_at_depth.insert(current_depth, 1);
         }
 
         for ch in 0..8 {
@@ -927,17 +930,18 @@ impl CwBvh {
                     (node.imask as u32 & !(0xffffffffu32 << slot_index)).count_ones();
                 let child_node_idx = node.child_base_idx as usize + relative_index as usize;
 
-                let child_depth = self.caclulate_max_depth(child_node_idx, ctx, current_depth + 1);
+                let child_depth =
+                    self.caclulate_max_depth(child_node_idx, result, current_depth + 1);
 
                 max_depth = max_depth.max(child_depth);
             } else {
                 // Leaf
                 // max_depth = max_depth.max(current_depth + 1);
 
-                if let Some(count) = ctx.leaves_at_depth.get(&current_depth) {
-                    ctx.leaves_at_depth.insert(current_depth, count + 1);
+                if let Some(count) = result.leaves_at_depth.get(&current_depth) {
+                    result.leaves_at_depth.insert(current_depth, count + 1);
                 } else {
-                    ctx.leaves_at_depth.insert(current_depth, 1);
+                    result.leaves_at_depth.insert(current_depth, 1);
                 }
             }
         }
@@ -994,45 +998,61 @@ fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
 }
 
 #[derive(Default)]
-pub struct CwBvhValidateCtx {
+pub struct CwBvhValidationResult {
+    /// Whether the BVH primitives have splits or not.
     pub splits: bool,
+    /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
+    /// Set of primitives discovered though validation traversal.
     pub discovered_primitives: HashSet<u32>,
+    /// Set of nodes discovered though validation traversal.
     pub discovered_nodes: HashSet<u32>,
+    /// Total number of nodes discovered though validation traversal.
     pub node_count: usize,
+    /// Total number of node children discovered though validation traversal.
     pub child_count: usize,
+    /// Total number of leafs discovered though validation traversal.
     pub leaf_count: usize,
+    /// Total number of primitives discovered though validation traversal.
     pub prim_count: usize,
-    pub max_depth: usize,
-    pub nodes_at_depth: HashMap<usize, usize>,
-    pub leaves_at_depth: HashMap<usize, usize>,
+    /// Maximum hierarchical BVH depth discovered though validation traversal.
+    pub max_depth: u32,
+    /// Quantity of nodes found at each depth though validation traversal.
+    pub nodes_at_depth: HashMap<u32, u32>,
+    /// Quantity of leaves found at each depth though validation traversal.
+    pub leaves_at_depth: HashMap<u32, u32>,
 }
 
-impl CwBvhValidateCtx {
-    pub fn print(&self) {
-        println!(
+impl fmt::Display for CwBvhValidationResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
             "GPU BVH Avg children/node: {:.3}, primitives/leaf: {:.3}",
             self.child_count as f64 / self.node_count as f64,
             self.prim_count as f64 / self.leaf_count as f64
-        );
+        )?;
 
-        println!(
+        writeln!(
+            f,
             "\
 child_count: {}
  node_count: {}
  prim_count: {}
  leaf_count: {}",
             self.child_count, self.node_count, self.prim_count, self.leaf_count
-        );
+        )?;
 
-        println!("Node & Leaf counts for each depth");
+        writeln!(f, "Node & Leaf counts for each depth")?;
         for i in 0..=self.max_depth {
-            println!(
+            writeln!(
+                f,
                 "{:<3} {:<10} {:<10}",
                 i,
                 self.nodes_at_depth.get(&i).unwrap_or(&0),
                 self.leaves_at_depth.get(&i).unwrap_or(&0)
-            );
+            )?;
         }
+
+        Ok(())
     }
 }

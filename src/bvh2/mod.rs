@@ -6,6 +6,10 @@ pub mod reinsertion;
 
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+};
 
 use bytemuck::{Pod, Zeroable};
 
@@ -389,40 +393,56 @@ impl Bvh2 {
     }
 
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
-    pub fn validate<T: Boundable>(&self, primitives: &[T], direct_layout: bool, splits: bool) {
+    pub fn validate<T: Boundable>(
+        &self,
+        primitives: &[T],
+        direct_layout: bool,
+        splits: bool,
+    ) -> Bvh2ValidationResult {
         if !splits {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());
         }
-        let mut ctx = Bvh2ValidateCtx {
+        let mut result = Bvh2ValidationResult {
             splits,
             direct_layout,
             ..Default::default()
         };
 
         if self.nodes.len() != 0 {
-            self.validate_impl::<T>(primitives, &mut ctx, 0, 0, 0);
+            self.validate_impl::<T>(primitives, &mut result, 0, 0, 0);
         }
-        assert_eq!(ctx.discovered_nodes.len(), self.nodes.len());
+        assert_eq!(result.discovered_nodes.len(), self.nodes.len());
+        assert_eq!(result.node_count, self.nodes.len());
         assert_eq!(
-            ctx.discovered_primitives.len(),
+            result.discovered_primitives.len(),
             self.primitive_indices.len()
         );
-        assert!(ctx.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
+        assert_eq!(result.prim_count, self.primitive_indices.len());
+        assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
+
+        result
     }
 
     pub fn validate_impl<T: Boundable>(
         &self,
         primitives: &[T],
-        ctx: &mut Bvh2ValidateCtx,
+        result: &mut Bvh2ValidationResult,
         node_index: u32,
         parent_index: u32,
-        depth: u32,
+        current_depth: u32,
     ) {
-        ctx.max_depth = ctx.max_depth.max(depth);
+        result.max_depth = result.max_depth.max(current_depth);
         let parent_aabb = self.nodes[parent_index as usize].aabb;
-        ctx.discovered_nodes.push(node_index);
+        result.discovered_nodes.insert(node_index);
         let node = &self.nodes[node_index as usize];
+        result.node_count += 1;
+
+        if let Some(count) = result.nodes_at_depth.get(&current_depth) {
+            result.nodes_at_depth.insert(current_depth, count + 1);
+        } else {
+            result.nodes_at_depth.insert(current_depth, 1);
+        }
 
         assert!(
             node.aabb.min.cmpge(parent_aabb.min).all()
@@ -435,12 +455,19 @@ impl Bvh2 {
         );
 
         if node.is_leaf() {
+            result.leaf_count += 1;
+            if let Some(count) = result.leaves_at_depth.get(&current_depth) {
+                result.leaves_at_depth.insert(current_depth, count + 1);
+            } else {
+                result.leaves_at_depth.insert(current_depth, 1);
+            }
             for i in 0..node.prim_count {
+                result.prim_count += 1;
                 let mut prim_index = (node.first_index + i) as usize;
-                ctx.discovered_primitives.push(prim_index as u32);
+                result.discovered_primitives.insert(prim_index as u32);
                 // If using splits, primitives will extend outside the leaf in some cases.
-                if !ctx.splits {
-                    if !ctx.direct_layout {
+                if !result.splits {
+                    if !result.direct_layout {
                         prim_index = self.primitive_indices[prim_index] as usize
                     }
                     let prim_aabb = primitives[prim_index].aabb();
@@ -456,13 +483,19 @@ impl Bvh2 {
                 }
             }
         } else {
-            self.validate_impl::<T>(primitives, ctx, node.first_index, parent_index, depth + 1);
             self.validate_impl::<T>(
                 primitives,
-                ctx,
+                result,
+                node.first_index,
+                parent_index,
+                current_depth + 1,
+            );
+            self.validate_impl::<T>(
+                primitives,
+                result,
                 node.first_index + 1,
                 parent_index,
-                depth + 1,
+                current_depth + 1,
             );
         }
     }
@@ -525,10 +558,57 @@ impl Bvh2 {
 }
 
 #[derive(Default)]
-pub struct Bvh2ValidateCtx {
+pub struct Bvh2ValidationResult {
+    /// Whether the BVH primitives have splits or not.
     pub splits: bool,
+    /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
-    pub discovered_nodes: Vec<u32>,
-    pub discovered_primitives: Vec<u32>,
+    /// Set of primitives discovered though validation traversal.
+    pub discovered_primitives: HashSet<u32>,
+    /// Set of nodes discovered though validation traversal.
+    pub discovered_nodes: HashSet<u32>,
+    /// Total number of nodes discovered though validation traversal.
+    pub node_count: usize,
+    /// Total number of leafs discovered though validation traversal.
+    pub leaf_count: usize,
+    /// Total number of primitives discovered though validation traversal.
+    pub prim_count: usize,
+    /// Maximum hierarchical BVH depth discovered though validation traversal.
     pub max_depth: u32,
+    /// Quantity of nodes found at each depth though validation traversal.
+    pub nodes_at_depth: HashMap<u32, u32>,
+    /// Quantity of leaves found at each depth though validation traversal.
+    pub leaves_at_depth: HashMap<u32, u32>,
+}
+
+impl fmt::Display for Bvh2ValidationResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "GPU BVH Avg primitives/leaf: {:.3}",
+            self.prim_count as f64 / self.leaf_count as f64
+        )?;
+
+        writeln!(
+            f,
+            "\
+node_count: {}
+prim_count: {}
+leaf_count: {}",
+            self.node_count, self.prim_count, self.leaf_count
+        )?;
+
+        writeln!(f, "Node & Leaf counts for each depth")?;
+        for i in 0..=self.max_depth {
+            writeln!(
+                f,
+                "{:<3} {:<10} {:<10}",
+                i,
+                self.nodes_at_depth.get(&i).unwrap_or(&0),
+                self.leaves_at_depth.get(&i).unwrap_or(&0)
+            )?;
+        }
+
+        Ok(())
+    }
 }
