@@ -738,7 +738,7 @@ impl CwBvh {
             direct_layout,
             ..Default::default()
         };
-        if self.nodes.len() != 0 {
+        if !self.nodes.is_empty() {
             self.validate_impl(0, Aabb::LARGEST, &mut ctx, primitives);
         }
         //self.print_nodes();
@@ -755,10 +755,10 @@ impl CwBvh {
                         let exact_aabb = exact_node_aabbs[child_node_index];
 
                         // TODO Could these bounds be tighter?
-                        assert!(exact_aabb.min.cmpge((comp_aabb.min - 1.0e-5).into()).all());
-                        assert!(exact_aabb.max.cmple((comp_aabb.max + 1.0e-5).into()).all());
-                        assert!(exact_aabb.min.cmpge((self_aabb.min - 1.0e-5).into()).all());
-                        assert!(exact_aabb.max.cmple((self_aabb.max + 1.0e-5).into()).all());
+                        assert!(exact_aabb.min.cmpge(comp_aabb.min - 1.0e-5).all());
+                        assert!(exact_aabb.max.cmple(comp_aabb.max + 1.0e-5).all());
+                        assert!(exact_aabb.min.cmpge(self_aabb.min - 1.0e-5).all());
+                        assert!(exact_aabb.max.cmple(self_aabb.max + 1.0e-5).all());
                     }
                 }
             }
@@ -899,7 +899,7 @@ impl CwBvh {
         ctx: &mut CwBvhValidateCtx,
         current_depth: usize,
     ) -> usize {
-        if self.nodes.len() == 0 {
+        if self.nodes.is_empty() {
             return 0;
         }
         let node = &self.nodes[node_idx];

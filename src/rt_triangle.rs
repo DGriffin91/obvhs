@@ -33,12 +33,12 @@ impl RtCompressedTriangle {
         Self {
             v0: [v0.x, v0.y, v0.z],
             e1_e2: [
-                f16::from_f32(e1.x).to_bits() as u16,
-                f16::from_f32(e2.x).to_bits() as u16,
-                f16::from_f32(e1.y).to_bits() as u16,
-                f16::from_f32(e2.y).to_bits() as u16,
-                f16::from_f32(e1.z).to_bits() as u16,
-                f16::from_f32(e2.z).to_bits() as u16,
+                f16::from_f32(e1.x).to_bits(),
+                f16::from_f32(e2.x).to_bits(),
+                f16::from_f32(e1.y).to_bits(),
+                f16::from_f32(e2.y).to_bits(),
+                f16::from_f32(e1.z).to_bits(),
+                f16::from_f32(e2.z).to_bits(),
             ],
         }
     }
