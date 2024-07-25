@@ -1,3 +1,67 @@
+//! # BVH Construction and Traversal Library
+//!
+//! - [PLOC](https://meistdan.github.io/publications/ploc/paper.pdf) BVH2 builder with [Parallel Reinsertion](https://meistdan.github.io/publications/prbvh/paper.pdf) and spatial pre-splits.
+//! - [CWBVH](https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf) An eight-way compressed wide BVH8 builder. Each BVH Node is compressed so that it takes up only 80 bytes per node.
+//! - CPU traversal for both BVH2 and CWBVH (SIMD traversal, intersecting 4 nodes at a time)
+//! - For GPU traversal example, see the [Tray Racing](https://github.com/DGriffin91/tray_racing) benchmark
+//!
+//! OBVHS optionally uses [rayon](https://github.com/rayon-rs/rayon) to parallelize building. Many parts of the building process are parallelized, but single threaded building speed has initally been the priority so there is still quite a bit of room for improvement in parallel building performance.
+//!
+//! ## Example
+//!
+//! ```
+//! use glam::*;
+//! use obvhs::{
+//!     cwbvh::builder::build_cwbvh_from_tris,
+//!     ray::{Ray, RayHit},
+//!     test_util::geometry::{icosphere, PLANE},
+//!     triangle::Triangle,
+//!     BvhBuildParams,
+//! };
+//! use std::time::Duration;
+//!
+//! fn main() {
+//!     // Build a scene with an icosphere and a plane
+//!     // BVH primitives do not need to be triangles, the BVH builder is only concerned with AABBs.
+//!     // (With the exception of optional precise triangle aabb splitting)
+//!     let mut tris: Vec<Triangle> = Vec::new();
+//!     tris.extend(icosphere(1));
+//!     tris.extend(PLANE);
+//!
+//!     // Build the BVH.
+//!     // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the
+//!     // respective presets. Feel free to copy the contents of build_cwbvh_from_tris or
+//!     // build_cwbvh. They are very straightforward. If you don't want to use Triangles as the
+//!     // primitive, use  build_cwbvh instead. build_cwbvh_from_tris just adds support for
+//!     // splitting tris.
+//!     let bvh = build_cwbvh_from_tris(
+//!         &tris,
+//!         BvhBuildParams::medium_build(),
+//!         &mut Duration::default(),
+//!     );
+//!
+//!     // Create a new ray
+//!     let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));
+//!
+//!     // Traverse the BVH, finding the closest hit.
+//!     let mut ray_hit = RayHit::none();
+//!     if bvh.ray_traverse(ray, &mut ray_hit, |ray, id| {
+//!         // Use primitive_indices to look up the original primitive id.
+//!         // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see
+//!         // cornell_box_cwbvh example)
+//!         tris[bvh.primitive_indices[id] as usize].intersect(ray)
+//!     }) {
+//!         println!(
+//!             "Hit Triangle {}",
+//!             bvh.primitive_indices[ray_hit.primitive_id as usize]
+//!         );
+//!         println!("Distance to hit: {}", ray_hit.t);
+//!     } else {
+//!         println!("Miss");
+//!     }
+//! }
+//! ```
+
 use std::time::Duration;
 
 use aabb::Aabb;

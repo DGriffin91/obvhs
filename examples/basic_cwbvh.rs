@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use glam::*;
 use obvhs::{
     cwbvh::builder::build_cwbvh_from_tris,
@@ -8,6 +6,7 @@ use obvhs::{
     triangle::Triangle,
     BvhBuildParams,
 };
+use std::time::Duration;
 
 fn main() {
     // Build a scene with an icosphere and a plane
@@ -18,9 +17,11 @@ fn main() {
     tris.extend(PLANE);
 
     // Build the BVH.
-    // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the respective presets.
-    // Feel free to copy the contents of build_cwbvh_from_tris or build_cwbvh. They are very straightforward.
-    // If you don't want to use Triangles as the primitive, use build_cwbvh instead. build_cwbvh_from_tris just adds support for splitting tris.
+    // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the
+    // respective presets. Feel free to copy the contents of build_cwbvh_from_tris or
+    // build_cwbvh. They are very straightforward. If you don't want to use Triangles as the
+    // primitive, use  build_cwbvh instead. build_cwbvh_from_tris just adds support for
+    // splitting tris.
     let bvh = build_cwbvh_from_tris(
         &tris,
         BvhBuildParams::medium_build(),
@@ -34,7 +35,8 @@ fn main() {
     let mut ray_hit = RayHit::none();
     if bvh.ray_traverse(ray, &mut ray_hit, |ray, id| {
         // Use primitive_indices to look up the original primitive id.
-        // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see cornell_box_cwbvh example)
+        // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see
+        // cornell_box_cwbvh example)
         tris[bvh.primitive_indices[id] as usize].intersect(ray)
     }) {
         println!(
