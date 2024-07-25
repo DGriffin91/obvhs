@@ -1,9 +1,9 @@
-/// Traverse the BVH with custom node and primitive intersections.
+/// Traverse a CwBvh with custom node and primitive intersections.
 /// I really didn't want to use a macro but it seems like everything else using closures/yielding is slower given
 /// both generic node and primitive traversal.
 ///
 /// # Parameters
-/// - `$cwbvh`: `&CwBvh` The CWBVH to be traversed.
+/// - `$cwbvh`: `&CwBvh` The CwBvh to be traversed.
 /// - `$node`: `&CwBvhNode` The current node in the BVH that is being traversed.
 /// - `$state`: `Traversal` Mutable traversal state.
 /// - `$node_intersection`: An expression that is executed for each node intersection during traversal.

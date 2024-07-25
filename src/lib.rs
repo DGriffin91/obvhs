@@ -16,7 +16,7 @@ pub mod splits;
 pub mod test_util;
 pub mod triangle;
 
-/// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in BVH2/CWBVH validation.
+/// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
 pub trait Boundable {
     fn aabb(&self) -> Aabb;
 }
@@ -143,7 +143,7 @@ macro_rules! scope {
     };
 }
 
-/// General build parameters for BVH2 & CWBVHs
+/// General build parameters for Bvh2 & CwBvh
 pub struct BvhBuildParams {
     /// Split large tris into multiple AABBs
     pub pre_split: bool,
@@ -155,14 +155,14 @@ pub struct BvhBuildParams {
     /// Typically 0..1: ratio of nodes considered as candidates for reinsertion. Above 1 to evaluate the whole set
     /// multiple times. A little goes a long way. Try 0.01 or even 0.001 before disabling for build performance.
     pub reinsertion_batch_ratio: f32,
-    /// For BVH2 only, a second pass of reinsertion after collapse. Since collapse reduces the node count,
+    /// For Bvh2 only, a second pass of reinsertion after collapse. Since collapse reduces the node count,
     /// this reinsertion pass will be faster. 0 to disable. Relative to the initial reinsertion_batch_ratio.
     pub post_collapse_reinsertion_batch_ratio_multiplier: f32,
     /// Bits used for ploc radix sort.
     pub sort_precision: SortPrecision,
     /// Min 1 (CwBvh will clamp to max 3)
     pub max_prims_per_leaf: u32,
-    /// Multiplier for traversal cost calculation during BVH2 collapse (Does not affect CwBvh). A higher value will
+    /// Multiplier for traversal cost calculation during Bvh2 collapse (Does not affect CwBvh). A higher value will
     /// result in more primitives per leaf.
     pub collapse_traversal_cost: f32,
 }

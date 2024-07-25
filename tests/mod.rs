@@ -155,7 +155,7 @@ mod tests {
             }
         }
 
-        // BVH2
+        // Bvh2
         let bvh2 = build_bvh2_from_tris(
             &tris,
             BvhBuildParams::fast_build(),
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(refrence_count, intersect_count);
         assert_eq!(refrence_intersect_sum, intersect_sum);
 
-        // CWBVH
+        // CwBvh
         let cwbvh = build_cwbvh_from_tris(
             &tris,
             BvhBuildParams::fast_build(),
@@ -214,9 +214,9 @@ mod tests {
     pub fn traverse_point() {
         let tris = icosphere(0);
 
-        // TODO BVH2
+        // TODO Bvh2
 
-        // CWBVH
+        // CwBvh
         let cwbvh = build_cwbvh_from_tris(
             &tris,
             BvhBuildParams::fast_build(),

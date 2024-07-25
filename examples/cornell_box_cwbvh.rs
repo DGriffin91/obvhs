@@ -55,7 +55,7 @@ fn generate_cornell_box() -> Vec<Triangle> {
 
 fn main() {
     let tris = generate_cornell_box();
-    // Build cwbvh (Change this to build_bvh2_from_tris to try with BVH2)
+    // Build cwbvh (Change this to build_bvh2_from_tris to try with Bvh2)
     let bvh = build_cwbvh_from_tris(
         &tris,
         BvhBuildParams::medium_build(),

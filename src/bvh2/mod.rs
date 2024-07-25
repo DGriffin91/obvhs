@@ -23,7 +23,7 @@ use crate::{
     Boundable,
 };
 
-/// A node in the BVH2, can be an inner node or leaf.
+/// A node in the Bvh2, can be an inner node or leaf.
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Bvh2Node {
@@ -557,6 +557,7 @@ impl Bvh2 {
     }
 }
 
+/// Result of Bvh2 validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct Bvh2ValidationResult {
     /// Whether the BVH primitives have splits or not.

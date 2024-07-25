@@ -53,7 +53,7 @@ pub struct TraversalStack32<T: Copy + Default> {
 // TODO allow the user to provide their own stack impl via a Trait.
 // BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no TLAS.
 // A BVH that deep would perform very slowly and would likely indicate that the geometry is degenerate in some way.
-// CwBvh::validate() will assert the CWBVH depth is less than TRAVERSAL_STACK_SIZE
+// CwBvh::validate() will assert the CwBvh depth is less than TRAVERSAL_STACK_SIZE
 impl<T: Copy + Default> TraversalStack32<T> {
     /// Pushes a value onto the stack. If the stack is full it will overwrite the value in the last position.
     #[inline(always)]
@@ -494,7 +494,7 @@ impl CwBvh {
     }
 
     /// Reorder the children of every BVH node. This results in a slightly different order since the normal reordering during
-    /// building is using the aabb's from the BVH2 and this uses the children node.p and node.e to compute the aabb. Traversal
+    /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
     ///
@@ -508,7 +508,7 @@ impl CwBvh {
     }
 
     /// Reorder the children of the given node_idx. This results in a slightly different order since the normal reordering during
-    /// building is using the aabb's from the BVH2 and this uses the children node.p and node.e to compute the aabb. Traversal
+    /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
     ///
@@ -997,6 +997,7 @@ fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
         | if dir.z < 0.0 { 0 } else { 0x01010101 })
 }
 
+/// Result of CwBvh validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct CwBvhValidationResult {
     /// Whether the BVH primitives have splits or not.
