@@ -7,7 +7,7 @@ homepage = "https://github.com/DGriffin91/obvhs"
 repository = "https://github.com/DGriffin91/obvhs"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-keywords = ["bvh", "bounding", "volume", "sah", "aabb", "cwbvh", "ploc"]
+keywords = ["bvh", "sah", "aabb", "cwbvh", "ploc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
