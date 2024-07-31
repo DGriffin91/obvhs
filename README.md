@@ -1,5 +1,8 @@
 # OBVHS - BVH Construction and Traversal Library
 
+![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg) [![Crates.io](https://img.shields.io/crates/v/obvhs.svg)](https://crates.io/crates/obvhs)
+[![Docs](https://docs.rs/obvhs/badge.svg)](https://docs.rs/obvhs/latest/obvhs/)
+
 - [PLOC](https://meistdan.github.io/publications/ploc/paper.pdf) BVH2 builder with [Parallel Reinsertion](https://meistdan.github.io/publications/prbvh/paper.pdf) and spatial pre-splits.
 - [CWBVH](https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf) An eight-way compressed wide BVH8 builder. Each BVH Node is compressed so that it takes up only 80 bytes per node.
 - CPU traversal for both BVH2 and CWBVH (SIMD traversal, intersecting 4 nodes at a time)
