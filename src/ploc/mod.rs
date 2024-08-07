@@ -92,6 +92,8 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
     for (i, prim_index) in indices.iter().enumerate() {
         let aabb = aabbs[i];
+        debug_assert!(!aabb.min.is_nan());
+        debug_assert!(!aabb.max.is_nan());
         total_aabb.extend(aabb.min);
         total_aabb.extend(aabb.max);
         init_leafs.push(Bvh2Node {
@@ -213,6 +215,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
                 prim_count: 0,
                 first_index: insert_index as u32,
             });
+
+            // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
             nodes[insert_index] = left;
             nodes[insert_index + 1] = right;
 
