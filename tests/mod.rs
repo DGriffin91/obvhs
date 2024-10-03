@@ -6,7 +6,10 @@ mod tests {
     use glam::*;
     use obvhs::{
         aabb::Aabb,
-        bvh2::builder::{build_bvh2, build_bvh2_from_tris},
+        bvh2::{
+            builder::{build_bvh2, build_bvh2_from_tris},
+            insertion_removal::build_bvh2_by_insertion,
+        },
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
@@ -377,5 +380,12 @@ mod tests {
         cwbvh.validate(&tris, false, false);
         cwbvh.order_children(&aabbs, false);
         cwbvh.validate(&tris, false, false);
+    }
+
+    #[test]
+    pub fn build_by_insertion() {
+        let tris = demoscene(32, 0);
+        let bvh = build_bvh2_by_insertion(&tris);
+        bvh.validate(&tris, false, false);
     }
 }

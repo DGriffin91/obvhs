@@ -1,6 +1,7 @@
 //! A binary BVH
 
 pub mod builder;
+pub mod insertion_removal;
 pub mod leaf_collapser;
 pub mod reinsertion;
 
@@ -161,7 +162,7 @@ pub struct Bvh2 {
     /// for large scenes without a tlas.
     pub max_depth: Option<usize>,
 }
-const DEFAULT_MAX_STACK_DEPTH: usize = 96;
+pub const DEFAULT_MAX_STACK_DEPTH: usize = 96;
 
 impl Bvh2 {
     #[inline(always)]
