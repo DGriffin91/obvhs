@@ -77,6 +77,10 @@ impl Triangle {
     }
 
     // https://github.com/RenderKit/embree/blob/0c236df6f31a8e9c8a48803dada333e9ea0029a6/kernels/geometry/triangle_intersector_moeller.h#L9
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "sse2"
+    ))]
     pub fn intersect_embree(&self, ray: &Ray) -> f32 {
         // Not watertight from the front side? Looks similar to what above looks like from the back side.
 

@@ -3,6 +3,11 @@
 pub mod builder;
 pub mod bvh2_to_cwbvh;
 pub mod node;
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    target_feature = "sse2"
+))]
 pub mod simd;
 pub mod traverse_macro;
 
