@@ -65,13 +65,19 @@ pub fn insert_leaf_node(
         let cost = direct_cost + inherited_cost_delta;
 
         if cost < min_cost {
-            // If this is not a leaf, it's possible a better cost could be found further down.
-            if !candidate.is_leaf() {
-                stack.push(candidate.first_index);
-                stack.push(candidate.first_index + 1);
-            }
             min_cost = cost;
             best_sibling_candidate_id = current_node_index;
+            // If this is not a leaf, it's possible a better cost could be found further down.
+            if !candidate.is_leaf() {
+                for child_idx in [candidate.first_index, candidate.first_index + 1] {
+                    let child = &bvh.nodes[child_idx as usize];
+                    let min_subtree_cost =
+                        new_node.aabb.union(&child.aabb).half_area() + inherited_cost_delta;
+                    if min_subtree_cost < min_cost {
+                        stack.push(child_idx);
+                    }
+                }
+            }
         }
     }
 
