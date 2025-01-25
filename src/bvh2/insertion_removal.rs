@@ -17,8 +17,9 @@ pub fn remove_node(bvh: &mut Bvh2, node_id: usize, parents: &[u32]) {
     bvh.refit_from_fast(parent_id, &parents);
 }
 
+// The index and inherited_cost of a given candidate sibling used for insertion.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SiblingCandidate {
+pub struct SiblingInsertionCandidate {
     inherited_cost: f32,
     index: u32,
 }
@@ -28,22 +29,33 @@ pub struct SiblingCandidate {
 /// When the best sibling is found, a parent of both the sibling and the new node in put in the location of
 /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
 /// See "Branch and Bound" https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf
+///
+/// # Arguments
+/// * `bvh` - The Bvh2 the new node is being added to
+/// * `new_node` - The new node. This node must be a leaf and already have a valid first_index into primitive_indices
+/// * `parents` - A mapping from a given node index to that node's parent for each node in the bvh. insert_leaf_node
+///     will update this mapping when it inserts a node.
+///  * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
+/// deepest leaf of the BVH. insert_leaf_node() will resize this stack after traversal to be at least 2x the required
+/// size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple nodes. But does
+/// require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be generous. Something like:
+/// `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs don't call bvh.depth(0) with each
+///  leaf just let insert_leaf_node() resize the stack as needed.
 pub fn insert_leaf_node(
     bvh: &mut Bvh2,
     new_node: Bvh2Node,
     parents: &mut Vec<u32>,
-    stack: &mut HeapStack<SiblingCandidate>,
+    stack: &mut HeapStack<SiblingInsertionCandidate>,
 ) {
-    debug_assert!(new_node.is_leaf());
     let mut min_cost = f32::MAX;
     let mut best_sibling_candidate_id = 0;
+    let mut max_stack_len = 1;
 
     stack.clear();
-
     let root_aabb = bvh.nodes[0].aabb;
 
     // Traverse the BVH to find the best sibling
-    stack.push(SiblingCandidate {
+    stack.push(SiblingInsertionCandidate {
         inherited_cost: root_aabb.union(&new_node.aabb).half_area() - root_aabb.half_area(),
         index: 0,
     });
@@ -62,16 +74,21 @@ pub fn insert_leaf_node(
             best_sibling_candidate_id = current_node_index;
             // If this is not a leaf, it's possible a better cost could be found further down.
             if !candidate.is_leaf() {
-                stack.push(SiblingCandidate {
+                stack.push(SiblingInsertionCandidate {
                     inherited_cost,
                     index: candidate.first_index,
                 });
-                stack.push(SiblingCandidate {
+                stack.push(SiblingInsertionCandidate {
                     inherited_cost,
                     index: candidate.first_index + 1,
                 });
+                max_stack_len = stack.len().max(max_stack_len);
             }
         }
+    }
+
+    if max_stack_len * 2 > stack.cap() {
+        stack.reserve(max_stack_len * 2);
     }
 
     let best_sibling_candidate = bvh.nodes[best_sibling_candidate_id];

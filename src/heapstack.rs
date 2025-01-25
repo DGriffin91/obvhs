@@ -88,6 +88,15 @@ impl<T: Clone + Default> HeapStack<T> {
         self.index
     }
 
+    /// Returns the capacity of the stack.
+    ///
+    /// # Returns
+    /// The capacity of the stack.
+    #[inline(always)]
+    pub fn cap(&self) -> usize {
+        self.data.len()
+    }
+
     /// Returns true if the stack is empty.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
