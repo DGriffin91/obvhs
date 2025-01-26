@@ -6,15 +6,93 @@ use crate::{
     Boundable,
 };
 
-pub fn remove_node(bvh: &mut Bvh2, node_id: usize, parents: &[u32]) {
-    // TODO if this node is not a leaf, remove sub-tree?
-    // Or maybe this would be in a different fn that would let you extract the subtree
-    // TODO Use something like reorder_in_stack_traversal_order to clean up the bvh
-    debug_assert!(node_id != 0);
-    let parent_id = parents[node_id] as usize;
+/// Removes and returns the leaf specified by `node_id`.
+/// Puts `node_id` sibling in its parents place then moves the last two nodes in the now empty slots at `node_id` and
+/// its sibling.
+///
+/// Doesn't update the primitive_indices mapping. If this node is just going to be re-inserted again, nothing needs to
+/// be done with primitive_indices, the mapping will still be valid. If this primitive needs to be removed permanently,
+/// primitive_indices would need to be updated. If nodes have multiple primitives it would probably be best to just
+/// rebuild primitive_indices occasionally, cleaning up removed primitives. If not, a free list could be used.
+/// primitive_indices would also need to be updated if the primitive index it's pointing to was removed, so this really
+/// probably needs to be managed by the user anyway.
+///
+/// # Arguments
+/// * `bvh` - The Bvh2 the new node is being added to
+/// * `node_id` - The index into bvh.nodes of the node that is to be removed
+/// * `parents` - A mapping from a given node index to that node's parent for each node in the bvh. insert_leaf_node
+///     will update this mapping when it inserts a node.
+pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bvh2Node {
+    // vvv TODO vvv
+    // vvv TODO vvv
+    // Currently broken, something in the id reassignment (maybe in parents) is incorrect and leads to nodes pointing to
+    // parents that are leafs. (leafs can't be parents)
+    // ^^^ TODO ^^^
+    // ^^^ TODO ^^^
+
+    // TODO handle BVHs with 3 or less nodes
+
+    let node_to_remove = bvh.nodes[node_id];
+    assert!(node_to_remove.is_leaf());
     let sibling_id = Bvh2Node::get_sibling_id(node_id);
+    assert_eq!(parents[node_id], parents[sibling_id]); // Both children should already have the same parent.
+    let parent_id = parents[node_id] as usize;
+    // Put sibling in parent's place (parent doesn't exist anymore)
     bvh.nodes[parent_id] = bvh.nodes[sibling_id];
+    // Don't need to update parents here since the parent that was for this `parent_id` slot is now the direct parent of
+    // the moved sibling, and the parents of `node_id` and `sibling_id` are updated below.
+
+    // Now slots at both node_id and sibling_id are empty.
+    // Take the last two nodes "src" and put them in those now empty "dst" slots.
+    let end_nodes = node_id >= bvh.nodes.len() - 2;
+    if end_nodes {
+        // If these were already the last 2 nodes in the list we can just discard both.
+        bvh.nodes.pop().unwrap();
+        bvh.nodes.pop().unwrap();
+        parents.pop().unwrap();
+        parents.pop().unwrap();
+    } else {
+        let dst_left_id = Bvh2Node::get_left_sibling_id(node_id);
+        let dst_right_id = Bvh2Node::get_right_sibling_id(node_id);
+
+        let src_left_id = bvh.nodes.len() as u32 - 2;
+        let src_right_id = Bvh2Node::get_sibling_id32(src_left_id);
+        let src_right_parent = parents.pop().unwrap();
+        let src_left_parent = parents.pop().unwrap();
+
+        parents[dst_left_id] = src_left_parent;
+        parents[dst_right_id] = src_right_parent;
+
+        assert_eq!(src_left_parent, src_right_parent); // Both children should already have the same parent.
+        let parent_of_relocated = &mut bvh.nodes[src_left_parent as usize];
+        assert!(!parent_of_relocated.is_leaf());
+        assert_eq!(parent_of_relocated.first_index, src_left_id);
+        assert_eq!(parent_of_relocated.first_index + 1, src_right_id);
+        // Tell the actual parent of the nodes that are moving where they're going to be now.
+        bvh.nodes[src_left_parent as usize].first_index = dst_left_id as u32;
+
+        let right_src_sibling = bvh.nodes.pop().unwrap(); // Last node is right src sibling
+        if !right_src_sibling.is_leaf() {
+            // Go to children of right_src_sibling and tell them where their parents went
+            parents[right_src_sibling.first_index as usize] = dst_right_id as u32;
+            parents[right_src_sibling.first_index as usize + 1] = dst_right_id as u32;
+        }
+        bvh.nodes[dst_right_id] = right_src_sibling;
+
+        let left_src_sibling = bvh.nodes.pop().unwrap(); // Second to last node is left src sibling
+        if !left_src_sibling.is_leaf() {
+            // Go to children of left_src_sibling and tell them where their parents went
+            parents[left_src_sibling.first_index as usize] = dst_left_id as u32;
+            parents[left_src_sibling.first_index as usize + 1] = dst_left_id as u32;
+        }
+        bvh.nodes[dst_left_id] = left_src_sibling;
+    }
+
+    // Need to work up the tree updating the aabbs since we just removed a node.
     bvh.refit_from_fast(parent_id, &parents);
+
+    // Return the removed node.
+    node_to_remove
 }
 
 // The index and inherited_cost of a given candidate sibling used for insertion.
@@ -30,23 +108,27 @@ pub struct SiblingInsertionCandidate {
 /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
 /// See "Branch and Bound" https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf
 ///
+/// # Returns
+/// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
+///
 /// # Arguments
 /// * `bvh` - The Bvh2 the new node is being added to
 /// * `new_node` - The new node. This node must be a leaf and already have a valid first_index into primitive_indices
 /// * `parents` - A mapping from a given node index to that node's parent for each node in the bvh. insert_leaf_node
 ///     will update this mapping when it inserts a node.
-///  * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
-/// deepest leaf of the BVH. insert_leaf_node() will resize this stack after traversal to be at least 2x the required
-/// size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple nodes. But does
-/// require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be generous. Something like:
-/// `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs don't call bvh.depth(0) with each
-///  leaf just let insert_leaf_node() resize the stack as needed.
+/// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
+///     deepest leaf of the BVH. insert_leaf_node() will resize this stack after traversal to be at least 2x the required
+///     size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple nodes. But does
+///     require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be generous. Something like:
+///     `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs don't call bvh.depth(0) with each
+///      leaf just let insert_leaf_node() resize the stack as needed.
 pub fn insert_leaf_node(
     bvh: &mut Bvh2,
     new_node: Bvh2Node,
     parents: &mut Vec<u32>,
     stack: &mut HeapStack<SiblingInsertionCandidate>,
-) {
+) -> usize {
+    assert!(new_node.is_leaf());
     let mut min_cost = f32::MAX;
     let mut best_sibling_candidate_id = 0;
     let mut max_stack_len = 1;
@@ -114,11 +196,13 @@ pub fn insert_leaf_node(
         parents[best_sibling_candidate.first_index as usize + 1] = new_sibling_id;
     }
     bvh.nodes.push(best_sibling_candidate);
-    bvh.nodes.push(new_node);
+    let new_node_id = bvh.nodes.len();
+    bvh.nodes.push(new_node); // Put the new node at the very end.
     parents.push(new_parent_id as u32);
     parents.push(new_parent_id as u32);
     // Need to work up the tree updating the aabbs since we just added a node.
     bvh.refit_from_fast(new_parent_id, &parents);
+    new_node_id
 }
 
 /// Slow at building, makes a slow bvh, just for testing insertion.
@@ -142,7 +226,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     let mut stack = HeapStack::new_with_capacity(1000);
 
-    let mut parents = bvh.compute_parents(); // TODO update on insert
+    let mut parents = bvh.compute_parents();
     for prim_id in 1..primitives.len() {
         insert_leaf_node(
             &mut bvh,
@@ -157,4 +241,25 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     }
 
     bvh
+}
+
+/// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
+/// optimize a BVH2
+pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
+    let mut stack = HeapStack::new_with_capacity(1000);
+    let mut parents = bvh.compute_parents();
+    for node_id in 1..bvh.nodes.len() {
+        if bvh.nodes.len() <= node_id {
+            break;
+        }
+        if bvh.nodes[node_id].is_leaf() {
+            //dbg!(node_id, bvh.nodes.len());
+            // Assert that the parent of this node is not a leaf (a parent could never be a leaf)
+            assert!(!bvh.nodes[parents[node_id] as usize].is_leaf());
+            // If the node is a leaf, remove it
+            let removed_leaf = remove_leaf(bvh, node_id, &mut parents);
+            // Insert it again, maybe it will find a better spot
+            insert_leaf_node(bvh, removed_leaf, &mut parents, &mut stack);
+        }
+    }
 }
