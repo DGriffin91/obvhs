@@ -3,7 +3,7 @@ use core::f32;
 use crate::{
     bvh2::{Bvh2, Bvh2Node},
     heapstack::HeapStack,
-    Boundable,
+    Boundable, INVALID,
 };
 
 /// Removes and returns the leaf specified by `node_id`.
@@ -22,10 +22,34 @@ use crate::{
 /// * `node_id` - The index into bvh.nodes of the node that is to be removed
 /// * `parents` - A mapping from a given node index to that node's parent for each node in the bvh. insert_leaf_node
 ///     will update this mapping when it inserts a node.
-pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bvh2Node {
-    // TODO handle BVHs with 3 or less nodes
-
+/// * `primitives_to_nodes` - A mapping from primitives back to nodes (may eventually be optionally included in the Bvh2)
+pub fn remove_leaf(
+    bvh: &mut Bvh2,
+    node_id: usize,
+    parents: &mut Vec<u32>,
+    mut primitives_to_nodes: Option<&mut Vec<u32>>,
+) -> Bvh2Node {
     let node_to_remove = bvh.nodes[node_id];
+
+    if bvh.nodes.len() == 1 {
+        // Special case if the BVH is just a leaf
+        bvh.nodes.clear();
+        parents.clear();
+        if let Some(primitives_to_nodes) = primitives_to_nodes {
+            primitives_to_nodes.clear();
+        }
+        return node_to_remove;
+    }
+
+    if let Some(primitives_to_nodes) = primitives_to_nodes.as_deref_mut() {
+        // Invalidate primitives_to_nodes instances
+        for prim_id in
+            node_to_remove.first_index..node_to_remove.first_index + node_to_remove.prim_count
+        {
+            primitives_to_nodes[prim_id as usize] = INVALID;
+        }
+    }
+
     assert!(node_to_remove.is_leaf());
     let sibling_id = Bvh2Node::get_sibling_id(node_id);
     debug_assert_eq!(parents[node_id], parents[sibling_id]); // Both children should already have the same parent.
@@ -33,9 +57,17 @@ pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bv
 
     // Put sibling in parent's place (parent doesn't exist anymore)
     bvh.nodes[parent_id] = bvh.nodes[sibling_id];
-    if !bvh.nodes[parent_id].is_leaf() {
+    let sibling = &mut bvh.nodes[parent_id];
+    if sibling.is_leaf() {
+        if let Some(primitives_to_nodes) = primitives_to_nodes.as_deref_mut() {
+            // Tell primitives where their node went.
+            for prim_id in sibling.first_index..sibling.first_index + sibling.prim_count {
+                primitives_to_nodes[prim_id as usize] = parent_id as u32;
+            }
+        }
+    } else {
         // Tell children of sibling where their parent went.
-        let left_sibling_child = bvh.nodes[parent_id].first_index as usize;
+        let left_sibling_child = sibling.first_index as usize;
         parents[left_sibling_child] = parent_id as u32;
         parents[left_sibling_child + 1] = parent_id as u32;
     }
@@ -72,15 +104,33 @@ pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bv
         bvh.nodes[src_left_parent as usize].first_index = dst_left_id as u32;
 
         let right_src_sibling = bvh.nodes.pop().unwrap(); // Last node is right src sibling
-        if !right_src_sibling.is_leaf() {
+        if right_src_sibling.is_leaf() {
+            if let Some(ref mut primitives_to_nodes) = primitives_to_nodes {
+                // Tell primitives where their node went.
+                let start = right_src_sibling.first_index;
+                let end = right_src_sibling.first_index + right_src_sibling.prim_count;
+                for prim_id in start..end {
+                    primitives_to_nodes[prim_id as usize] = dst_right_id as u32;
+                }
+            }
+        } else {
             // Go to children of right_src_sibling and tell them where their parent went
             parents[right_src_sibling.first_index as usize] = dst_right_id as u32;
             parents[right_src_sibling.first_index as usize + 1] = dst_right_id as u32;
         }
         bvh.nodes[dst_right_id] = right_src_sibling;
 
-        let left_src_sibling = bvh.nodes.pop().unwrap(); // Second to last node is left src sibling
-        if !left_src_sibling.is_leaf() {
+        let left_src_sibling = bvh.nodes.pop().unwrap(); // Last node is left src sibling
+        if left_src_sibling.is_leaf() {
+            if let Some(ref mut primitives_to_nodes) = primitives_to_nodes {
+                // Tell primitives where their node went.
+                let start = left_src_sibling.first_index;
+                let end = left_src_sibling.first_index + left_src_sibling.prim_count;
+                for prim_id in start..end {
+                    primitives_to_nodes[prim_id as usize] = dst_left_id as u32;
+                }
+            }
+        } else {
             // Go to children of left_src_sibling and tell them where their parent went
             parents[left_src_sibling.first_index as usize] = dst_left_id as u32;
             parents[left_src_sibling.first_index as usize + 1] = dst_left_id as u32;
@@ -97,7 +147,7 @@ pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bv
     }
 
     // Need to work up the tree updating the aabbs since we just removed a node.
-    bvh.refit_from(parent_id, &parents);
+    bvh.refit_from_fast(parent_id, &parents);
 
     // Return the removed node.
     node_to_remove
@@ -130,11 +180,13 @@ pub struct SiblingInsertionCandidate {
 ///     require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be generous. Something like:
 ///     `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs don't call bvh.depth(0) with each
 ///      leaf just let insert_leaf_node() resize the stack as needed.
+/// * `primitives_to_nodes` - A mapping from primitives back to nodes (may eventually be optionally included in the Bvh2)
 pub fn insert_leaf_node(
     bvh: &mut Bvh2,
     new_node: Bvh2Node,
     parents: &mut Vec<u32>,
     stack: &mut HeapStack<SiblingInsertionCandidate>,
+    mut primitives_to_nodes: Option<&mut Vec<u32>>,
 ) -> usize {
     assert!(new_node.is_leaf());
     let mut min_cost = f32::MAX;
@@ -197,9 +249,18 @@ pub fn insert_leaf_node(
     let new_parent_id = best_sibling_candidate_id;
     bvh.nodes[new_parent_id] = new_parent;
 
-    // If the best selected sibling was an inner node, we need to update the parents mapping so that the children of
-    // that node point to the new location that it's being moved to.
-    if !best_sibling_candidate.is_leaf() {
+    if best_sibling_candidate.is_leaf() {
+        if let Some(primitives_to_nodes) = primitives_to_nodes.as_deref_mut() {
+            // Tell primitives where their node went.
+            let start = best_sibling_candidate.first_index;
+            let end = best_sibling_candidate.first_index + best_sibling_candidate.prim_count;
+            for prim_id in start..end {
+                primitives_to_nodes[prim_id as usize] = new_sibling_id;
+            }
+        }
+    } else {
+        // If the best selected sibling was an inner node, we need to update the parents mapping so that the children of
+        // that node point to the new location that it's being moved to.
         parents[best_sibling_candidate.first_index as usize] = new_sibling_id;
         parents[best_sibling_candidate.first_index as usize + 1] = new_sibling_id;
     }
@@ -208,8 +269,22 @@ pub fn insert_leaf_node(
     bvh.nodes.push(new_node); // Put the new node at the very end.
     parents.push(new_parent_id as u32);
     parents.push(new_parent_id as u32);
+
+    if let Some(primitives_to_nodes) = primitives_to_nodes.as_deref_mut() {
+        // Update primitive to node mapping
+        let start = new_node.first_index;
+        let end = new_node.first_index + new_node.prim_count;
+        if primitives_to_nodes.len() < end as usize {
+            primitives_to_nodes.resize(end as usize, 0);
+        }
+        for prim_id in start..end {
+            primitives_to_nodes[prim_id as usize] = new_node_id as u32;
+        }
+    }
+
     // Need to work up the tree updating the aabbs since we just added a node.
     bvh.refit_from_fast(new_parent_id, &parents);
+
     new_node_id
 }
 
@@ -234,6 +309,8 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     let mut stack = HeapStack::new_with_capacity(1000);
 
+    let mut primitives_to_nodes = vec![INVALID; primitives.len()];
+
     let mut parents = bvh.compute_parents();
     for prim_id in 1..primitives.len() {
         insert_leaf_node(
@@ -245,7 +322,15 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
             },
             &mut parents,
             &mut stack,
+            Some(&mut primitives_to_nodes),
         );
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        bvh.validate_primitives_to_nodes(&primitives_to_nodes);
+        bvh.validate(primitives, false, false);
+        bvh.validate_parents(&parents);
     }
 
     bvh
@@ -254,9 +339,12 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 /// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
 /// optimize a BVH2. This currently actually tends to make a good bvh slower since doing a lot of insert_leaf_node tends
 /// to result in very deep BVHs.
-pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
+pub fn slow_leaf_reinsertion(
+    bvh: &mut Bvh2,
+    parents: &mut Vec<u32>,
+    mut primitives_to_nodes: Option<&mut Vec<u32>>,
+) {
     let mut stack = HeapStack::new_with_capacity(1000);
-    let mut parents = bvh.compute_parents();
     for node_id in 1..bvh.nodes.len() {
         if bvh.nodes.len() <= node_id {
             break;
@@ -265,9 +353,92 @@ pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
             // Assert that the parent of this node is not a leaf (a parent could never be a leaf)
             assert!(!bvh.nodes[parents[node_id] as usize].is_leaf());
             // If the node is a leaf, remove it
-            let removed_leaf = remove_leaf(bvh, node_id, &mut parents);
+            let removed_leaf =
+                remove_leaf(bvh, node_id, parents, primitives_to_nodes.as_deref_mut());
             // Insert it again, maybe it will find a better spot
-            insert_leaf_node(bvh, removed_leaf, &mut parents, &mut stack);
+            insert_leaf_node(
+                bvh,
+                removed_leaf,
+                parents,
+                &mut stack,
+                primitives_to_nodes.as_deref_mut(),
+            );
         }
+    }
+    #[cfg(debug_assertions)]
+    {
+        bvh.validate_parents(&parents);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::{bvh2::builder::build_bvh2, test_util::geometry::demoscene, BvhBuildParams};
+
+    #[test]
+    fn build_by_insertion() {
+        for res in 30..=32 {
+            let tris = demoscene(res, 0);
+            let bvh = build_bvh2_by_insertion(&tris);
+            bvh.validate(&tris, false, false);
+        }
+    }
+
+    #[test]
+    fn test_slow_leaf_reinsertion() {
+        for res in 30..=32 {
+            let tris = demoscene(res, 0);
+
+            let mut bvh = build_bvh2(
+                &tris,
+                BvhBuildParams::fastest_build(),
+                &mut Duration::default(),
+            );
+            let mut primitives_to_nodes = bvh.compute_primitives_to_nodes(tris.len());
+            bvh.validate(&tris, false, false);
+            let mut parents = bvh.compute_parents();
+            slow_leaf_reinsertion(&mut bvh, &mut parents, Some(&mut primitives_to_nodes));
+            bvh.validate(&tris, false, false);
+            bvh.validate_parents(&parents);
+            bvh.validate_primitives_to_nodes(&primitives_to_nodes);
+            bvh.reorder_in_stack_traversal_order();
+            bvh.validate(&tris, false, false);
+        }
+    }
+
+    #[test]
+    fn remove_all_primitives() {
+        let tris = demoscene(16, 0);
+        let mut bvh = build_bvh2(
+            &tris,
+            BvhBuildParams::fastest_build(),
+            &mut Duration::default(),
+        );
+        let mut parents = bvh.compute_parents();
+        let mut primitives_to_nodes = bvh.compute_primitives_to_nodes(tris.len());
+
+        bvh.validate_parents(&parents);
+        bvh.validate_primitives_to_nodes(&primitives_to_nodes);
+        bvh.validate(&tris, true, false);
+
+        for prim_id in 0..tris.len() {
+            let node_id = primitives_to_nodes[prim_id];
+            let _removed_node = remove_leaf(
+                &mut bvh,
+                node_id as usize,
+                &mut parents,
+                Some(&mut primitives_to_nodes),
+            );
+            bvh.validate_parents(&parents);
+            bvh.validate_primitives_to_nodes(&primitives_to_nodes);
+            bvh.validate(&tris, true, false);
+        }
+
+        bvh.validate_parents(&parents);
+        bvh.validate_primitives_to_nodes(&primitives_to_nodes);
+        bvh.validate(&tris, true, false);
     }
 }

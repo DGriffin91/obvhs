@@ -21,14 +21,14 @@ use crate::{
     aabb::Aabb,
     heapstack::HeapStack,
     ray::{Ray, RayHit},
-    Boundable,
+    Boundable, INVALID,
 };
 
 /// A node in the Bvh2, can be an inner node or leaf.
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct Bvh2Node {
-    /// The bounding box for the primitive(s) contain in this node
+    /// The bounding box for the primitive(s) contained in this node
     pub aabb: Aabb,
     /// Number of primitives contained in this node.
     /// If prim_count is 0, this is a inner node.
@@ -346,6 +346,70 @@ impl Bvh2 {
         parents
     }
 
+    /// A mapping from primitives back to nodes (may eventually be optionally included in the Bvh2)
+    pub fn compute_primitives_to_nodes(&self, primitive_count: usize) -> Vec<u32> {
+        let mut primitives_to_nodes = vec![0u32; primitive_count];
+        for (node_id, node) in self.nodes.iter().enumerate() {
+            if node.is_leaf() {
+                let start = node.first_index;
+                let end = node.first_index + node.prim_count;
+                for prim_id in start..end {
+                    primitives_to_nodes[prim_id as usize] = node_id as u32;
+                }
+            }
+        }
+        primitives_to_nodes
+    }
+
+    // Seems around 80% faster than compute_parents.
+    // TODO is there a better way to parallelize?
+    #[cfg(feature = "parallel")]
+    pub fn compute_parents_parallel(&self) -> Vec<u32> {
+        let parents: Vec<AtomicU32> = (0..self.nodes.len()).map(|_| AtomicU32::new(0)).collect();
+
+        parents[0].store(0, Ordering::Relaxed);
+
+        self.nodes.par_iter().enumerate().for_each(|(i, node)| {
+            if !node.is_leaf() {
+                parents[node.first_index as usize].store(i as u32, Ordering::Relaxed);
+                parents[node.first_index as usize + 1].store(i as u32, Ordering::Relaxed);
+            }
+        });
+
+        parents
+            .into_iter()
+            .map(|a| a.load(Ordering::Relaxed))
+            .collect()
+    }
+
+    pub fn validate_parents(&self, parents: &[u32]) {
+        self.nodes.iter().enumerate().for_each(|(i, node)| {
+            if !node.is_leaf() {
+                assert_eq!(parents[node.first_index as usize], i as u32);
+                assert_eq!(parents[node.first_index as usize + 1], i as u32);
+            }
+        });
+    }
+
+    pub fn validate_primitives_to_nodes(&self, primitive_to_node: &[u32]) {
+        primitive_to_node
+            .iter()
+            .enumerate()
+            .for_each(|(prim_id, node_id)| {
+                if *node_id != INVALID {
+                    let prim_id = prim_id as u32;
+                    let node = &self.nodes[*node_id as usize];
+                    assert!(node.is_leaf());
+                    let start = node.first_index;
+                    let end = node.first_index + node.prim_count;
+                    assert!(
+                        prim_id >= start && prim_id < end,
+                        "prim_id {prim_id} not in {start}..{end}",
+                    )
+                }
+            });
+    }
+
     /// Refit the BVH working up the tree from this node, ignoring leaves. (TODO add a version that checks leaves)
     /// This recomputes the Aabbs for all the parents of the given node index.
     /// This can only be used to refit when a single node has changed or moved.
@@ -402,7 +466,7 @@ impl Bvh2 {
         direct_layout: bool,
         splits: bool,
     ) -> Bvh2ValidationResult {
-        if !splits {
+        if !splits || direct_layout {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());
         }
@@ -417,11 +481,14 @@ impl Bvh2 {
         }
         assert_eq!(result.discovered_nodes.len(), self.nodes.len());
         assert_eq!(result.node_count, self.nodes.len());
-        assert_eq!(
-            result.discovered_primitives.len(),
-            self.primitive_indices.len()
-        );
-        assert_eq!(result.prim_count, self.primitive_indices.len());
+        if !direct_layout {
+            // Ignore primitive_indices if this is a direct layout
+            assert_eq!(
+                result.discovered_primitives.len(),
+                self.primitive_indices.len()
+            );
+            assert_eq!(result.prim_count, self.primitive_indices.len());
+        }
         assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
 
         result
@@ -501,27 +568,6 @@ impl Bvh2 {
                 current_depth + 1,
             );
         }
-    }
-
-    // Seems around 80% faster than compute_parents.
-    // TODO is there a better way to parallelize?
-    #[cfg(feature = "parallel")]
-    pub fn compute_parents_parallel(&self) -> Vec<u32> {
-        let parents: Vec<AtomicU32> = (0..self.nodes.len()).map(|_| AtomicU32::new(0)).collect();
-
-        parents[0].store(0, Ordering::Relaxed);
-
-        self.nodes.par_iter().enumerate().for_each(|(i, node)| {
-            if !node.is_leaf() {
-                parents[node.first_index as usize].store(i as u32, Ordering::Relaxed);
-                parents[node.first_index as usize + 1].store(i as u32, Ordering::Relaxed);
-            }
-        });
-
-        parents
-            .into_iter()
-            .map(|a| a.load(Ordering::Relaxed))
-            .collect()
     }
 
     /// Basic debug print illustrating the bvh layout

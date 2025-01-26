@@ -80,6 +80,8 @@ pub mod splits;
 pub mod test_util;
 pub mod triangle;
 
+pub const INVALID: u32 = u32::MAX;
+
 /// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
 pub trait Boundable {
     fn aabb(&self) -> Aabb;

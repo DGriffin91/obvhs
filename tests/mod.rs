@@ -6,10 +6,7 @@ mod tests {
     use glam::*;
     use obvhs::{
         aabb::Aabb,
-        bvh2::{
-            builder::{build_bvh2, build_bvh2_from_tris},
-            insertion_removal::build_bvh2_by_insertion,
-        },
+        bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
@@ -380,29 +377,5 @@ mod tests {
         cwbvh.validate(&tris, false, false);
         cwbvh.order_children(&aabbs, false);
         cwbvh.validate(&tris, false, false);
-    }
-
-    #[test]
-    pub fn build_by_insertion() {
-        let tris = demoscene(32, 0);
-        let bvh = build_bvh2_by_insertion(&tris);
-        bvh.validate(&tris, false, false);
-    }
-
-    #[test]
-    pub fn slow_leaf_reinsertion() {
-        for seed in [0, 1] {
-            let tris = demoscene(32, seed);
-            let mut bvh = build_bvh2(
-                &tris,
-                BvhBuildParams::fastest_build(),
-                &mut Duration::default(),
-            );
-            bvh.validate(&tris, false, false);
-            obvhs::bvh2::insertion_removal::slow_leaf_reinsertion(&mut bvh);
-            bvh.validate(&tris, false, false);
-            bvh.reorder_in_stack_traversal_order();
-            bvh.validate(&tris, false, false);
-        }
     }
 }
