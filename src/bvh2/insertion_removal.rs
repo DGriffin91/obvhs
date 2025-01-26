@@ -23,24 +23,24 @@ use crate::{
 /// * `parents` - A mapping from a given node index to that node's parent for each node in the bvh. insert_leaf_node
 ///     will update this mapping when it inserts a node.
 pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bvh2Node {
-    // vvv TODO vvv
-    // vvv TODO vvv
-    // Currently broken, something in the id reassignment (maybe in parents) is incorrect and leads to nodes pointing to
-    // parents that are leafs. (leafs can't be parents)
-    // ^^^ TODO ^^^
-    // ^^^ TODO ^^^
-
     // TODO handle BVHs with 3 or less nodes
 
     let node_to_remove = bvh.nodes[node_id];
     assert!(node_to_remove.is_leaf());
     let sibling_id = Bvh2Node::get_sibling_id(node_id);
-    assert_eq!(parents[node_id], parents[sibling_id]); // Both children should already have the same parent.
-    let parent_id = parents[node_id] as usize;
+    debug_assert_eq!(parents[node_id], parents[sibling_id]); // Both children should already have the same parent.
+    let mut parent_id = parents[node_id] as usize;
+
     // Put sibling in parent's place (parent doesn't exist anymore)
     bvh.nodes[parent_id] = bvh.nodes[sibling_id];
-    // Don't need to update parents here since the parent that was for this `parent_id` slot is now the direct parent of
-    // the moved sibling, and the parents of `node_id` and `sibling_id` are updated below.
+    if !bvh.nodes[parent_id].is_leaf() {
+        // Tell children of sibling where their parent went.
+        let left_sibling_child = bvh.nodes[parent_id].first_index as usize;
+        parents[left_sibling_child] = parent_id as u32;
+        parents[left_sibling_child + 1] = parent_id as u32;
+    }
+    // Don't need to update other parents here since the parent that was for this `parent_id` slot is now the direct
+    // parent of the moved sibling, and the parents of `node_id` and `sibling_id` are updated below.
 
     // Now slots at both node_id and sibling_id are empty.
     // Take the last two nodes "src" and put them in those now empty "dst" slots.
@@ -63,17 +63,17 @@ pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bv
         parents[dst_left_id] = src_left_parent;
         parents[dst_right_id] = src_right_parent;
 
-        assert_eq!(src_left_parent, src_right_parent); // Both children should already have the same parent.
+        debug_assert_eq!(src_left_parent, src_right_parent); // Both children should already have the same parent.
         let parent_of_relocated = &mut bvh.nodes[src_left_parent as usize];
-        assert!(!parent_of_relocated.is_leaf());
-        assert_eq!(parent_of_relocated.first_index, src_left_id);
-        assert_eq!(parent_of_relocated.first_index + 1, src_right_id);
+        debug_assert!(!parent_of_relocated.is_leaf());
+        debug_assert_eq!(parent_of_relocated.first_index, src_left_id);
+        debug_assert_eq!(parent_of_relocated.first_index + 1, src_right_id);
         // Tell the actual parent of the nodes that are moving where they're going to be now.
         bvh.nodes[src_left_parent as usize].first_index = dst_left_id as u32;
 
         let right_src_sibling = bvh.nodes.pop().unwrap(); // Last node is right src sibling
         if !right_src_sibling.is_leaf() {
-            // Go to children of right_src_sibling and tell them where their parents went
+            // Go to children of right_src_sibling and tell them where their parent went
             parents[right_src_sibling.first_index as usize] = dst_right_id as u32;
             parents[right_src_sibling.first_index as usize + 1] = dst_right_id as u32;
         }
@@ -81,15 +81,23 @@ pub fn remove_leaf(bvh: &mut Bvh2, node_id: usize, parents: &mut Vec<u32>) -> Bv
 
         let left_src_sibling = bvh.nodes.pop().unwrap(); // Second to last node is left src sibling
         if !left_src_sibling.is_leaf() {
-            // Go to children of left_src_sibling and tell them where their parents went
+            // Go to children of left_src_sibling and tell them where their parent went
             parents[left_src_sibling.first_index as usize] = dst_left_id as u32;
             parents[left_src_sibling.first_index as usize + 1] = dst_left_id as u32;
         }
         bvh.nodes[dst_left_id] = left_src_sibling;
+
+        // If the to be removed node's parent was at the end of the array and has now moved update parent_id:
+        if parent_id as u32 == src_left_id {
+            parent_id = dst_left_id;
+        }
+        if parent_id as u32 == src_right_id {
+            parent_id = dst_right_id;
+        }
     }
 
     // Need to work up the tree updating the aabbs since we just removed a node.
-    bvh.refit_from_fast(parent_id, &parents);
+    bvh.refit_from(parent_id, &parents);
 
     // Return the removed node.
     node_to_remove
@@ -103,8 +111,8 @@ pub struct SiblingInsertionCandidate {
 }
 
 /// Searches through tree recursively to find the best sibling for the node being inserted. The best sibling is
-/// classified as the sibling that if chosen would increase the surface area of the BVH the least.
-/// When the best sibling is found, a parent of both the sibling and the new node in put in the location of
+/// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
+/// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
 /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
 /// See "Branch and Bound" https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf
 ///
@@ -244,7 +252,8 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 }
 
 /// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
-/// optimize a BVH2
+/// optimize a BVH2. This currently actually tends to make a good bvh slower since doing a lot of insert_leaf_node tends
+/// to result in very deep BVHs.
 pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
     let mut stack = HeapStack::new_with_capacity(1000);
     let mut parents = bvh.compute_parents();
@@ -253,7 +262,6 @@ pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
             break;
         }
         if bvh.nodes[node_id].is_leaf() {
-            //dbg!(node_id, bvh.nodes.len());
             // Assert that the parent of this node is not a leaf (a parent could never be a leaf)
             assert!(!bvh.nodes[parents[node_id] as usize].is_leaf());
             // If the node is a leaf, remove it
