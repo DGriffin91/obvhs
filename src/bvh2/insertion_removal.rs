@@ -1,6 +1,7 @@
 use core::f32;
 
 use crate::{
+    aabb::Aabb,
     bvh2::{Bvh2, Bvh2Node},
     heapstack::HeapStack,
     Boundable, INVALID,
@@ -20,18 +21,15 @@ impl Bvh2 {
     ///
     /// Doesn't update the primitive_indices mapping. If this node is just going to be re-inserted again, nothing needs
     /// to be done with primitive_indices, the mapping will still be valid. If this primitive needs to be removed
-    /// permanently, primitive_indices would need to be updated. If nodes have multiple primitives it would probably be
-    /// best to just rebuild primitive_indices occasionally, cleaning up removed primitives. If not, a free list could
-    /// be used. primitive_indices would also need to be updated if the primitive index it's pointing to was removed, so
-    /// this really probably needs to be managed by the user anyway.
+    /// permanently see Bvh2::remove_primitive().
     ///
     /// # Arguments
-    /// * `bvh` - The Bvh2 the new node is being added to
     /// * `node_id` - The index into self.nodes of the node that is to be removed
     pub fn remove_leaf(&mut self, node_id: usize) -> Bvh2Node {
         let parents = self.parents.as_mut().unwrap();
 
         let node_to_remove = self.nodes[node_id];
+        assert!(node_to_remove.is_leaf());
 
         if self.nodes.len() == 1 {
             // Special case if the BVH is just a leaf
@@ -45,14 +43,14 @@ impl Bvh2 {
 
         if let Some(primitives_to_nodes) = self.primitives_to_nodes.as_deref_mut() {
             // Invalidate primitives_to_nodes instances
-            for prim_id in
+            for node_prim_id in
                 node_to_remove.first_index..node_to_remove.first_index + node_to_remove.prim_count
             {
-                primitives_to_nodes[prim_id as usize] = INVALID;
+                let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                primitives_to_nodes[direct_prim_id as usize] = INVALID;
             }
         }
 
-        assert!(node_to_remove.is_leaf());
         let sibling_id = Bvh2Node::get_sibling_id(node_id);
         debug_assert_eq!(parents[node_id], parents[sibling_id]); // Both children should already have the same parent.
         let mut parent_id = parents[node_id] as usize;
@@ -63,8 +61,9 @@ impl Bvh2 {
         if sibling.is_leaf() {
             if let Some(primitives_to_nodes) = self.primitives_to_nodes.as_deref_mut() {
                 // Tell primitives where their node went.
-                for prim_id in sibling.first_index..sibling.first_index + sibling.prim_count {
-                    primitives_to_nodes[prim_id as usize] = parent_id as u32;
+                for node_prim_id in sibling.first_index..sibling.first_index + sibling.prim_count {
+                    let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                    primitives_to_nodes[direct_prim_id as usize] = parent_id as u32;
                 }
             }
         } else {
@@ -111,8 +110,9 @@ impl Bvh2 {
                     // Tell primitives where their node went.
                     let start = right_src_sibling.first_index;
                     let end = right_src_sibling.first_index + right_src_sibling.prim_count;
-                    for prim_id in start..end {
-                        primitives_to_nodes[prim_id as usize] = dst_right_id as u32;
+                    for node_prim_id in start..end {
+                        let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                        primitives_to_nodes[direct_prim_id as usize] = dst_right_id as u32;
                     }
                 }
             } else {
@@ -128,8 +128,9 @@ impl Bvh2 {
                     // Tell primitives where their node went.
                     let start = left_src_sibling.first_index;
                     let end = left_src_sibling.first_index + left_src_sibling.prim_count;
-                    for prim_id in start..end {
-                        primitives_to_nodes[prim_id as usize] = dst_left_id as u32;
+                    for node_prim_id in start..end {
+                        let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                        primitives_to_nodes[direct_prim_id as usize] = dst_left_id as u32;
                     }
                 }
             } else {
@@ -155,7 +156,7 @@ impl Bvh2 {
         node_to_remove
     }
 
-    /// Searches through tree recursively to find the best sibling for the node being inserted. The best sibling is
+    /// Searches the tree recursively to find the best sibling for the node being inserted. The best sibling is
     /// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
     /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
     /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
@@ -165,7 +166,6 @@ impl Bvh2 {
     /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
     ///
     /// # Arguments
-    /// * `bvh` - The Bvh2 the new node is being added to
     /// * `new_node` - This node must be a leaf and already have a valid first_index into primitive_indices
     /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
     ///     deepest leaf of the BVH. insert_leaf_node() will resize this stack after traversal to be at least 2x the
@@ -245,8 +245,9 @@ impl Bvh2 {
                 // Tell primitives where their node went.
                 let start = best_sibling_candidate.first_index;
                 let end = best_sibling_candidate.first_index + best_sibling_candidate.prim_count;
-                for prim_id in start..end {
-                    primitives_to_nodes[prim_id as usize] = new_sibling_id;
+                for node_prim_id in start..end {
+                    let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                    primitives_to_nodes[direct_prim_id as usize] = new_sibling_id;
                 }
             }
         } else {
@@ -266,10 +267,11 @@ impl Bvh2 {
             let start = new_node.first_index;
             let end = new_node.first_index + new_node.prim_count;
             if primitives_to_nodes.len() < end as usize {
-                primitives_to_nodes.resize(end as usize, 0);
+                primitives_to_nodes.resize(end as usize, INVALID);
             }
-            for prim_id in start..end {
-                primitives_to_nodes[prim_id as usize] = new_node_id as u32;
+            for node_prim_id in start..end {
+                let direct_prim_id = self.primitive_indices[node_prim_id as usize];
+                primitives_to_nodes[direct_prim_id as usize] = new_node_id as u32;
             }
         }
 
@@ -278,7 +280,111 @@ impl Bvh2 {
 
         new_node_id
     }
+
+    /// Removes the leaf that contains the given primitive. Should be correct for nodes with multiple primitives per
+    /// leaf but faster for nodes with only one primitive per leaf, and will leave node aabb oversized.
+    /// Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
+    ///
+    /// # Returns
+    /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
+    ///
+    /// # Arguments
+    /// * `primitive_id` - The index of the primitive being removed.
+    pub fn remove_primitive(&mut self, primitive_id: u32) {
+        let remove_primitive_id = primitive_id;
+        self.init_parents();
+        self.init_primitives_to_nodes();
+
+        let node_id = self.primitives_to_nodes.as_mut().unwrap()[remove_primitive_id as usize];
+
+        let node = &self.nodes[node_id as usize];
+        assert!(node.is_leaf());
+        if node.prim_count == 1 {
+            let removed_leaf = self.remove_leaf(node_id as usize);
+            self.primitive_indices_freelist
+                .push(removed_leaf.first_index);
+            self.primitive_indices[removed_leaf.first_index as usize] = INVALID;
+        } else {
+            // Update leaf with the remaining primitives, use the existing leftover space in primitive_indices and
+            // only add the removed primitive to the freelist
+
+            let node = &mut self.nodes[node_id as usize];
+
+            let start = node.first_index as usize;
+            let end = (node.first_index + node.prim_count) as usize;
+            let last = end - 1;
+            let mut spare_spot_id = start;
+            // Condense primitive_indices for this node.
+            for node_prim_id in start..end {
+                let direct_prim_id = self.primitive_indices[node_prim_id];
+                if direct_prim_id == remove_primitive_id {
+                    break;
+                }
+                spare_spot_id += 1;
+            }
+            if spare_spot_id < last {
+                self.primitive_indices[spare_spot_id] = self.primitive_indices[last];
+            }
+            // Free now open last position.
+            self.primitive_indices_freelist.push(last as u32);
+            self.primitive_indices[last] = INVALID;
+
+            assert!(node.prim_count > 1);
+            node.prim_count -= 1;
+        }
+
+        let primitives_to_nodes = self.primitives_to_nodes.as_mut().unwrap();
+        if primitives_to_nodes.len() > remove_primitive_id as usize {
+            primitives_to_nodes[remove_primitive_id as usize] = INVALID;
+        }
+    }
+
+    /// Searches the tree recursively to find the best sibling for the primitive being inserted
+    /// (see Bvh2::insert_leaf_node()). Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
+    ///
+    /// # Returns
+    /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
+    ///
+    /// # Arguments
+    /// * `bvh` - The Bvh2 the new node is being added to
+    /// * `primitive_id` - The index of the primitive being inserted.
+    /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
+    ///     deepest leaf of the BVH. insert_leaf_node() will resize this stack after traversal to be at least 2x the
+    ///     required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
+    ///     nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
+    ///     generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
+    ///     don't call bvh.depth(0) with each leaf just let insert_leaf_node() resize the stack as needed.
+    pub fn insert_primitive(
+        &mut self,
+        aabb: Aabb,
+        primitive_id: u32,
+        stack: &mut HeapStack<SiblingInsertionCandidate>,
+    ) {
+        self.init_primitives_to_nodes();
+        self.init_parents();
+        let primitives_to_nodes = self.primitives_to_nodes.as_mut().unwrap();
+        if primitives_to_nodes.len() <= primitive_id as usize {
+            primitives_to_nodes.resize(primitive_id as usize + 1, INVALID);
+        }
+        let first_index = if let Some(free_slot) = self.primitive_indices_freelist.pop() {
+            self.primitive_indices[free_slot as usize] = primitive_id;
+            free_slot
+        } else {
+            self.primitive_indices.push(primitive_id);
+            self.primitive_indices.len() as u32 - 1
+        };
+        let new_node_id = self.insert_leaf_node(
+            Bvh2Node {
+                aabb,
+                prim_count: 1,
+                first_index,
+            },
+            stack,
+        );
+        self.primitives_to_nodes.as_mut().unwrap()[primitive_id as usize] = new_node_id as u32;
+    }
 }
+
 /// Slow at building, makes a slow bvh, just for testing insertion.
 /// Can result in very deep BVHs in some cases.
 /// Consider using `bvh.max_depth = Some(bvh.depth(0).max(DEFAULT_MAX_STACK_DEPTH));`
@@ -294,23 +400,14 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
             prim_count: 1,
             first_index: 0,
         }],
-        primitive_indices: (0..primitives.len() as u32).collect(),
+        primitive_indices: vec![0],
         ..Default::default()
     };
 
     let mut stack = HeapStack::new_with_capacity(1000);
 
-    bvh.init_primitives_to_nodes();
-    bvh.init_parents();
     for prim_id in 1..primitives.len() {
-        bvh.insert_leaf_node(
-            Bvh2Node {
-                aabb: primitives[prim_id].aabb(),
-                prim_count: 1,
-                first_index: prim_id as u32,
-            },
-            &mut stack,
-        );
+        bvh.insert_primitive(primitives[prim_id].aabb(), prim_id as u32, &mut stack);
     }
 
     #[cfg(debug_assertions)]
@@ -368,7 +465,7 @@ mod tests {
 
             let mut bvh = build_bvh2(
                 &tris,
-                BvhBuildParams::fastest_build(),
+                BvhBuildParams::medium_build(),
                 &mut Duration::default(),
             );
             bvh.init_primitives_to_nodes();
@@ -383,24 +480,45 @@ mod tests {
     #[test]
     fn remove_all_primitives() {
         let tris = demoscene(16, 0);
-        let mut bvh = build_bvh2(
+
+        // Test with both a bvh that only has one primitive per leaf
+        // and also with one that has multiple primitives per leaf.
+        let bvh1 = build_bvh2(
             &tris,
             BvhBuildParams::fastest_build(),
             &mut Duration::default(),
         );
-        bvh.init_primitives_to_nodes();
-        bvh.init_parents();
-        bvh.validate(&tris, true, false);
+        let bvh2 = build_bvh2(
+            &tris,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
 
-        for prim_id in 0..tris.len() {
-            let node_id = bvh.primitives_to_nodes.as_ref().unwrap()[prim_id];
-            let _removed_node = bvh.remove_leaf(node_id as usize);
-            bvh.validate(&tris, true, false);
+        let mut found_leaf_with_multiple_nodes = false;
+        for node in &bvh2.nodes {
+            if node.prim_count > 1 {
+                found_leaf_with_multiple_nodes = true;
+                break;
+            }
+        }
+        if !found_leaf_with_multiple_nodes {
+            panic!("Test remove_all_primitives bvh2 should have some nodes that contain multiple primitives");
         }
 
-        assert_eq!(bvh.nodes.len(), 0);
-        assert_eq!(bvh.parents.as_ref().unwrap().len(), 0);
-        assert_eq!(bvh.primitives_to_nodes.as_ref().unwrap().len(), 0);
-        bvh.validate(&tris, true, false);
+        for bvh in &mut [bvh1, bvh2] {
+            bvh.init_primitives_to_nodes();
+            bvh.init_parents();
+            bvh.validate(&tris, false, false);
+
+            for primitive_id in 0..tris.len() as u32 {
+                bvh.remove_primitive(primitive_id);
+                bvh.validate(&tris, false, false);
+            }
+
+            assert_eq!(bvh.nodes.len(), 0);
+            assert_eq!(bvh.parents.as_ref().unwrap().len(), 0);
+            assert_eq!(bvh.primitives_to_nodes.as_ref().unwrap().len(), 0);
+            bvh.validate(&tris, false, false);
+        }
     }
 }

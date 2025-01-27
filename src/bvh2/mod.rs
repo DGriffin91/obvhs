@@ -159,10 +159,16 @@ pub struct Bvh2 {
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub primitive_indices: Vec<u32>,
 
+    /// A freelist for use when removing primitives from the bvh. These represent slots in Bvh2::primitive_indices
+    /// that are available if a primitive is added to the bvh. Only currently used by Bvh2::remove_primitive() and
+    /// Bvh2::insert_primitive() which are not part of the typical initial bvh generation.
+    pub primitive_indices_freelist: Vec<u32>,
+
     /// An optional mapping from primitives back to nodes.
     /// Ex. let node_id = primitives_to_nodes.unwrap()[primitive_id];
     /// Where primitive_id is the original index of the primitive used when making the BVH and node_id is the index
-    /// into Bvh2::nodes for the node of that primitive.
+    /// into Bvh2::nodes for the node of that primitive. Always use with the direct primitive id, not the one in the
+    /// bvh node.
     /// If `primitives_to_nodes` is Some, it is expected that functions that modify the BVH will keep the mapping valid.
     pub primitives_to_nodes: Option<Vec<u32>>,
 
@@ -400,7 +406,7 @@ impl Bvh2 {
 
     /// Compute compute_primitives_to_nodes only if they have not already been computed
     pub fn init_primitives_to_nodes(&mut self) {
-        if self.parents.is_none() {
+        if self.primitives_to_nodes.is_none() {
             self.recompute_primitives_to_nodes();
         }
     }
@@ -433,8 +439,8 @@ impl Bvh2 {
     }
 
     pub fn validate_primitives_to_nodes(&self) {
-        let primitive_to_node = self.primitives_to_nodes.as_deref().unwrap();
-        primitive_to_node
+        let primitives_to_nodes = self.primitives_to_nodes.as_deref().unwrap();
+        primitives_to_nodes
             .iter()
             .enumerate()
             .for_each(|(prim_id, node_id)| {
@@ -509,6 +515,14 @@ impl Bvh2 {
         }
     }
 
+    /// Get the count of active primitive indices.
+    /// when primitives are removed they are added to the `primitive_indices_freelist` so the
+    /// self.primitive_indices.len() may not represent the actual number of valid, active primitive_indices.
+    ///
+    pub fn active_primitive_indices_count(&self) -> usize {
+        self.primitive_indices.len() - self.primitive_indices_freelist.len()
+    }
+
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
     pub fn validate<T: Boundable>(
         &self,
@@ -516,11 +530,6 @@ impl Bvh2 {
         direct_layout: bool,
         splits: bool,
     ) -> Bvh2ValidationResult {
-        if !splits || direct_layout {
-            // Could still check this if duplicated were removed from self.primitive_indices first
-            assert_eq!(self.primitive_indices.len(), primitives.len());
-        }
-
         if self.primitives_to_nodes.is_some() {
             self.validate_primitives_to_nodes();
         }
@@ -542,11 +551,9 @@ impl Bvh2 {
         assert_eq!(result.node_count, self.nodes.len());
         if !direct_layout {
             // Ignore primitive_indices if this is a direct layout
-            assert_eq!(
-                result.discovered_primitives.len(),
-                self.primitive_indices.len()
-            );
-            assert_eq!(result.prim_count, self.primitive_indices.len());
+            let active_indices_count = self.active_primitive_indices_count();
+            assert_eq!(result.discovered_primitives.len(), active_indices_count);
+            assert_eq!(result.prim_count, active_indices_count);
         }
         assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
 
