@@ -343,14 +343,26 @@ mod tests {
 
     #[test]
     fn test_reinsertion() {
-        for res in 30..=32 {
-            let tris = demoscene(res, 0);
-            let mut aabbs = Vec::with_capacity(tris.len());
-            let mut indices = Vec::with_capacity(tris.len());
-            for (i, primitive) in tris.iter().enumerate() {
-                indices.push(i as u32);
-                aabbs.push(primitive.aabb());
-            }
+        let tris = demoscene(32, 0);
+        let mut aabbs = Vec::with_capacity(tris.len());
+        let mut indices = Vec::with_capacity(tris.len());
+        for (i, primitive) in tris.iter().enumerate() {
+            indices.push(i as u32);
+            aabbs.push(primitive.aabb());
+        }
+        {
+            // Test without init_primitives_to_nodes & init_parents
+            let mut bvh =
+                PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+            bvh.validate(&tris, false, false);
+            ReinsertionOptimizer::run(&mut bvh, 0.25, None);
+            bvh.validate(&tris, false, false);
+            bvh.reorder_in_stack_traversal_order();
+            ReinsertionOptimizer::run(&mut bvh, 0.5, None);
+            bvh.validate(&tris, false, false);
+        }
+        {
+            // Test with init_primitives_to_nodes & init_parents
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes();

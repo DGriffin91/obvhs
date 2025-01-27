@@ -181,8 +181,17 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     std::mem::swap(&mut bvh.primitive_indices, &mut indices_copy);
 
     if previously_had_parents {
-        // If we had parents already computed before collapse we need to recompute them now, if not, skip the extra computation
+        // If we had parents already computed before collapse we need to recompute them now
+        // TODO perf there might be a way to update this during collapse
         bvh.recompute_parents();
+    } else {
+        // If not, skip the extra computation
+        bvh.parents = None;
+    }
+    if bvh.primitives_to_nodes.is_some() {
+        // If primitives_to_nodes already existed we need to make sure it remains valid.
+        // TODO perf there might be a way to update this during collapse
+        bvh.recompute_primitives_to_nodes();
     }
 }
 
@@ -296,6 +305,46 @@ impl SometimesAtomicU32 {
         #[cfg(not(feature = "parallel"))]
         {
             self.value
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        ploc::{PlocSearchDistance, SortPrecision},
+        test_util::geometry::demoscene,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_collapse() {
+        let tris = demoscene(32, 0);
+        let mut aabbs = Vec::with_capacity(tris.len());
+        let mut indices = Vec::with_capacity(tris.len());
+        for (i, primitive) in tris.iter().enumerate() {
+            indices.push(i as u32);
+            aabbs.push(primitive.aabb());
+        }
+        {
+            // Test without init_primitives_to_nodes & init_parents
+            let mut bvh =
+                PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+            bvh.validate(&tris, false, false);
+            collapse(&mut bvh, 8, 1.0);
+            bvh.validate(&tris, false, false);
+        }
+        {
+            // Test with init_primitives_to_nodes & init_parents
+            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            bvh.validate(&tris, false, false);
+            bvh.init_primitives_to_nodes();
+            bvh.init_parents();
+            bvh.validate(&tris, false, false);
+            collapse(&mut bvh, 8, 1.0);
+            bvh.validate(&tris, false, false);
         }
     }
 }
