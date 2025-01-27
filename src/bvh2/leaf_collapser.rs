@@ -23,7 +23,9 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
     let nodes_qty = bvh.nodes.len();
 
-    let parents = bvh.compute_parents();
+    let previously_had_parents = bvh.parents.is_some();
+
+    bvh.init_parents();
 
     let mut indices_copy = Vec::new();
     let mut nodes_copy = Vec::new();
@@ -39,7 +41,9 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     // TODO need to figure out if parallel version can have data races, if so:
     // maybe record commands in parallel, include a index, and execute them sequentially
     // also reference original impl
-    bottom_up_traverse(bvh, &parents, |leaf, i| {
+
+    assert!(bvh.parents.is_some()); // SAFETY: bottom_up_traverse assumes self.bvh.parents.is_some()
+    bottom_up_traverse(bvh, |leaf, i| {
         if leaf {
             prim_counts[i].set(bvh.nodes[i].prim_count);
         } else {
@@ -133,7 +137,8 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
                             first_prim += node.prim_count;
                             while !Bvh2Node::is_left_sibling(j) && j != i {
-                                j = parents[j] as usize;
+                                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
+                                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
                             }
                             if j == i {
                                 break;
@@ -174,13 +179,17 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
     std::mem::swap(&mut bvh.nodes, &mut nodes_copy);
     std::mem::swap(&mut bvh.primitive_indices, &mut indices_copy);
+
+    if previously_had_parents {
+        // If we had parents already computed before collapse we need to recompute them now, if not, skip the extra computation
+        bvh.recompute_parents();
+    }
 }
 
 // Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
 #[cfg(not(feature = "parallel"))]
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
-    parents: &[u32],
     mut process_node: F, // True is for leaf
 ) where
     F: FnMut(bool, usize),
@@ -200,7 +209,8 @@ fn bottom_up_traverse<F>(
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i;
             while j != 0 {
-                j = parents[j] as usize;
+                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
+                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
 
                 process_node(false, j);
             }
@@ -211,7 +221,6 @@ fn bottom_up_traverse<F>(
 #[cfg(feature = "parallel")]
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
-    parents: &[u32],
     process_node: F, // True is for leaf
 ) where
     F: Fn(bool, usize) + Sync + Send,
@@ -231,7 +240,8 @@ fn bottom_up_traverse<F>(
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i as usize;
             while j != 0 {
-                j = parents[j] as usize;
+                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
+                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
 
                 process_node(false, j);
             }

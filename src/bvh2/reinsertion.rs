@@ -19,7 +19,6 @@ pub struct ReinsertionOptimizer<'a> {
     candidates: Vec<Candidate>,
     reinsertions: Vec<Reinsertion>,
     touched: Vec<bool>,
-    parents: Vec<u32>,
     bvh: &'a mut Bvh2,
     batch_size_ratio: f32,
 }
@@ -37,10 +36,10 @@ impl ReinsertionOptimizer<'_> {
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() || batch_size_ratio <= 0.0 {
             return;
         }
-        #[cfg(feature = "parallel")]
-        let parents = bvh.compute_parents_parallel();
-        #[cfg(not(feature = "parallel"))]
-        let parents = bvh.compute_parents();
+
+        if bvh.parents.is_none() {
+            bvh.init_parents();
+        }
 
         let cap = (bvh.nodes.len() as f32 * batch_size_ratio.min(1.0)).ceil() as usize;
 
@@ -48,7 +47,6 @@ impl ReinsertionOptimizer<'_> {
             candidates: Vec::with_capacity(cap),
             reinsertions: Vec::with_capacity(cap),
             touched: vec![false; bvh.nodes.len()],
-            parents,
             bvh,
             batch_size_ratio,
         }
@@ -56,6 +54,8 @@ impl ReinsertionOptimizer<'_> {
     }
 
     pub fn optimize_impl(&mut self, ratio_sequence: Option<Vec<f32>>) {
+        assert!(self.bvh.parents.is_some());
+
         // This initially preforms reinsertion at the specified ratio, then at progressively smaller ratios,
         // focusing more reinsertion time at the top of the bvh. The original method would perform reinsertion
         // for a fixed ratio a fixed number of times.
@@ -135,6 +135,7 @@ impl ReinsertionOptimizer<'_> {
             .sort_unstable_by(|a, b| b.area_diff.partial_cmp(&a.area_diff).unwrap());
 
         assert!(self.reinsertions.len() <= self.touched.len());
+        assert!(self.bvh.parents.is_some()); // SAFETY: get_conflicts assumes self.bvh.parents.is_some()
         (0..self.reinsertions.len()).for_each(|i| {
             let reinsertion = &self.reinsertions[i];
             let conflicts = self.get_conflicts(reinsertion.from, reinsertion.to);
@@ -152,10 +153,12 @@ impl ReinsertionOptimizer<'_> {
     }
 
     fn find_reinsertion(&self, stack: &mut HeapStack<(f32, u32)>, node_id: usize) -> Reinsertion {
+        let parents = self.bvh.parents.as_ref().unwrap();
+
         debug_assert_ne!(node_id, 0);
         // Try to elide bounds checks
         assert!(node_id < self.bvh.nodes.len());
-        assert!(node_id < self.parents.len());
+        assert!(node_id < parents.len());
 
         /*
          * Here is an example that explains how the cost of a reinsertion is computed. For the
@@ -191,13 +194,12 @@ impl ReinsertionOptimizer<'_> {
             area_diff: 0.0,
         };
         let node_area = self.bvh.nodes[node_id].aabb.half_area();
-        let parent_area = self.bvh.nodes[self.parents[node_id] as usize]
-            .aabb
-            .half_area();
+
+        let parent_area = self.bvh.nodes[parents[node_id] as usize].aabb.half_area();
         let mut area_diff = parent_area;
         let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
         let mut pivot_bbox = self.bvh.nodes[sibling_id].aabb;
-        let parent_id = self.parents[node_id] as usize;
+        let parent_id = parents[node_id] as usize;
         let mut pivot_id = parent_id;
         let aabb = self.bvh.nodes[node_id].aabb;
         stack.clear();
@@ -234,11 +236,11 @@ impl ReinsertionOptimizer<'_> {
             }
 
             sibling_id = Bvh2Node::get_sibling_id(pivot_id);
-            pivot_id = self.parents[pivot_id] as usize;
+            pivot_id = parents[pivot_id] as usize;
         }
 
         if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
-            || best_reinsertion.to == self.parents[best_reinsertion.from as usize]
+            || best_reinsertion.to == parents[best_reinsertion.from as usize]
         {
             best_reinsertion = Reinsertion::default();
         }
@@ -247,8 +249,10 @@ impl ReinsertionOptimizer<'_> {
     }
 
     fn reinsert_node(&mut self, from: usize, to: usize) {
+        let parents = self.bvh.parents.as_mut().unwrap();
+
         let sibling_id = Bvh2Node::get_sibling_id(from);
-        let parent_id = self.parents[from] as usize;
+        let parent_id = parents[from] as usize;
         let sibling_node = self.bvh.nodes[sibling_id];
         let dst_node = self.bvh.nodes[to];
 
@@ -257,18 +261,18 @@ impl ReinsertionOptimizer<'_> {
         self.bvh.nodes[parent_id] = sibling_node;
 
         if !self.bvh.nodes[sibling_id].is_leaf() {
-            self.parents[self.bvh.nodes[sibling_id].first_index as usize] = sibling_id as u32;
-            self.parents[self.bvh.nodes[sibling_id].first_index as usize + 1] = sibling_id as u32;
+            parents[self.bvh.nodes[sibling_id].first_index as usize] = sibling_id as u32;
+            parents[self.bvh.nodes[sibling_id].first_index as usize + 1] = sibling_id as u32;
         }
         if !self.bvh.nodes[parent_id].is_leaf() {
-            self.parents[self.bvh.nodes[parent_id].first_index as usize] = parent_id as u32;
-            self.parents[self.bvh.nodes[parent_id].first_index as usize + 1] = parent_id as u32;
+            parents[self.bvh.nodes[parent_id].first_index as usize] = parent_id as u32;
+            parents[self.bvh.nodes[parent_id].first_index as usize + 1] = parent_id as u32;
         }
 
-        self.parents[sibling_id] = to as u32;
-        self.parents[from] = to as u32;
-        self.bvh.refit_from_fast(to, &self.parents);
-        self.bvh.refit_from_fast(parent_id, &self.parents);
+        parents[sibling_id] = to as u32;
+        parents[from] = to as u32;
+        self.bvh.refit_from_fast(to);
+        self.bvh.refit_from_fast(parent_id);
     }
 
     #[inline(always)]
@@ -277,8 +281,9 @@ impl ReinsertionOptimizer<'_> {
             to as usize,
             from as usize,
             Bvh2Node::get_sibling_id(from as usize),
-            self.parents[to as usize] as usize,
-            self.parents[from as usize] as usize,
+            // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
+            unsafe { self.bvh.parents.as_ref().unwrap_unchecked() }[to as usize] as usize,
+            unsafe { self.bvh.parents.as_ref().unwrap_unchecked() }[from as usize] as usize,
         ]
     }
 }
