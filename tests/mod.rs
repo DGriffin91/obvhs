@@ -163,7 +163,7 @@ mod tests {
         );
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
-        bvh2.validate(&tris, false, false);
+        bvh2.validate(&tris, false, false, true);
         bvh2.aabb_traverse(aabb, |bvh, id| {
             let node = &bvh.nodes[id as usize];
             for i in 0..node.prim_count {

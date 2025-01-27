@@ -72,7 +72,7 @@ pub fn build_bvh2_from_tris(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(triangles, false, config.pre_split);
+        bvh2.validate(triangles, false, config.pre_split, true);
     }
 
     bvh2
@@ -125,7 +125,7 @@ pub fn build_bvh2<T: Boundable>(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(primitives, false, config.pre_split);
+        bvh2.validate(primitives, false, config.pre_split, true);
     }
 
     bvh2

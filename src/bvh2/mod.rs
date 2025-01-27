@@ -176,6 +176,10 @@ pub struct Bvh2 {
     /// If `parents` is Some, it is expected that functions that modify the BVH will keep the mapping valid.
     pub parents: Option<Vec<u32>>,
 
+    /// This is set by operations that ensure that parents have higher indices than children and unset by operations
+    /// that might disturb that order. Some operations require this ordering and will reorder if this is not true.
+    pub children_are_ordered_after_parents: bool,
+
     /// Maximum bvh hierarchy depth. Used to determine stack depth for cpu bvh2 traversal.
     /// Stack defaults to 96 if max_depth isn't set, which much deeper than most bvh's even
     /// for large scenes without a tlas.
@@ -321,7 +325,10 @@ impl Bvh2 {
         }
     }
 
-    // Order node array in stack traversal order. (Doesn't seem to really speed up traversal)
+    /// Order node array in stack traversal order. Ensures parents are always at lower indices than children. Fairly
+    /// slow, can take around 1/3 of the time of building the same BVH from scratch from with the fastest_build preset.
+    /// Doesn't seem to speed up traversal much for a new BVH created from PLOC, but if it has had many
+    /// removals/insertions it can help.
     pub fn reorder_in_stack_traversal_order(&mut self) {
         let mut new_nodes: Vec<Bvh2Node> = Vec::with_capacity(self.nodes.len());
         let mut mapping = vec![0; self.nodes.len()]; // Map from where n node used to be to where it is now
@@ -351,22 +358,71 @@ impl Bvh2 {
         }
         self.nodes = new_nodes;
         if self.parents.is_some() {
-            self.recompute_parents();
+            self.update_parents();
         }
         if self.primitives_to_nodes.is_some() {
-            self.recompute_primitives_to_nodes();
+            self.update_primitives_to_nodes();
+        }
+        self.children_are_ordered_after_parents = true;
+    }
+
+    /// Refits the whole BVH from the leaves up. If the leaves have moved very much the BVH can quickly become
+    /// degenerate causing significantly higher traversal times. Consider rebuilding the BVH from scratch or running a
+    /// bit of reinsertion after refit.
+    pub fn refit_all(&mut self) {
+        if self.children_are_ordered_after_parents {
+            // If children are already ordered after parents we can update in a single sweep.
+            // Around 3x faster than the fallback below.
+            for node_id in (0..self.nodes.len()).rev() {
+                let node = &self.nodes[node_id];
+                if !node.is_leaf() {
+                    let first_child_bbox = self.nodes[node.first_index as usize].aabb;
+                    let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
+                    self.nodes[node_id].aabb = first_child_bbox.union(&second_child_bbox);
+                }
+            }
+        } else {
+            // If not, we need to create a safe order in which we can make updates.
+            // This is much faster than reordering the whole bvh with Bvh2::reorder_in_stack_traversal_order()
+            let mut stack = HeapStack::new_with_capacity(self.max_depth.unwrap_or(1000));
+            let mut reverse_stack = Vec::with_capacity(self.nodes.len());
+            stack.push(0);
+            reverse_stack.push(0);
+            while let Some(current_node_index) = stack.pop() {
+                let node = &self.nodes[*current_node_index as usize];
+                if !node.is_leaf() {
+                    reverse_stack.push(node.first_index);
+                    reverse_stack.push(node.first_index + 1);
+                    stack.push(node.first_index);
+                    stack.push(node.first_index + 1);
+                }
+            }
+            for node_id in reverse_stack.iter().rev() {
+                let node = &self.nodes[*node_id as usize];
+                if !node.is_leaf() {
+                    let first_child_bbox = self.nodes[node.first_index as usize].aabb;
+                    let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
+                    self.nodes[*node_id as usize].aabb = first_child_bbox.union(&second_child_bbox);
+                }
+            }
         }
     }
 
-    /// Compute parents only if they have not already been computed
+    /// Compute parents and update cache only if they have not already been computed
     pub fn init_parents(&mut self) {
         if self.parents.is_none() {
-            self.recompute_parents();
+            self.update_parents();
         }
+    }
+
+    /// Compute the mapping from a given node index to that node's parent for each node in the bvh and update local
+    /// cache.
+    pub fn update_parents(&mut self) {
+        self.parents = Some(self.compute_parents());
     }
 
     /// Compute the mapping from a given node index to that node's parent for each node in the bvh.
-    pub fn recompute_parents(&mut self) {
+    pub fn compute_parents(&self) -> Vec<u32> {
         #[cfg(not(feature = "parallel"))]
         {
             let mut parents = vec![0; self.nodes.len()];
@@ -377,7 +433,7 @@ impl Bvh2 {
                     parents[node.first_index as usize + 1] = i as u32;
                 }
             });
-            self.parents = Some(parents);
+            return parents;
         }
         // Seems around 80% faster than compute_parents.
         // TODO is there a better way to parallelize?
@@ -395,24 +451,22 @@ impl Bvh2 {
                 }
             });
 
-            self.parents = Some(
-                parents
-                    .into_iter()
-                    .map(|a| a.load(Ordering::Relaxed))
-                    .collect(),
-            );
+            return parents
+                .into_iter()
+                .map(|a| a.load(Ordering::Relaxed))
+                .collect();
         }
     }
 
-    /// Compute compute_primitives_to_nodes only if they have not already been computed
+    /// Compute compute_primitives_to_nodes and update cache only if they have not already been computed
     pub fn init_primitives_to_nodes(&mut self) {
         if self.primitives_to_nodes.is_none() {
-            self.recompute_primitives_to_nodes();
+            self.update_primitives_to_nodes();
         }
     }
 
-    /// Compute the mapping from primitive index to node index.
-    pub fn recompute_primitives_to_nodes(&mut self) {
+    /// Compute the mapping from primitive index to node index and update local cache.
+    pub fn update_primitives_to_nodes(&mut self) {
         let mut primitives_to_nodes = vec![0u32; self.primitive_indices.len()];
         for (node_id, node) in self.nodes.iter().enumerate() {
             if node.is_leaf() {
@@ -529,6 +583,7 @@ impl Bvh2 {
         primitives: &[T],
         direct_layout: bool,
         splits: bool,
+        tight_fit: bool,
     ) -> Bvh2ValidationResult {
         if self.primitives_to_nodes.is_some() {
             self.validate_primitives_to_nodes();
@@ -541,6 +596,7 @@ impl Bvh2 {
         let mut result = Bvh2ValidationResult {
             splits,
             direct_layout,
+            require_tight_fit: tight_fit,
             ..Default::default()
         };
 
@@ -556,6 +612,20 @@ impl Bvh2 {
             assert_eq!(result.prim_count, active_indices_count);
         }
         assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
+
+        if self.children_are_ordered_after_parents {
+            // Assert that children are always ordered after parents in self.nodes
+            let temp_parents;
+            let parents = if let Some(parents) = self.parents.as_ref() {
+                parents
+            } else {
+                temp_parents = self.compute_parents();
+                &temp_parents
+            };
+            for node_id in (1..self.nodes.len()).rev() {
+                assert!(parents[node_id] < node_id as u32);
+            }
+        }
 
         result
     }
@@ -597,6 +667,7 @@ impl Bvh2 {
             } else {
                 result.leaves_at_depth.insert(current_depth, 1);
             }
+            let mut temp_aabb = Aabb::empty();
             for i in 0..node.prim_count {
                 result.prim_count += 1;
                 let mut prim_index = (node.first_index + i) as usize;
@@ -607,6 +678,7 @@ impl Bvh2 {
                         prim_index = self.primitive_indices[prim_index] as usize
                     }
                     let prim_aabb = primitives[prim_index].aabb();
+                    temp_aabb = temp_aabb.union(&prim_aabb);
                     assert!(
                         prim_aabb.min.cmpge(node.aabb.min).all()
                             && prim_aabb.max.cmple(node.aabb.max).all(),
@@ -618,7 +690,26 @@ impl Bvh2 {
                     );
                 }
             }
+            if result.require_tight_fit {
+                assert_eq!(
+                    temp_aabb, node.aabb,
+                    "Primitive do not fit in tightly in parent {node_index}",
+                );
+            }
         } else {
+            if result.require_tight_fit {
+                let left_id = node.first_index as usize;
+                let right_id = node.first_index as usize + 1;
+                let left_child_aabb = &self.nodes[left_id];
+                let right_child_aabb = &self.nodes[right_id];
+
+                assert_eq!(
+                    left_child_aabb.aabb.union(&right_child_aabb.aabb),
+                    node.aabb,
+                    "Children {left_id} & {right_id} do not fit in tightly in parent {node_index}",
+                );
+            }
+
             self.validate_impl::<T>(
                 primitives,
                 result,
@@ -700,6 +791,8 @@ pub struct Bvh2ValidationResult {
     pub splits: bool,
     /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
+    /// Require validation to ensure aabbs tightly fit children and primitives.
+    pub require_tight_fit: bool,
     /// Set of primitives discovered though validation traversal.
     pub discovered_primitives: HashSet<u32>,
     /// Set of nodes discovered though validation traversal.
@@ -747,5 +840,47 @@ leaf_count: {}",
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use glam::*;
+
+    use crate::{
+        ploc::{PlocSearchDistance, SortPrecision},
+        test_util::geometry::demoscene,
+        Transformable,
+    };
+
+    #[test]
+    fn test_refit_all() {
+        let mut tris = demoscene(32, 0);
+        let mut aabbs = Vec::with_capacity(tris.len());
+        let mut indices = Vec::with_capacity(tris.len());
+        for (i, primitive) in tris.iter().enumerate() {
+            indices.push(i as u32);
+            aabbs.push(primitive.aabb());
+        }
+
+        // Test without init_primitives_to_nodes & init_parents
+        let mut bvh =
+            PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+
+        bvh.init_primitives_to_nodes();
+        let primitives_to_nodes = bvh.primitives_to_nodes.as_ref().unwrap();
+        tris.transform(&Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.3),
+            Quat::from_rotation_y(0.1),
+            vec3(0.33, 0.3, 0.37),
+        ));
+        for (prim_id, tri) in tris.iter().enumerate() {
+            bvh.nodes[primitives_to_nodes[prim_id] as usize].aabb = tri.aabb();
+        }
+
+        bvh.refit_all();
+
+        bvh.validate(&tris, false, false, true);
     }
 }

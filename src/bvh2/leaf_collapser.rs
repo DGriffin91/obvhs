@@ -183,7 +183,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     if previously_had_parents {
         // If we had parents already computed before collapse we need to recompute them now
         // TODO perf there might be a way to update this during collapse
-        bvh.recompute_parents();
+        bvh.update_parents();
     } else {
         // If not, skip the extra computation
         bvh.parents = None;
@@ -191,7 +191,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     if bvh.primitives_to_nodes.is_some() {
         // If primitives_to_nodes already existed we need to make sure it remains valid.
         // TODO perf there might be a way to update this during collapse
-        bvh.recompute_primitives_to_nodes();
+        bvh.update_primitives_to_nodes();
     }
 }
 
@@ -332,19 +332,19 @@ mod tests {
             // Test without init_primitives_to_nodes & init_parents
             let mut bvh =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             collapse(&mut bvh, 8, 1.0);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
         {
             // Test with init_primitives_to_nodes & init_parents
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             bvh.init_primitives_to_nodes();
             bvh.init_parents();
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             collapse(&mut bvh, 8, 1.0);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
     }
 }

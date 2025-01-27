@@ -113,6 +113,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     Bvh2 {
         nodes,
         primitive_indices: indices,
+        children_are_ordered_after_parents: true,
         ..Default::default()
     }
 }

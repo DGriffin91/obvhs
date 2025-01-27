@@ -53,6 +53,7 @@ impl ReinsertionOptimizer<'_> {
             batch_size_ratio,
         }
         .optimize_impl(ratio_sequence);
+        bvh.children_are_ordered_after_parents = false;
     }
 
     pub fn optimize_impl(&mut self, ratio_sequence: Option<Vec<f32>>) {
@@ -354,25 +355,25 @@ mod tests {
             // Test without init_primitives_to_nodes & init_parents
             let mut bvh =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             ReinsertionOptimizer::run(&mut bvh, 0.25, None);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             bvh.reorder_in_stack_traversal_order();
             ReinsertionOptimizer::run(&mut bvh, 0.5, None);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
         {
             // Test with init_primitives_to_nodes & init_parents
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             bvh.init_primitives_to_nodes();
             bvh.init_parents();
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             ReinsertionOptimizer::run(&mut bvh, 0.25, None);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             bvh.reorder_in_stack_traversal_order();
             ReinsertionOptimizer::run(&mut bvh, 0.5, None);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
     }
 }

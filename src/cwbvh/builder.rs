@@ -66,7 +66,7 @@ pub fn build_cwbvh_from_tris(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(triangles, false, config.pre_split);
+        bvh2.validate(triangles, false, config.pre_split, true);
         cwbvh.validate(triangles, config.pre_split, false);
     }
 
@@ -109,7 +109,7 @@ pub fn build_cwbvh<T: Boundable>(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(&aabbs, false, config.pre_split);
+        bvh2.validate(&aabbs, false, config.pre_split, true);
         cwbvh.validate(&aabbs, config.pre_split, false);
     }
 

@@ -148,6 +148,7 @@ impl Bvh2 {
         // Need to work up the tree updating the aabbs since we just removed a node.
         self.refit_from_fast(parent_id);
 
+        self.children_are_ordered_after_parents = false;
         // Return the removed node.
         node_to_remove
     }
@@ -408,7 +409,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     #[cfg(debug_assertions)]
     {
-        bvh.validate(primitives, false, false);
+        bvh.validate(primitives, false, false, true);
     }
 
     bvh
@@ -450,7 +451,7 @@ mod tests {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
             let bvh = build_bvh2_by_insertion(&tris);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
     }
 
@@ -467,9 +468,9 @@ mod tests {
             bvh.init_primitives_to_nodes();
             bvh.init_parents();
             slow_leaf_reinsertion(&mut bvh);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
             bvh.reorder_in_stack_traversal_order();
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
     }
 
@@ -504,17 +505,17 @@ mod tests {
         for bvh in &mut [bvh1, bvh2] {
             bvh.init_primitives_to_nodes();
             bvh.init_parents();
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
 
             for primitive_id in 0..tris.len() as u32 {
                 bvh.remove_primitive(primitive_id);
-                bvh.validate(&tris, false, false);
+                bvh.validate(&tris, false, false, false);
             }
 
             assert_eq!(bvh.nodes.len(), 0);
             assert_eq!(bvh.parents.as_ref().unwrap().len(), 0);
             assert_eq!(bvh.primitives_to_nodes.as_ref().unwrap().len(), 0);
-            bvh.validate(&tris, false, false);
+            bvh.validate(&tris, false, false, true);
         }
     }
 }
