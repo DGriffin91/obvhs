@@ -2,7 +2,7 @@ use core::f32;
 
 use crate::{
     aabb::Aabb,
-    bvh2::{Bvh2, Bvh2Node},
+    bvh2::{update_primitives_to_nodes_for_node, Bvh2, Bvh2Node},
     heapstack::HeapStack,
     Boundable, INVALID,
 };
@@ -59,13 +59,13 @@ impl Bvh2 {
         self.nodes[parent_id] = self.nodes[sibling_id];
         let sibling = &mut self.nodes[parent_id];
         if sibling.is_leaf() {
-            if let Some(primitives_to_nodes) = self.primitives_to_nodes.as_deref_mut() {
-                // Tell primitives where their node went.
-                for node_prim_id in sibling.first_index..sibling.first_index + sibling.prim_count {
-                    let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                    primitives_to_nodes[direct_prim_id as usize] = parent_id as u32;
-                }
-            }
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                &sibling,
+                parent_id as usize,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
         } else {
             // Tell children of sibling where their parent went.
             let left_sibling_child = sibling.first_index as usize;
@@ -106,15 +106,13 @@ impl Bvh2 {
 
             let right_src_sibling = self.nodes.pop().unwrap(); // Last node is right src sibling
             if right_src_sibling.is_leaf() {
-                if let Some(ref mut primitives_to_nodes) = self.primitives_to_nodes {
-                    // Tell primitives where their node went.
-                    let start = right_src_sibling.first_index;
-                    let end = right_src_sibling.first_index + right_src_sibling.prim_count;
-                    for node_prim_id in start..end {
-                        let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                        primitives_to_nodes[direct_prim_id as usize] = dst_right_id as u32;
-                    }
-                }
+                // Tell primitives where their node went.
+                update_primitives_to_nodes_for_node(
+                    &right_src_sibling,
+                    dst_right_id,
+                    &self.primitive_indices,
+                    &mut self.primitives_to_nodes,
+                );
             } else {
                 // Go to children of right_src_sibling and tell them where their parent went
                 parents[right_src_sibling.first_index as usize] = dst_right_id as u32;
@@ -124,15 +122,13 @@ impl Bvh2 {
 
             let left_src_sibling = self.nodes.pop().unwrap(); // Last node is left src sibling
             if left_src_sibling.is_leaf() {
-                if let Some(ref mut primitives_to_nodes) = self.primitives_to_nodes {
-                    // Tell primitives where their node went.
-                    let start = left_src_sibling.first_index;
-                    let end = left_src_sibling.first_index + left_src_sibling.prim_count;
-                    for node_prim_id in start..end {
-                        let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                        primitives_to_nodes[direct_prim_id as usize] = dst_left_id as u32;
-                    }
-                }
+                // Tell primitives where their node went.
+                update_primitives_to_nodes_for_node(
+                    &left_src_sibling,
+                    dst_left_id,
+                    &self.primitive_indices,
+                    &mut self.primitives_to_nodes,
+                );
             } else {
                 // Go to children of left_src_sibling and tell them where their parent went
                 parents[left_src_sibling.first_index as usize] = dst_left_id as u32;
@@ -241,15 +237,13 @@ impl Bvh2 {
         self.nodes[new_parent_id] = new_parent;
 
         if best_sibling_candidate.is_leaf() {
-            if let Some(primitives_to_nodes) = &mut self.primitives_to_nodes {
-                // Tell primitives where their node went.
-                let start = best_sibling_candidate.first_index;
-                let end = best_sibling_candidate.first_index + best_sibling_candidate.prim_count;
-                for node_prim_id in start..end {
-                    let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                    primitives_to_nodes[direct_prim_id as usize] = new_sibling_id;
-                }
-            }
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                &best_sibling_candidate,
+                new_sibling_id as usize,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
         } else {
             // If the best selected sibling was an inner node, we need to update the parents mapping so that the children of
             // that node point to the new location that it's being moved to.
@@ -263,16 +257,18 @@ impl Bvh2 {
         parents.push(new_parent_id as u32);
 
         if let Some(primitives_to_nodes) = &mut self.primitives_to_nodes {
-            // Update primitive to node mapping
-            let start = new_node.first_index;
+            // Tell primitives where their node went.
             let end = new_node.first_index + new_node.prim_count;
             if primitives_to_nodes.len() < end as usize {
+                // Since we are adding a primitive it's possible that primitives_to_nodes is not large enough yet.
                 primitives_to_nodes.resize(end as usize, INVALID);
             }
-            for node_prim_id in start..end {
-                let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                primitives_to_nodes[direct_prim_id as usize] = new_node_id as u32;
-            }
+            update_primitives_to_nodes_for_node(
+                &new_node,
+                new_node_id,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
         }
 
         // Need to work up the tree updating the aabbs since we just added a node.

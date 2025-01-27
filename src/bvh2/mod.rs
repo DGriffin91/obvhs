@@ -518,7 +518,7 @@ impl Bvh2 {
     /// Get the count of active primitive indices.
     /// when primitives are removed they are added to the `primitive_indices_freelist` so the
     /// self.primitive_indices.len() may not represent the actual number of valid, active primitive_indices.
-    ///
+    #[inline(always)]
     pub fn active_primitive_indices_count(&self) -> usize {
         self.primitive_indices.len() - self.primitive_indices_freelist.len()
     }
@@ -668,6 +668,27 @@ impl Bvh2 {
             1 + self
                 .depth(node.first_index as usize)
                 .max(self.depth((node.first_index + 1) as usize))
+        }
+    }
+}
+
+/// Update the `primitives_to_nodes` mappings for primitives contained in `node_id`. Does nothing if primitives_to_nodes
+/// is not already init.
+// Not a member of Bvh2 because of borrow issues when a reference to other things like parents is also taken.
+// Maybe could be cleaner as a macro?
+#[inline]
+fn update_primitives_to_nodes_for_node(
+    node: &Bvh2Node,
+    node_id: usize,
+    primitive_indices: &[u32],
+    primitives_to_nodes: &mut Option<Vec<u32>>,
+) {
+    if let Some(primitives_to_nodes) = primitives_to_nodes.as_mut() {
+        let start = node.first_index;
+        let end = start + node.prim_count;
+        for node_prim_id in start..end {
+            let direct_prim_id = primitive_indices[node_prim_id as usize];
+            primitives_to_nodes[direct_prim_id as usize] = node_id as u32;
         }
     }
 }

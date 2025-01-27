@@ -14,6 +14,8 @@ use crate::{
     heapstack::HeapStack,
 };
 
+use super::update_primitives_to_nodes_for_node;
+
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
 pub struct ReinsertionOptimizer<'a> {
     candidates: Vec<Candidate>,
@@ -260,13 +262,32 @@ impl ReinsertionOptimizer<'_> {
         self.bvh.nodes[sibling_id] = dst_node;
         self.bvh.nodes[parent_id] = sibling_node;
 
-        if !self.bvh.nodes[sibling_id].is_leaf() {
-            parents[self.bvh.nodes[sibling_id].first_index as usize] = sibling_id as u32;
-            parents[self.bvh.nodes[sibling_id].first_index as usize + 1] = sibling_id as u32;
+        let sibling_node = &self.bvh.nodes[sibling_id];
+        if sibling_node.is_leaf() {
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                &sibling_node,
+                sibling_id,
+                &self.bvh.primitive_indices,
+                &mut self.bvh.primitives_to_nodes,
+            );
+        } else {
+            parents[sibling_node.first_index as usize] = sibling_id as u32;
+            parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
         }
-        if !self.bvh.nodes[parent_id].is_leaf() {
-            parents[self.bvh.nodes[parent_id].first_index as usize] = parent_id as u32;
-            parents[self.bvh.nodes[parent_id].first_index as usize + 1] = parent_id as u32;
+
+        let parent_node = &self.bvh.nodes[parent_id];
+        if self.bvh.nodes[parent_id].is_leaf() {
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                &parent_node,
+                parent_id,
+                &self.bvh.primitive_indices,
+                &mut self.bvh.primitives_to_nodes,
+            );
+        } else {
+            parents[parent_node.first_index as usize] = parent_id as u32;
+            parents[parent_node.first_index as usize + 1] = parent_id as u32;
         }
 
         parents[sibling_id] = to as u32;
@@ -307,5 +328,39 @@ impl RadixKey for Candidate {
     #[inline]
     fn get_level(&self, level: usize) -> u8 {
         (-self.cost).get_level(level)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::{
+        ploc::{PlocSearchDistance, SortPrecision},
+        test_util::geometry::demoscene,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_reinsertion() {
+        for res in 30..=32 {
+            let tris = demoscene(res, 0);
+            let mut aabbs = Vec::with_capacity(tris.len());
+            let mut indices = Vec::with_capacity(tris.len());
+            for (i, primitive) in tris.iter().enumerate() {
+                indices.push(i as u32);
+                aabbs.push(primitive.aabb());
+            }
+            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            bvh.validate(&tris, false, false);
+            bvh.init_primitives_to_nodes();
+            bvh.init_parents();
+            bvh.validate(&tris, false, false);
+            ReinsertionOptimizer::run(&mut bvh, 0.25, None);
+            bvh.validate(&tris, false, false);
+            bvh.reorder_in_stack_traversal_order();
+            ReinsertionOptimizer::run(&mut bvh, 0.5, None);
+            bvh.validate(&tris, false, false);
+        }
     }
 }
