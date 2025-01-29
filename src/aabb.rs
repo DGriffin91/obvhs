@@ -184,9 +184,9 @@ impl Aabb {
     }
 
     /// Checks if this AABB intersects with another AABB.
-    #[inline]
+    #[inline(always)]
     pub fn intersect_aabb(&self, other: &Aabb) -> bool {
-        !(self.min.cmpgt(other.max).any() || self.max.cmplt(other.min).any())
+        (self.min.cmpgt(other.max) | self.max.cmplt(other.min)).bitmask() == 0
     }
 
     /// Checks if this AABB intersects with a ray and returns the distance to the intersection point.
