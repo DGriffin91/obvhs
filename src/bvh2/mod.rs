@@ -304,9 +304,13 @@ impl Bvh2 {
     /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
     /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
-    pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
-        let mut stack =
-            HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
+    pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(
+        &self,
+        stack: &mut HeapStack<u32>,
+        aabb: Aabb,
+        mut eval: F,
+    ) {
+        stack.clear();
         stack.push(0);
         while let Some(current_node_index) = stack.pop() {
             let node = &self.nodes[*current_node_index as usize];
@@ -323,6 +327,7 @@ impl Bvh2 {
                 stack.push(node.first_index + 1);
             }
         }
+        stack.clear();
     }
 
     /// Order node array in stack traversal order. Ensures parents are always at lower indices than children. Fairly

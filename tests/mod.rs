@@ -6,11 +6,15 @@ mod tests {
     use glam::*;
     use obvhs::{
         aabb::Aabb,
-        bvh2::builder::{build_bvh2, build_bvh2_from_tris},
+        bvh2::{
+            builder::{build_bvh2, build_bvh2_from_tris},
+            DEFAULT_MAX_STACK_DEPTH,
+        },
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
         },
+        heapstack::HeapStack,
         ray::{Ray, RayHit},
         test_util::{
             geometry::{demoscene, height_to_triangles, icosphere},
@@ -164,7 +168,9 @@ mod tests {
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
         bvh2.validate(&tris, false, false, true);
-        bvh2.aabb_traverse(aabb, |bvh, id| {
+        let mut stack =
+            HeapStack::new_with_capacity(bvh2.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
+        bvh2.aabb_traverse(&mut stack, aabb, |bvh, id| {
             let node = &bvh.nodes[id as usize];
             for i in 0..node.prim_count {
                 let primitive_id = bvh.primitive_indices[(node.first_index + i) as usize] as usize;
