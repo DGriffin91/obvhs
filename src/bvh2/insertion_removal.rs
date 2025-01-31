@@ -158,6 +158,7 @@ impl Bvh2 {
     /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
     /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
     /// See "Branch and Bound" https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf
+    /// Jiˇrí Bittner et al. 2012 Fast Insertion-Based Optimization of Bounding Volume Hierarchies
     ///
     /// # Returns
     /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
@@ -195,15 +196,14 @@ impl Bvh2 {
             let candidate = &self.nodes[current_node_index];
 
             let direct_cost = candidate.aabb.union(&new_node.aabb).half_area();
-            let cost_increase = direct_cost - candidate.aabb.half_area();
-            let inherited_cost = sibling_candidate.inherited_cost + cost_increase;
-            let cost = direct_cost + inherited_cost;
+            let total_cost = direct_cost + sibling_candidate.inherited_cost;
 
-            if cost < min_cost {
-                min_cost = cost;
+            if total_cost < min_cost {
+                min_cost = total_cost;
                 best_sibling_candidate_id = current_node_index;
                 // If this is not a leaf, it's possible a better cost could be found further down.
                 if !candidate.is_leaf() {
+                    let inherited_cost = total_cost - candidate.aabb.half_area();
                     stack.push(SiblingInsertionCandidate {
                         inherited_cost,
                         index: candidate.first_index,
