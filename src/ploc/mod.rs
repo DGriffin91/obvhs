@@ -16,11 +16,9 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
+use crate::bvh2::node::Bvh2Node;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
-use crate::{
-    aabb::Aabb,
-    bvh2::{Bvh2, Bvh2Node},
-};
+use crate::{aabb::Aabb, bvh2::Bvh2};
 
 impl PlocSearchDistance {
     /// # Arguments

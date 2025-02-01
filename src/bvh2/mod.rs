@@ -3,7 +3,10 @@
 pub mod builder;
 pub mod insertion_removal;
 pub mod leaf_collapser;
+pub mod node;
 pub mod reinsertion;
+
+use node::Bvh2Node;
 
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -11,8 +14,6 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
 };
-
-use bytemuck::{Pod, Zeroable};
 
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -25,138 +26,20 @@ use crate::{
     Boundable, INVALID,
 };
 
-/// A node in the Bvh2, can be an inner node or leaf.
-#[derive(Default, Clone, Copy, Debug)]
-#[repr(C)]
-pub struct Bvh2Node {
-    /// The bounding box for the primitive(s) contained in this node
-    pub aabb: Aabb,
-    /// Number of primitives contained in this node.
-    /// If prim_count is 0, this is a inner node.
-    /// If prim_count > 0 this node is a leaf node.
-    pub prim_count: u32,
-    /// The index of the first child Aabb or primitive.
-    /// If this node is an inner node the first child will be at `nodes[first_index]`, and the second at `nodes[first_index + 1]`.
-    /// If this node is a leaf node the first index typically indexes into a primitive_indices list that contains the actual index of the primitive.
-    /// The reason for this mapping is that if multiple primitives are contained in this node, they need to have their indices layed out contiguously.
-    /// To avoid this indirection we have two options:
-    /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the primitive list.
-    /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
-    pub first_index: u32,
-}
-
-unsafe impl Pod for Bvh2Node {}
-unsafe impl Zeroable for Bvh2Node {}
-
-impl Bvh2Node {
-    #[inline(always)]
-    pub fn new(aabb: Aabb, prim_count: u32, first_index: u32) -> Self {
-        Self {
-            aabb,
-            prim_count,
-            first_index,
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_leaf(&self) -> bool {
-        self.prim_count != 0
-    }
-
-    #[inline(always)]
-    pub fn is_left_sibling(node_id: usize) -> bool {
-        node_id % 2 == 1
-    }
-    #[inline(always)]
-    pub fn get_sibling_id(node_id: usize) -> usize {
-        if Self::is_left_sibling(node_id) {
-            node_id + 1
-        } else {
-            node_id - 1
-        }
-    }
-    #[inline(always)]
-    pub fn get_left_sibling_id(node_id: usize) -> usize {
-        if Self::is_left_sibling(node_id) {
-            node_id
-        } else {
-            node_id - 1
-        }
-    }
-    #[inline(always)]
-    pub fn get_right_sibling_id(node_id: usize) -> usize {
-        if Self::is_left_sibling(node_id) {
-            node_id + 1
-        } else {
-            node_id
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_left_sibling32(node_id: u32) -> bool {
-        node_id % 2 == 1
-    }
-    #[inline(always)]
-    pub fn get_sibling_id32(node_id: u32) -> u32 {
-        if Self::is_left_sibling32(node_id) {
-            node_id + 1
-        } else {
-            node_id - 1
-        }
-    }
-    #[inline(always)]
-    pub fn get_left_sibling_id32(node_id: u32) -> u32 {
-        if Self::is_left_sibling32(node_id) {
-            node_id
-        } else {
-            node_id - 1
-        }
-    }
-    #[inline(always)]
-    pub fn get_right_sibling_id32(node_id: u32) -> u32 {
-        if Self::is_left_sibling32(node_id) {
-            node_id + 1
-        } else {
-            node_id
-        }
-    }
-    #[inline(always)]
-    pub fn make_inner(&mut self, first_index: u32) {
-        self.prim_count = 0;
-        self.first_index = first_index;
-    }
-}
-
-/// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
-pub struct RayTraversal {
-    pub stack: HeapStack<u32>,
-    pub ray: Ray,
-    pub current_primitive_index: u32,
-    pub primitive_count: u32,
-}
-
-impl RayTraversal {
-    #[inline(always)]
-    /// Reinitialize traversal state with new ray.
-    pub fn reinit(&mut self, ray: Ray) {
-        self.stack.clear();
-        self.stack.push(0);
-        self.primitive_count = 0;
-        self.current_primitive_index = 0;
-        self.ray = ray;
-    }
-}
-
 /// A binary BVH
 #[derive(Clone, Default)]
 pub struct Bvh2 {
-    /// List of nodes contained in this bvh. first_index in Bvh2Node indexes into this list.
+    /// List of nodes contained in this bvh. first_index in Bvh2Node for inner nodes indexes into this list. This list
+    /// fully represents the BVH tree. The other fields in this struct provide additional information that allow the BVH
+    /// to be manipulated more efficently, but are not actually part of the BVH itself. The only other critical field is
+    /// `primitive_indices`, assuming the BVH is not using a direct mapping.
     pub nodes: Vec<Bvh2Node>,
 
     /// Mapping from bvh primitive indices to original input indices
-    /// The reason for this mapping is that if multiple primitives are contained in a node, they need to have their indices laid out contiguously.
-    /// To avoid this indirection we have two options:
-    /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the primitive list.
+    /// The reason for this mapping is that if multiple primitives are contained in a node, they need to have their
+    /// indices laid out contiguously. To avoid this indirection we have two options:
+    /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the
+    ///     primitive list.
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub primitive_indices: Vec<u32>,
 
@@ -804,6 +687,26 @@ fn update_primitives_to_nodes_for_node(
             let direct_prim_id = primitive_indices[node_prim_id as usize];
             primitives_to_nodes[direct_prim_id as usize] = node_id as u32;
         }
+    }
+}
+
+/// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
+pub struct RayTraversal {
+    pub stack: HeapStack<u32>,
+    pub ray: Ray,
+    pub current_primitive_index: u32,
+    pub primitive_count: u32,
+}
+
+impl RayTraversal {
+    #[inline(always)]
+    /// Reinitialize traversal state with new ray.
+    pub fn reinit(&mut self, ray: Ray) {
+        self.stack.clear();
+        self.stack.push(0);
+        self.primitive_count = 0;
+        self.current_primitive_index = 0;
+        self.ray = ray;
     }
 }
 

@@ -162,7 +162,7 @@ impl ReinsertionOptimizer<'_> {
                 .map(|i| {
                     // TODO figure out a way to create a limited number of these just once and reuse from the rayon
                     let mut stack = HeapStack::<(f32, u32)>::new_with_capacity(256);
-                    find_reinsertion(self.bvh, &mut stack, self.candidates[i].node_id as usize)
+                    find_reinsertion(self.bvh, self.candidates[i].node_id as usize, &mut stack)
                 })
                 .collect::<Vec<_>>();
             reinsertions_map.drain(..).for_each(|r| {
