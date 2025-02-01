@@ -16,6 +16,7 @@ use bytemuck::{Pod, Zeroable};
 
 #[cfg(feature = "parallel")]
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use reinsertion::find_reinsertion;
 
 use crate::{
     aabb::Aabb,
@@ -574,6 +575,23 @@ impl Bvh2 {
         }
     }
 
+    /// Update node aabb and refit the BVH working up the tree from this node.
+    #[inline]
+    pub fn resize_node(&mut self, node_id: usize, aabb: Aabb) {
+        self.nodes[node_id].aabb = aabb;
+        self.refit_from_fast(node_id);
+    }
+
+    /// Find if there might be a better spot in the BVH for this node and move it there.
+    #[inline]
+    pub fn reinsert_node(&mut self, node_id: usize, stack: &mut HeapStack<(f32, u32)>) {
+        let reinsertion = find_reinsertion(self, node_id, stack);
+        if reinsertion.area_diff > 0.0 {
+            reinsertion::reinsert_node(self, reinsertion.from as usize, reinsertion.to as usize);
+            self.children_are_ordered_after_parents = false;
+        }
+    }
+
     /// Get the count of active primitive indices.
     /// when primitives are removed they are added to the `primitive_indices_freelist` so the
     /// self.primitive_indices.len() may not represent the actual number of valid, active primitive_indices.
@@ -854,10 +872,13 @@ mod tests {
     use glam::*;
 
     use crate::{
+        heapstack::HeapStack,
         ploc::{PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
-        Transformable,
+        BvhBuildParams, Transformable,
     };
+
+    use super::builder::build_bvh2_from_tris;
 
     #[test]
     fn test_refit_all() {
@@ -885,6 +906,27 @@ mod tests {
         }
 
         bvh.refit_all();
+
+        bvh.validate(&tris, false, false, true);
+    }
+
+    #[test]
+    fn test_reinsert_node() {
+        let tris = demoscene(32, 0);
+
+        let mut bvh = build_bvh2_from_tris(
+            &tris,
+            BvhBuildParams::fastest_build(),
+            &mut Default::default(),
+        );
+
+        bvh.init_primitives_to_nodes();
+        bvh.init_parents();
+
+        let mut stack = HeapStack::new_with_capacity(256);
+        for node_id in 1..bvh.nodes.len() {
+            bvh.reinsert_node(node_id, &mut stack);
+        }
 
         bvh.validate(&tris, false, false, true);
     }

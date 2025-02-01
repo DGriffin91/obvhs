@@ -56,6 +56,47 @@ impl ReinsertionOptimizer<'_> {
         bvh.children_are_ordered_after_parents = false;
     }
 
+    /// Restructures the BVH, optimizing given node locations within the BVH hierarchy per SAH cost.
+    ///
+    /// # Arguments
+    /// * `candidates` - A list of ids for nodes that need to be re-inserted.
+    /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
+    /// that potentially limit the proportion of reinsertions in a single pass.
+    pub fn run_with_candidates(bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
+        crate::scope!("reinsertion_optimize");
+
+        if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
+            return;
+        }
+
+        if bvh.parents.is_none() {
+            bvh.init_parents();
+        }
+
+        let cap = candidates.len();
+
+        let candidates = candidates
+            .iter()
+            .map(|node_id| {
+                let cost = bvh.nodes[*node_id as usize].aabb.half_area();
+                Candidate {
+                    cost,
+                    node_id: *node_id,
+                }
+            })
+            .collect::<Vec<_>>();
+
+        ReinsertionOptimizer {
+            candidates,
+            reinsertions: Vec::with_capacity(cap),
+            touched: vec![false; bvh.nodes.len()],
+            bvh,
+            batch_size_ratio: 0.0,
+        }
+        .optimize_specific_candidates(iterations);
+        bvh.children_are_ordered_after_parents = false;
+    }
+
     pub fn optimize_impl(&mut self, ratio_sequence: Option<Vec<f32>>) {
         assert!(self.bvh.parents.is_some());
 
@@ -77,6 +118,14 @@ impl ReinsertionOptimizer<'_> {
             self.find_candidates(node_count);
             self.optimize_candidates(&mut reinsertion_stack, node_count - 1);
         });
+    }
+
+    pub fn optimize_specific_candidates(&mut self, iterations: u32) {
+        assert!(self.bvh.parents.is_some());
+        let mut reinsertion_stack = HeapStack::<(f32, u32)>::new_with_capacity(256); // Can't put in Self because of borrows
+        for _ in 0..iterations {
+            self.optimize_candidates(&mut reinsertion_stack, self.candidates.len());
+        }
     }
 
     /// Find potential candidates for reinsertion
@@ -113,7 +162,7 @@ impl ReinsertionOptimizer<'_> {
                 .map(|i| {
                     // TODO figure out a way to create a limited number of these just once and reuse from the rayon
                     let mut stack = HeapStack::<(f32, u32)>::new_with_capacity(256);
-                    self.find_reinsertion(&mut stack, self.candidates[i].node_id as usize)
+                    find_reinsertion(self.bvh, &mut stack, self.candidates[i].node_id as usize)
                 })
                 .collect::<Vec<_>>();
             reinsertions_map.drain(..).for_each(|r| {
@@ -126,8 +175,11 @@ impl ReinsertionOptimizer<'_> {
         {
             assert!(count <= self.candidates.len());
             (0..count).for_each(|i| {
-                let r =
-                    self.find_reinsertion(reinsertion_stack, self.candidates[i].node_id as usize);
+                let r = find_reinsertion(
+                    self.bvh,
+                    self.candidates[i].node_id as usize,
+                    reinsertion_stack,
+                );
                 if r.area_diff > 0.0 {
                     self.reinsertions.push(r)
                 }
@@ -151,150 +203,12 @@ impl ReinsertionOptimizer<'_> {
                 self.touched[conflict] = true;
             });
 
-            self.reinsert_node(reinsertion.from as usize, reinsertion.to as usize);
+            reinsert_node(
+                &mut self.bvh,
+                reinsertion.from as usize,
+                reinsertion.to as usize,
+            );
         });
-    }
-
-    fn find_reinsertion(&self, stack: &mut HeapStack<(f32, u32)>, node_id: usize) -> Reinsertion {
-        let parents = self.bvh.parents.as_ref().unwrap();
-
-        debug_assert_ne!(node_id, 0);
-        // Try to elide bounds checks
-        assert!(node_id < self.bvh.nodes.len());
-        assert!(node_id < parents.len());
-
-        /*
-         * Here is an example that explains how the cost of a reinsertion is computed. For the
-         * reinsertion from A to C, in the figure below, we need to remove P1, replace it by B,
-         * and create a node that holds A and C and place it where C was.
-         *
-         *             R
-         *            / \
-         *          Pn   Q1
-         *          /     \
-         *        ...     ...
-         *        /         \
-         *       P1          C
-         *      / \
-         *     A   B
-         *
-         * The resulting area *decrease* is (SA(x) means the surface area of x):
-         *
-         *     SA(P1) +                                                : P1 was removed
-         *     SA(P2) - SA(B) +                                        : P2 now only contains B
-         *     SA(P3) - SA(B U sibling(P2)) +                          : Same but for P3
-         *     ... +
-         *     SA(Pn) - SA(B U sibling(P2) U ... U sibling(P(n - 1)) + : Same but for Pn
-         *     0 +                                                     : R does not change
-         *     SA(Q1) - SA(Q1 U A) +                                   : Q1 now contains A
-         *     SA(Q2) - SA(Q2 U A) +                                   : Q2 now contains A
-         *     ... +
-         *     -SA(A U C)                                              : For the parent of A and C
-         */
-        let mut best_reinsertion = Reinsertion {
-            from: node_id as u32,
-            to: 0,
-            area_diff: 0.0,
-        };
-        let node_area = self.bvh.nodes[node_id].aabb.half_area();
-
-        let parent_area = self.bvh.nodes[parents[node_id] as usize].aabb.half_area();
-        let mut area_diff = parent_area;
-        let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
-        let mut pivot_bbox = self.bvh.nodes[sibling_id].aabb;
-        let parent_id = parents[node_id] as usize;
-        let mut pivot_id = parent_id;
-        let aabb = self.bvh.nodes[node_id].aabb;
-        stack.clear();
-        loop {
-            stack.push((area_diff, sibling_id as u32));
-            while !stack.is_empty() {
-                let (top_area_diff, top_sibling_id) = stack.pop_fast();
-                if top_area_diff - node_area <= best_reinsertion.area_diff {
-                    continue;
-                }
-
-                let dst_node = &self.bvh.nodes[*top_sibling_id as usize];
-                let merged_area = dst_node.aabb.union(&aabb).half_area();
-                let reinsert_area = top_area_diff - merged_area;
-                if reinsert_area > best_reinsertion.area_diff {
-                    best_reinsertion.to = *top_sibling_id;
-                    best_reinsertion.area_diff = reinsert_area;
-                }
-
-                if !dst_node.is_leaf() {
-                    let child_area = reinsert_area + dst_node.aabb.half_area();
-                    stack.push((child_area, dst_node.first_index));
-                    stack.push((child_area, dst_node.first_index + 1));
-                }
-            }
-
-            if pivot_id != parent_id {
-                pivot_bbox = pivot_bbox.union(&self.bvh.nodes[sibling_id].aabb);
-                area_diff += self.bvh.nodes[pivot_id].aabb.half_area() - pivot_bbox.half_area();
-            }
-
-            if pivot_id == 0 {
-                break;
-            }
-
-            sibling_id = Bvh2Node::get_sibling_id(pivot_id);
-            pivot_id = parents[pivot_id] as usize;
-        }
-
-        if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
-            || best_reinsertion.to == parents[best_reinsertion.from as usize]
-        {
-            best_reinsertion = Reinsertion::default();
-        }
-
-        best_reinsertion
-    }
-
-    fn reinsert_node(&mut self, from: usize, to: usize) {
-        let parents = self.bvh.parents.as_mut().unwrap();
-
-        let sibling_id = Bvh2Node::get_sibling_id(from);
-        let parent_id = parents[from] as usize;
-        let sibling_node = self.bvh.nodes[sibling_id];
-        let dst_node = self.bvh.nodes[to];
-
-        self.bvh.nodes[to].make_inner(Bvh2Node::get_left_sibling_id(from) as u32);
-        self.bvh.nodes[sibling_id] = dst_node;
-        self.bvh.nodes[parent_id] = sibling_node;
-
-        let sibling_node = &self.bvh.nodes[sibling_id];
-        if sibling_node.is_leaf() {
-            // Tell primitives where their node went.
-            update_primitives_to_nodes_for_node(
-                &sibling_node,
-                sibling_id,
-                &self.bvh.primitive_indices,
-                &mut self.bvh.primitives_to_nodes,
-            );
-        } else {
-            parents[sibling_node.first_index as usize] = sibling_id as u32;
-            parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
-        }
-
-        let parent_node = &self.bvh.nodes[parent_id];
-        if self.bvh.nodes[parent_id].is_leaf() {
-            // Tell primitives where their node went.
-            update_primitives_to_nodes_for_node(
-                &parent_node,
-                parent_id,
-                &self.bvh.primitive_indices,
-                &mut self.bvh.primitives_to_nodes,
-            );
-        } else {
-            parents[parent_node.first_index as usize] = parent_id as u32;
-            parents[parent_node.first_index as usize + 1] = parent_id as u32;
-        }
-
-        parents[sibling_id] = to as u32;
-        parents[from] = to as u32;
-        self.bvh.refit_from_fast(to);
-        self.bvh.refit_from_fast(parent_id);
     }
 
     #[inline(always)]
@@ -311,10 +225,10 @@ impl ReinsertionOptimizer<'_> {
 }
 
 #[derive(Default, Clone, Copy)]
-struct Reinsertion {
-    from: u32,
-    to: u32,
-    area_diff: f32,
+pub struct Reinsertion {
+    pub from: u32,
+    pub to: u32,
+    pub area_diff: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -330,6 +244,158 @@ impl RadixKey for Candidate {
     fn get_level(&self, level: usize) -> u8 {
         (-self.cost).get_level(level)
     }
+}
+
+pub fn find_reinsertion(
+    bvh: &Bvh2,
+    node_id: usize,
+    stack: &mut HeapStack<(f32, u32)>,
+) -> Reinsertion {
+    let parents = bvh
+        .parents
+        .as_ref()
+        .expect("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()");
+
+    debug_assert_ne!(node_id, 0);
+    // Try to elide bounds checks
+    assert!(node_id < bvh.nodes.len());
+    assert!(node_id < parents.len());
+
+    /*
+     * Here is an example that explains how the cost of a reinsertion is computed. For the
+     * reinsertion from A to C, in the figure below, we need to remove P1, replace it by B,
+     * and create a node that holds A and C and place it where C was.
+     *
+     *             R
+     *            / \
+     *          Pn   Q1
+     *          /     \
+     *        ...     ...
+     *        /         \
+     *       P1          C
+     *      / \
+     *     A   B
+     *
+     * The resulting area *decrease* is (SA(x) means the surface area of x):
+     *
+     *     SA(P1) +                                                : P1 was removed
+     *     SA(P2) - SA(B) +                                        : P2 now only contains B
+     *     SA(P3) - SA(B U sibling(P2)) +                          : Same but for P3
+     *     ... +
+     *     SA(Pn) - SA(B U sibling(P2) U ... U sibling(P(n - 1)) + : Same but for Pn
+     *     0 +                                                     : R does not change
+     *     SA(Q1) - SA(Q1 U A) +                                   : Q1 now contains A
+     *     SA(Q2) - SA(Q2 U A) +                                   : Q2 now contains A
+     *     ... +
+     *     -SA(A U C)                                              : For the parent of A and C
+     */
+    let mut best_reinsertion = Reinsertion {
+        from: node_id as u32,
+        to: 0,
+        area_diff: 0.0,
+    };
+    let node_area = bvh.nodes[node_id].aabb.half_area();
+
+    let parent_area = bvh.nodes[parents[node_id] as usize].aabb.half_area();
+    let mut area_diff = parent_area;
+    let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
+    let mut pivot_bbox = bvh.nodes[sibling_id].aabb;
+    let parent_id = parents[node_id] as usize;
+    let mut pivot_id = parent_id;
+    let aabb = bvh.nodes[node_id].aabb;
+    stack.clear();
+    loop {
+        stack.push((area_diff, sibling_id as u32));
+        while !stack.is_empty() {
+            let (top_area_diff, top_sibling_id) = stack.pop_fast();
+            if top_area_diff - node_area <= best_reinsertion.area_diff {
+                continue;
+            }
+
+            let dst_node = &bvh.nodes[*top_sibling_id as usize];
+            let merged_area = dst_node.aabb.union(&aabb).half_area();
+            let reinsert_area = top_area_diff - merged_area;
+            if reinsert_area > best_reinsertion.area_diff {
+                best_reinsertion.to = *top_sibling_id;
+                best_reinsertion.area_diff = reinsert_area;
+            }
+
+            if !dst_node.is_leaf() {
+                let child_area = reinsert_area + dst_node.aabb.half_area();
+                stack.push((child_area, dst_node.first_index));
+                stack.push((child_area, dst_node.first_index + 1));
+            }
+        }
+
+        if pivot_id != parent_id {
+            pivot_bbox = pivot_bbox.union(&bvh.nodes[sibling_id].aabb);
+            area_diff += bvh.nodes[pivot_id].aabb.half_area() - pivot_bbox.half_area();
+        }
+
+        if pivot_id == 0 {
+            break;
+        }
+
+        sibling_id = Bvh2Node::get_sibling_id(pivot_id);
+        pivot_id = parents[pivot_id] as usize;
+    }
+
+    if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
+        || best_reinsertion.to == parents[best_reinsertion.from as usize]
+    {
+        best_reinsertion = Reinsertion::default();
+    }
+
+    best_reinsertion
+}
+
+pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
+    let parents = bvh
+        .parents
+        .as_mut()
+        .expect("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()");
+
+    let sibling_id = Bvh2Node::get_sibling_id(from);
+    let parent_id = parents[from] as usize;
+    let sibling_node = bvh.nodes[sibling_id];
+    let dst_node = bvh.nodes[to];
+
+    bvh.nodes[to].make_inner(Bvh2Node::get_left_sibling_id(from) as u32);
+    bvh.nodes[sibling_id] = dst_node;
+    bvh.nodes[parent_id] = sibling_node;
+
+    let sibling_node = &bvh.nodes[sibling_id];
+    if sibling_node.is_leaf() {
+        // Tell primitives where their node went.
+        update_primitives_to_nodes_for_node(
+            &sibling_node,
+            sibling_id,
+            &bvh.primitive_indices,
+            &mut bvh.primitives_to_nodes,
+        );
+    } else {
+        parents[sibling_node.first_index as usize] = sibling_id as u32;
+        parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
+    }
+
+    let parent_node = &bvh.nodes[parent_id];
+    if bvh.nodes[parent_id].is_leaf() {
+        // Tell primitives where their node went.
+        update_primitives_to_nodes_for_node(
+            &parent_node,
+            parent_id,
+            &bvh.primitive_indices,
+            &mut bvh.primitives_to_nodes,
+        );
+    } else {
+        parents[parent_node.first_index as usize] = parent_id as u32;
+        parents[parent_node.first_index as usize + 1] = parent_id as u32;
+    }
+
+    parents[sibling_id] = to as u32;
+    parents[from] = to as u32;
+    bvh.refit_from_fast(to);
+    bvh.refit_from_fast(parent_id);
 }
 
 #[cfg(test)]
