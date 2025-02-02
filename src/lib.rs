@@ -142,6 +142,19 @@ impl VecExt for glam::Vec3A {
     }
 }
 
+#[allow(unused)]
+fn as_slice_of_atomic_u32(slice: &mut [u32]) -> &mut [core::sync::atomic::AtomicU32] {
+    assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
+    assert_eq!(align_of::<AtomicU32>(), align_of::<u32>());
+    use core::sync::atomic::AtomicU32;
+    let parents: &mut [AtomicU32] = unsafe {
+        core::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut AtomicU32, slice.len())
+    };
+    // Alternatively:
+    //let slice: &mut [AtomicU32] = unsafe { &mut *((slice.as_mut_slice() as *mut [u32]) as *mut [AtomicU32]) };
+    parents
+}
+
 /// A macro to measure and print the execution time of a block of code.
 ///
 /// # Arguments

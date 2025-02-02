@@ -7,6 +7,8 @@ use crate::{
     Boundable, INVALID,
 };
 
+use super::DEFAULT_MAX_STACK_DEPTH;
+
 // The index and inherited_cost of a given candidate sibling used for insertion.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SiblingInsertionCandidate {
@@ -177,6 +179,7 @@ impl Bvh2 {
         let mut min_cost = f32::MAX;
         let mut best_sibling_candidate_id = 0;
         let mut max_stack_len = 1;
+        let new_node_cost = new_node.aabb.half_area();
 
         stack.clear();
         let root_aabb = self.nodes[0].aabb;
@@ -197,9 +200,13 @@ impl Bvh2 {
             if total_cost < min_cost {
                 min_cost = total_cost;
                 best_sibling_candidate_id = current_node_index;
-                // If this is not a leaf, it's possible a better cost could be found further down.
-                if !candidate.is_leaf() {
-                    let inherited_cost = total_cost - candidate.aabb.half_area();
+            }
+
+            // If this is not a leaf, it's possible a better cost could be found further down.
+            if !candidate.is_leaf() {
+                let inherited_cost = total_cost - candidate.aabb.half_area();
+                let min_subtree_cost = new_node_cost + inherited_cost;
+                if min_subtree_cost < min_cost {
                     stack.push(SiblingInsertionCandidate {
                         inherited_cost,
                         index: candidate.first_index,
@@ -336,7 +343,7 @@ impl Bvh2 {
     /// (see Bvh2::insert_leaf()). Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
     ///
     /// # Returns
-    /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
+    /// The index of the newly added node.
     ///
     /// # Arguments
     /// * `bvh` - The Bvh2 the new node is being added to
@@ -352,7 +359,7 @@ impl Bvh2 {
         aabb: Aabb,
         primitive_id: u32,
         stack: &mut HeapStack<SiblingInsertionCandidate>,
-    ) {
+    ) -> usize {
         self.init_primitives_to_nodes();
         self.init_parents();
         if self.primitives_to_nodes.len() <= primitive_id as usize {
@@ -375,13 +382,12 @@ impl Bvh2 {
             stack,
         );
         self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
+        new_node_id
     }
 }
 
 /// Slow at building, makes a slow bvh, just for testing insertion.
 /// Can result in very deep BVHs in some cases.
-/// Consider using `bvh.max_depth = Some(bvh.depth(0).max(DEFAULT_MAX_STACK_DEPTH));`
-/// (which shouldn't typically be needed, even in huge scenes)
 ///
 /// Dramatically slower than ploc at both building and traversal. Easily 10x or 100x slower at building.
 /// (goes up by something like n^3 after a certain threshold).
@@ -402,6 +408,10 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     for prim_id in 1..primitives.len() {
         bvh.insert_primitive(primitives[prim_id].aabb(), prim_id as u32, &mut stack);
     }
+
+    // Setting this here for bvh.validate since often the bvh is too deep for DEFAULT_MAX_STACK_DEPTH
+    // Typically this is not needed with a ploc builder, even in huge scenes.
+    bvh.max_depth = Some(bvh.depth(0).max(DEFAULT_MAX_STACK_DEPTH));
 
     #[cfg(debug_assertions)]
     {

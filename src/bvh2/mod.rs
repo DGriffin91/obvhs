@@ -331,21 +331,9 @@ impl Bvh2 {
         #[cfg(feature = "parallel")]
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-            use std::sync::atomic::AtomicU32;
             use std::sync::atomic::Ordering;
 
-            assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
-            assert_eq!(align_of::<AtomicU32>(), align_of::<u32>());
-            let parents: &mut [AtomicU32] =
-                unsafe { &mut *((parents.as_mut_slice() as *mut [u32]) as *mut [AtomicU32]) };
-            // Alternatively:
-            //let parents: &mut [AtomicU32] = unsafe {
-            //    std::slice::from_raw_parts_mut(
-            //        parents.as_mut_ptr() as *mut AtomicU32,
-            //        parents.len(),
-            //    )
-            //};
-
+            let parents = crate::as_slice_of_atomic_u32(parents);
             nodes.par_iter().enumerate().for_each(|(i, node)| {
                 if !node.is_leaf() {
                     parents[node.first_index as usize].store(i as u32, Ordering::Relaxed);
@@ -481,7 +469,8 @@ impl Bvh2 {
         self.refit_from_fast(node_id);
     }
 
-    /// Find if there might be a better spot in the BVH for this node and move it there.
+    /// Find if there might be a better spot in the BVH for this node and move it there. The id of the reinserted node
+    /// does not changed.
     #[inline]
     pub fn reinsert_node(&mut self, node_id: usize, stack: &mut HeapStack<(f32, u32)>) {
         let reinsertion = find_reinsertion(self, node_id, stack);
