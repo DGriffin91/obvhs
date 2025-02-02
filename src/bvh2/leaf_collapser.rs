@@ -186,7 +186,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
         // If not, skip the extra computation
         bvh.parents.clear();
     }
-    if bvh.primitives_to_nodes.is_some() {
+    if !bvh.primitives_to_nodes.is_empty() {
         // If primitives_to_nodes already existed we need to make sure it remains valid.
         // TODO perf there might be a way to update this during collapse
         bvh.update_primitives_to_nodes();

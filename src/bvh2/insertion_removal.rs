@@ -33,19 +33,18 @@ impl Bvh2 {
             // Special case if the BVH is just a leaf
             self.nodes.clear();
             self.parents.clear();
-            if let Some(primitives_to_nodes) = &mut self.primitives_to_nodes {
-                primitives_to_nodes.clear();
-            }
+            self.primitives_to_nodes.clear();
             return node_to_remove;
         }
 
-        if let Some(primitives_to_nodes) = self.primitives_to_nodes.as_deref_mut() {
+        // if primitives_to_nodes has already been initialized
+        if !self.primitives_to_nodes.is_empty() {
             // Invalidate primitives_to_nodes instances
             for node_prim_id in
                 node_to_remove.first_index..node_to_remove.first_index + node_to_remove.prim_count
             {
                 let direct_prim_id = self.primitive_indices[node_prim_id as usize];
-                primitives_to_nodes[direct_prim_id as usize] = INVALID;
+                self.primitives_to_nodes[direct_prim_id as usize] = INVALID;
             }
         }
 
@@ -254,12 +253,13 @@ impl Bvh2 {
         self.parents.push(new_parent_id as u32);
         self.parents.push(new_parent_id as u32);
 
-        if let Some(primitives_to_nodes) = &mut self.primitives_to_nodes {
+        // if primitives_to_nodes has already been initialized
+        if !self.primitives_to_nodes.is_empty() {
             // Tell primitives where their node went.
             let end = new_node.first_index + new_node.prim_count;
-            if primitives_to_nodes.len() < end as usize {
+            if self.primitives_to_nodes.len() < end as usize {
                 // Since we are adding a primitive it's possible that primitives_to_nodes is not large enough yet.
-                primitives_to_nodes.resize(end as usize, INVALID);
+                self.primitives_to_nodes.resize(end as usize, INVALID);
             }
             update_primitives_to_nodes_for_node(
                 &new_node,
@@ -289,7 +289,7 @@ impl Bvh2 {
         self.init_parents();
         self.init_primitives_to_nodes();
 
-        let node_id = self.primitives_to_nodes.as_mut().unwrap()[remove_primitive_id as usize];
+        let node_id = self.primitives_to_nodes[remove_primitive_id as usize];
 
         let node = &self.nodes[node_id as usize];
         assert!(node.is_leaf());
@@ -327,9 +327,8 @@ impl Bvh2 {
             node.prim_count -= 1;
         }
 
-        let primitives_to_nodes = self.primitives_to_nodes.as_mut().unwrap();
-        if primitives_to_nodes.len() > remove_primitive_id as usize {
-            primitives_to_nodes[remove_primitive_id as usize] = INVALID;
+        if self.primitives_to_nodes.len() > remove_primitive_id as usize {
+            self.primitives_to_nodes[remove_primitive_id as usize] = INVALID;
         }
     }
 
@@ -356,9 +355,9 @@ impl Bvh2 {
     ) {
         self.init_primitives_to_nodes();
         self.init_parents();
-        let primitives_to_nodes = self.primitives_to_nodes.as_mut().unwrap();
-        if primitives_to_nodes.len() <= primitive_id as usize {
-            primitives_to_nodes.resize(primitive_id as usize + 1, INVALID);
+        if self.primitives_to_nodes.len() <= primitive_id as usize {
+            self.primitives_to_nodes
+                .resize(primitive_id as usize + 1, INVALID);
         }
         let first_index = if let Some(free_slot) = self.primitive_indices_freelist.pop() {
             self.primitive_indices[free_slot as usize] = primitive_id;
@@ -375,7 +374,7 @@ impl Bvh2 {
             },
             stack,
         );
-        self.primitives_to_nodes.as_mut().unwrap()[primitive_id as usize] = new_node_id as u32;
+        self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
     }
 }
 
@@ -511,7 +510,7 @@ mod tests {
 
             assert_eq!(bvh.nodes.len(), 0);
             assert_eq!(bvh.parents.len(), 0);
-            assert_eq!(bvh.primitives_to_nodes.as_ref().unwrap().len(), 0);
+            assert_eq!(bvh.primitives_to_nodes.len(), 0);
             bvh.validate(&tris, false, false, true);
         }
     }

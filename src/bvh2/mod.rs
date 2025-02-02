@@ -50,8 +50,10 @@ pub struct Bvh2 {
     /// Where primitive_id is the original index of the primitive used when making the BVH and node_id is the index
     /// into Bvh2::nodes for the node of that primitive. Always use with the direct primitive id, not the one in the
     /// bvh node.
-    /// If `primitives_to_nodes` is Some, it is expected that functions that modify the BVH will keep the mapping valid.
-    pub primitives_to_nodes: Option<Vec<u32>>,
+    /// If `primitives_to_nodes` is empty it's expected that it has not been initialized yet or has been invalidated.
+    /// If `primitives_to_nodes` is not empty, it is expected that functions that modify the BVH will keep the mapping
+    /// valid or call primitives_to_nodes.clear().
+    pub primitives_to_nodes: Vec<u32>,
 
     /// An optional mapping from a given node index to that node's parent for each node in the bvh.
     /// If `parents` is empty it's expected that it has not been initialized yet or has been invalidated.
@@ -248,7 +250,7 @@ impl Bvh2 {
         if !self.parents.is_empty() {
             self.update_parents();
         }
-        if self.primitives_to_nodes.is_some() {
+        if !self.primitives_to_nodes.is_empty() {
             self.update_primitives_to_nodes();
         }
         self.children_are_ordered_after_parents = true;
@@ -309,7 +311,7 @@ impl Bvh2 {
         Bvh2::compute_parents(&self.nodes, &mut self.parents);
     }
 
-    /// Compute the mapping from a given node index to that node's parent for each node in the bvh, take vec to allow
+    /// Compute the mapping from a given node index to that node's parent for each node in the bvh, takes a Vec to allow
     /// reusing the allocation.
     pub fn compute_parents(nodes: &[Bvh2Node], parents: &mut Vec<u32>) {
         parents.resize(nodes.len(), 0);
@@ -348,26 +350,38 @@ impl Bvh2 {
 
     /// Compute compute_primitives_to_nodes and update cache only if they have not already been computed
     pub fn init_primitives_to_nodes(&mut self) {
-        if self.primitives_to_nodes.is_none() {
+        if self.primitives_to_nodes.is_empty() {
             self.update_primitives_to_nodes();
         }
     }
 
     /// Compute the mapping from primitive index to node index and update local cache.
     pub fn update_primitives_to_nodes(&mut self) {
-        let mut primitives_to_nodes = vec![0u32; self.primitive_indices.len()];
-        for (node_id, node) in self.nodes.iter().enumerate() {
+        Bvh2::compute_primitives_to_nodes(
+            &self.nodes,
+            &self.primitive_indices,
+            &mut self.primitives_to_nodes,
+        );
+    }
+
+    /// Compute the mapping from primitive index to node index. Takes a Vec to allow reusing the allocation.
+    pub fn compute_primitives_to_nodes(
+        nodes: &[Bvh2Node],
+        primitive_indices: &[u32],
+        primitives_to_nodes: &mut Vec<u32>,
+    ) {
+        primitives_to_nodes.resize(primitive_indices.len(), 0);
+        for (node_id, node) in nodes.iter().enumerate() {
             if node.is_leaf() {
                 let start = node.first_index;
                 let end = node.first_index + node.prim_count;
                 for node_prim_id in start..end {
                     // TODO perf avoid this indirection by making self.primitive_indices optional?
-                    let prim_id = self.primitive_indices[node_prim_id as usize];
+                    let prim_id = primitive_indices[node_prim_id as usize];
                     primitives_to_nodes[prim_id as usize] = node_id as u32;
                 }
             }
         }
-        self.primitives_to_nodes = Some(primitives_to_nodes);
     }
 
     pub fn validate_parents(&self) {
@@ -380,8 +394,7 @@ impl Bvh2 {
     }
 
     pub fn validate_primitives_to_nodes(&self) {
-        let primitives_to_nodes = self.primitives_to_nodes.as_deref().unwrap();
-        primitives_to_nodes
+        self.primitives_to_nodes
             .iter()
             .enumerate()
             .for_each(|(prim_id, node_id)| {
@@ -487,7 +500,7 @@ impl Bvh2 {
         splits: bool,
         tight_fit: bool,
     ) -> Bvh2ValidationResult {
-        if self.primitives_to_nodes.is_some() {
+        if !self.primitives_to_nodes.is_empty() {
             self.validate_primitives_to_nodes();
         }
 
@@ -675,9 +688,9 @@ fn update_primitives_to_nodes_for_node(
     node: &Bvh2Node,
     node_id: usize,
     primitive_indices: &[u32],
-    primitives_to_nodes: &mut Option<Vec<u32>>,
+    primitives_to_nodes: &mut Vec<u32>,
 ) {
-    if let Some(primitives_to_nodes) = primitives_to_nodes.as_mut() {
+    if !primitives_to_nodes.is_empty() {
         let start = node.first_index;
         let end = start + node.prim_count;
         for node_prim_id in start..end {
@@ -795,14 +808,13 @@ mod tests {
             PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
 
         bvh.init_primitives_to_nodes();
-        let primitives_to_nodes = bvh.primitives_to_nodes.as_ref().unwrap();
         tris.transform(&Mat4::from_scale_rotation_translation(
             Vec3::splat(1.3),
             Quat::from_rotation_y(0.1),
             vec3(0.33, 0.3, 0.37),
         ));
         for (prim_id, tri) in tris.iter().enumerate() {
-            bvh.nodes[primitives_to_nodes[prim_id] as usize].aabb = tri.aabb();
+            bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].aabb = tri.aabb();
         }
 
         bvh.refit_all();
