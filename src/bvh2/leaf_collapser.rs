@@ -23,7 +23,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
     let nodes_qty = bvh.nodes.len();
 
-    let previously_had_parents = bvh.parents.is_some();
+    let previously_had_parents = !bvh.parents.is_empty();
 
     bvh.init_parents();
 
@@ -42,7 +42,6 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     // maybe record commands in parallel, include a index, and execute them sequentially
     // also reference original impl
 
-    assert!(bvh.parents.is_some()); // SAFETY: bottom_up_traverse assumes self.bvh.parents.is_some()
     bottom_up_traverse(bvh, |leaf, i| {
         if leaf {
             prim_counts[i].set(bvh.nodes[i].prim_count);
@@ -137,8 +136,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
                             first_prim += node.prim_count;
                             while !Bvh2Node::is_left_sibling(j) && j != i {
-                                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
-                                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
+                                j = bvh.parents[j] as usize;
                             }
                             if j == i {
                                 break;
@@ -186,7 +184,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
         bvh.update_parents();
     } else {
         // If not, skip the extra computation
-        bvh.parents = None;
+        bvh.parents.clear();
     }
     if bvh.primitives_to_nodes.is_some() {
         // If primitives_to_nodes already existed we need to make sure it remains valid.
@@ -218,8 +216,7 @@ fn bottom_up_traverse<F>(
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i;
             while j != 0 {
-                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
-                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
+                j = bvh.parents[j] as usize;
 
                 process_node(false, j);
             }
@@ -250,7 +247,7 @@ fn bottom_up_traverse<F>(
             let mut j = i as usize;
             while j != 0 {
                 // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
-                j = unsafe { bvh.parents.as_ref().unwrap_unchecked() }[j] as usize;
+                j = bvh.parents[j] as usize;
 
                 process_node(false, j);
             }

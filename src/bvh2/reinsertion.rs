@@ -39,9 +39,7 @@ impl ReinsertionOptimizer<'_> {
             return;
         }
 
-        if bvh.parents.is_none() {
-            bvh.init_parents();
-        }
+        bvh.init_parents();
 
         let cap = (bvh.nodes.len() as f32 * batch_size_ratio.min(1.0)).ceil() as usize;
 
@@ -69,9 +67,7 @@ impl ReinsertionOptimizer<'_> {
             return;
         }
 
-        if bvh.parents.is_none() {
-            bvh.init_parents();
-        }
+        bvh.init_parents();
 
         let cap = candidates.len();
 
@@ -98,8 +94,6 @@ impl ReinsertionOptimizer<'_> {
     }
 
     pub fn optimize_impl(&mut self, ratio_sequence: Option<Vec<f32>>) {
-        assert!(self.bvh.parents.is_some());
-
         // This initially preforms reinsertion at the specified ratio, then at progressively smaller ratios,
         // focusing more reinsertion time at the top of the bvh. The original method would perform reinsertion
         // for a fixed ratio a fixed number of times.
@@ -121,7 +115,6 @@ impl ReinsertionOptimizer<'_> {
     }
 
     pub fn optimize_specific_candidates(&mut self, iterations: u32) {
-        assert!(self.bvh.parents.is_some());
         let mut reinsertion_stack = HeapStack::<(f32, u32)>::new_with_capacity(256); // Can't put in Self because of borrows
         for _ in 0..iterations {
             self.optimize_candidates(&mut reinsertion_stack, self.candidates.len());
@@ -190,7 +183,6 @@ impl ReinsertionOptimizer<'_> {
             .sort_unstable_by(|a, b| b.area_diff.partial_cmp(&a.area_diff).unwrap());
 
         assert!(self.reinsertions.len() <= self.touched.len());
-        assert!(self.bvh.parents.is_some()); // SAFETY: get_conflicts assumes self.bvh.parents.is_some()
         (0..self.reinsertions.len()).for_each(|i| {
             let reinsertion = &self.reinsertions[i];
             let conflicts = self.get_conflicts(reinsertion.from, reinsertion.to);
@@ -218,8 +210,8 @@ impl ReinsertionOptimizer<'_> {
             from as usize,
             Bvh2Node::get_sibling_id(from as usize),
             // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
-            unsafe { self.bvh.parents.as_ref().unwrap_unchecked() }[to as usize] as usize,
-            unsafe { self.bvh.parents.as_ref().unwrap_unchecked() }[from as usize] as usize,
+            self.bvh.parents[to as usize] as usize,
+            self.bvh.parents[from as usize] as usize,
         ]
     }
 }
@@ -251,15 +243,14 @@ pub fn find_reinsertion(
     node_id: usize,
     stack: &mut HeapStack<(f32, u32)>,
 ) -> Reinsertion {
-    let parents = bvh
-        .parents
-        .as_ref()
-        .expect("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()");
+    if bvh.parents.is_empty() {
+        panic!("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()")
+    }
 
     debug_assert_ne!(node_id, 0);
     // Try to elide bounds checks
     assert!(node_id < bvh.nodes.len());
-    assert!(node_id < parents.len());
+    assert!(node_id < bvh.parents.len());
 
     /*
      * Here is an example that explains how the cost of a reinsertion is computed. For the
@@ -296,11 +287,11 @@ pub fn find_reinsertion(
     };
     let node_area = bvh.nodes[node_id].aabb.half_area();
 
-    let parent_area = bvh.nodes[parents[node_id] as usize].aabb.half_area();
+    let parent_area = bvh.nodes[bvh.parents[node_id] as usize].aabb.half_area();
     let mut area_diff = parent_area;
     let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
     let mut pivot_bbox = bvh.nodes[sibling_id].aabb;
-    let parent_id = parents[node_id] as usize;
+    let parent_id = bvh.parents[node_id] as usize;
     let mut pivot_id = parent_id;
     let aabb = bvh.nodes[node_id].aabb;
     stack.clear();
@@ -337,11 +328,11 @@ pub fn find_reinsertion(
         }
 
         sibling_id = Bvh2Node::get_sibling_id(pivot_id);
-        pivot_id = parents[pivot_id] as usize;
+        pivot_id = bvh.parents[pivot_id] as usize;
     }
 
     if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
-        || best_reinsertion.to == parents[best_reinsertion.from as usize]
+        || best_reinsertion.to == bvh.parents[best_reinsertion.from as usize]
     {
         best_reinsertion = Reinsertion::default();
     }
@@ -350,13 +341,12 @@ pub fn find_reinsertion(
 }
 
 pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
-    let parents = bvh
-        .parents
-        .as_mut()
-        .expect("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()");
+    if bvh.parents.is_empty() {
+        panic!("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()")
+    }
 
     let sibling_id = Bvh2Node::get_sibling_id(from);
-    let parent_id = parents[from] as usize;
+    let parent_id = bvh.parents[from] as usize;
     let sibling_node = bvh.nodes[sibling_id];
     let dst_node = bvh.nodes[to];
 
@@ -374,8 +364,8 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
             &mut bvh.primitives_to_nodes,
         );
     } else {
-        parents[sibling_node.first_index as usize] = sibling_id as u32;
-        parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
+        bvh.parents[sibling_node.first_index as usize] = sibling_id as u32;
+        bvh.parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
     }
 
     let parent_node = &bvh.nodes[parent_id];
@@ -388,12 +378,12 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
             &mut bvh.primitives_to_nodes,
         );
     } else {
-        parents[parent_node.first_index as usize] = parent_id as u32;
-        parents[parent_node.first_index as usize + 1] = parent_id as u32;
+        bvh.parents[parent_node.first_index as usize] = parent_id as u32;
+        bvh.parents[parent_node.first_index as usize + 1] = parent_id as u32;
     }
 
-    parents[sibling_id] = to as u32;
-    parents[from] = to as u32;
+    bvh.parents[sibling_id] = to as u32;
+    bvh.parents[from] = to as u32;
     bvh.refit_from_fast(to);
     bvh.refit_from_fast(parent_id);
 }

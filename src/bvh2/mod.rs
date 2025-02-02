@@ -3,20 +3,17 @@
 pub mod builder;
 pub mod insertion_removal;
 pub mod leaf_collapser;
+
 pub mod node;
 pub mod reinsertion;
 
 use node::Bvh2Node;
 
-#[cfg(feature = "parallel")]
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
 };
 
-#[cfg(feature = "parallel")]
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use reinsertion::find_reinsertion;
 
 use crate::{
@@ -57,8 +54,10 @@ pub struct Bvh2 {
     pub primitives_to_nodes: Option<Vec<u32>>,
 
     /// An optional mapping from a given node index to that node's parent for each node in the bvh.
-    /// If `parents` is Some, it is expected that functions that modify the BVH will keep the mapping valid.
-    pub parents: Option<Vec<u32>>,
+    /// If `parents` is empty it's expected that it has not been initialized yet or has been invalidated.
+    /// If `parents` is not empty it's expected that functions that modify the BVH will keep the mapping valid or call
+    /// parents.clear().
+    pub parents: Vec<u32>,
 
     /// This is set by operations that ensure that parents have higher indices than children and unset by operations
     /// that might disturb that order. Some operations require this ordering and will reorder if this is not true.
@@ -246,7 +245,7 @@ impl Bvh2 {
             }
         }
         self.nodes = new_nodes;
-        if self.parents.is_some() {
+        if !self.parents.is_empty() {
             self.update_parents();
         }
         if self.primitives_to_nodes.is_some() {
@@ -299,7 +298,7 @@ impl Bvh2 {
 
     /// Compute parents and update cache only if they have not already been computed
     pub fn init_parents(&mut self) {
-        if self.parents.is_none() {
+        if self.parents.is_empty() {
             self.update_parents();
         }
     }
@@ -307,43 +306,43 @@ impl Bvh2 {
     /// Compute the mapping from a given node index to that node's parent for each node in the bvh and update local
     /// cache.
     pub fn update_parents(&mut self) {
-        self.parents = Some(self.compute_parents());
+        Bvh2::compute_parents(&self.nodes, &mut self.parents);
     }
 
-    /// Compute the mapping from a given node index to that node's parent for each node in the bvh.
-    pub fn compute_parents(&self) -> Vec<u32> {
+    /// Compute the mapping from a given node index to that node's parent for each node in the bvh, take vec to allow
+    /// reusing the allocation.
+    pub fn compute_parents(nodes: &[Bvh2Node], parents: &mut Vec<u32>) {
+        parents.resize(nodes.len(), 0);
+        parents[0] = 0;
+
         #[cfg(not(feature = "parallel"))]
         {
-            let mut parents = vec![0; self.nodes.len()];
-            parents[0] = 0;
-            self.nodes.iter().enumerate().for_each(|(i, node)| {
+            nodes.iter().enumerate().for_each(|(i, node)| {
                 if !node.is_leaf() {
                     parents[node.first_index as usize] = i as u32;
                     parents[node.first_index as usize + 1] = i as u32;
                 }
             });
-            return parents;
         }
         // Seems around 80% faster than compute_parents.
         // TODO is there a better way to parallelize?
         #[cfg(feature = "parallel")]
         {
-            let parents: Vec<AtomicU32> =
-                (0..self.nodes.len()).map(|_| AtomicU32::new(0)).collect();
+            use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
+            use std::mem::transmute;
+            use std::sync::atomic::AtomicU32;
+            use std::sync::atomic::Ordering;
 
-            parents[0].store(0, Ordering::Relaxed);
+            assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
+            assert_eq!(align_of::<AtomicU32>(), align_of::<u32>());
+            let parents: &mut [AtomicU32] = unsafe { transmute(parents.as_mut_slice()) };
 
-            self.nodes.par_iter().enumerate().for_each(|(i, node)| {
+            nodes.par_iter().enumerate().for_each(|(i, node)| {
                 if !node.is_leaf() {
                     parents[node.first_index as usize].store(i as u32, Ordering::Relaxed);
                     parents[node.first_index as usize + 1].store(i as u32, Ordering::Relaxed);
                 }
             });
-
-            return parents
-                .into_iter()
-                .map(|a| a.load(Ordering::Relaxed))
-                .collect();
         }
     }
 
@@ -372,11 +371,10 @@ impl Bvh2 {
     }
 
     pub fn validate_parents(&self) {
-        let parents = self.parents.as_deref().unwrap();
         self.nodes.iter().enumerate().for_each(|(i, node)| {
             if !node.is_leaf() {
-                assert_eq!(parents[node.first_index as usize], i as u32);
-                assert_eq!(parents[node.first_index as usize + 1], i as u32);
+                assert_eq!(self.parents[node.first_index as usize], i as u32);
+                assert_eq!(self.parents[node.first_index as usize + 1], i as u32);
             }
         });
     }
@@ -410,7 +408,6 @@ impl Bvh2 {
     /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from(&mut self, mut index: usize) {
         self.init_parents();
-        let parents = self.parents.as_deref().unwrap();
         loop {
             let node = &self.nodes[index];
             if !node.is_leaf() {
@@ -421,7 +418,7 @@ impl Bvh2 {
             if index == 0 {
                 break;
             }
-            index = parents[index] as usize;
+            index = self.parents[index] as usize;
         }
     }
 
@@ -431,7 +428,6 @@ impl Bvh2 {
     /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from_fast(&mut self, mut index: usize) {
         self.init_parents();
-        let parents = self.parents.as_deref().unwrap();
         let mut same_count = 0;
         loop {
             let node = &self.nodes[index];
@@ -454,7 +450,7 @@ impl Bvh2 {
             if index == 0 {
                 break;
             }
-            index = parents[index] as usize;
+            index = self.parents[index] as usize;
         }
     }
 
@@ -495,7 +491,7 @@ impl Bvh2 {
             self.validate_primitives_to_nodes();
         }
 
-        if self.parents.is_some() {
+        if !self.parents.is_empty() {
             self.validate_parents();
         }
 
@@ -521,13 +517,14 @@ impl Bvh2 {
 
         if self.children_are_ordered_after_parents {
             // Assert that children are always ordered after parents in self.nodes
-            let temp_parents;
-            let parents = if let Some(parents) = self.parents.as_ref() {
-                parents
-            } else {
-                temp_parents = self.compute_parents();
+            let mut temp_parents = vec![];
+            let parents = if self.parents.is_empty() {
+                Bvh2::compute_parents(&self.nodes, &mut temp_parents);
                 &temp_parents
+            } else {
+                &self.parents
             };
+
             for node_id in (1..self.nodes.len()).rev() {
                 assert!(parents[node_id] < node_id as u32);
             }
