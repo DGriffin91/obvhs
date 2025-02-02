@@ -46,19 +46,20 @@ pub struct Bvh2 {
     pub primitive_indices_freelist: Vec<u32>,
 
     /// An optional mapping from primitives back to nodes.
-    /// Ex. let node_id = primitives_to_nodes.unwrap()[primitive_id];
+    /// Ex. let node_id = primitives_to_nodes[primitive_id];
     /// Where primitive_id is the original index of the primitive used when making the BVH and node_id is the index
     /// into Bvh2::nodes for the node of that primitive. Always use with the direct primitive id, not the one in the
     /// bvh node.
+    /// See: Bvh2::init_primitives_to_nodes().
     /// If `primitives_to_nodes` is empty it's expected that it has not been initialized yet or has been invalidated.
     /// If `primitives_to_nodes` is not empty, it is expected that functions that modify the BVH will keep the mapping
-    /// valid or call primitives_to_nodes.clear().
+    /// valid.
     pub primitives_to_nodes: Vec<u32>,
 
     /// An optional mapping from a given node index to that node's parent for each node in the bvh.
+    /// See: Bvh2::init_parents().
     /// If `parents` is empty it's expected that it has not been initialized yet or has been invalidated.
-    /// If `parents` is not empty it's expected that functions that modify the BVH will keep the mapping valid or call
-    /// parents.clear().
+    /// If `parents` is not empty it's expected that functions that modify the BVH will keep the mapping valid.
     pub parents: Vec<u32>,
 
     /// This is set by operations that ensure that parents have higher indices than children and unset by operations
