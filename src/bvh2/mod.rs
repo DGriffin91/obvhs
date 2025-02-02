@@ -331,13 +331,20 @@ impl Bvh2 {
         #[cfg(feature = "parallel")]
         {
             use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-            use std::mem::transmute;
             use std::sync::atomic::AtomicU32;
             use std::sync::atomic::Ordering;
 
             assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
             assert_eq!(align_of::<AtomicU32>(), align_of::<u32>());
-            let parents: &mut [AtomicU32] = unsafe { transmute(parents.as_mut_slice()) };
+            let parents: &mut [AtomicU32] =
+                unsafe { &mut *((parents.as_mut_slice() as *mut [u32]) as *mut [AtomicU32]) };
+            // Alternatively:
+            //let parents: &mut [AtomicU32] = unsafe {
+            //    std::slice::from_raw_parts_mut(
+            //        parents.as_mut_ptr() as *mut AtomicU32,
+            //        parents.len(),
+            //    )
+            //};
 
             nodes.par_iter().enumerate().for_each(|(i, node)| {
                 if !node.is_leaf() {
