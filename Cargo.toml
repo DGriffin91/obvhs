@@ -38,3 +38,7 @@ profile-with-optick = ["profiling/profile-with-optick"]
 profile-with-superluminal = ["profiling/profile-with-superluminal"]
 profile-with-tracing = ["profiling/profile-with-tracing"]
 profile-with-tracy = ["profiling/profile-with-tracy"]
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
