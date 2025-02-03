@@ -32,6 +32,10 @@ const DT: f32 = 0.015; // Constant so it's deterministic
 
 const COUNT: u32 = 3000;
 
+const BENCH_STEPS: u32 = 1000;
+
+const RENDER: bool = false;
+
 fn main() {
     let mut physics = PhysicsWorld {
         rebuild_method: BvhRebuid::Full,
@@ -57,96 +61,101 @@ fn main() {
         physics.add_sphere(vec3a(x, i as f32 * 0.25, z), Vec3A::ZERO, 0.5, 0.5);
     }
     physics.bvh_full_rebuild();
-    let mut steps = 0;
-    let start = std::time::Instant::now();
 
     let mut spawn = false;
 
-    let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
-    window.set_target_fps(FPS_LIMIT);
-    let mut buffer = vec![0u32; width * height];
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        if window.get_mouse_down(MouseButton::Left) {
-            if !spawn {
-                spawn = true;
-                physics.add_sphere_update_bvh(
-                    vec3a(0.0, 25.0, 0.0),
-                    vec3a(0.0, -100.0, 0.0),
-                    3.0,
-                    30.0,
-                );
-            }
-        } else {
-            spawn = false;
-        }
-
-        let physics_start = Instant::now();
-        physics_update(&mut physics);
-        let physics_end = physics_start.elapsed();
-        steps += 1;
-
-        let render_start = Instant::now();
-        {
-            let bvh = &physics.bvh;
-            // Seems to be faster to convert to cwbvh each frame before rendering
-            let bvh = bvh2_to_cwbvh(&bvh, 3, true, false);
-
-            scope!("render");
-
-            #[cfg(feature = "parallel")]
-            let iter = buffer.par_iter_mut();
-            #[cfg(not(feature = "parallel"))]
-            let iter = buffer.iter_mut();
-
-            iter.enumerate().for_each(|(i, color)| {
-                // TODO there seems to be precision issues with rendering if the sphere are far away from the camera.
-                // This issue occurs regardless of using a BVH. Maybe something in the projection or ray calculation?
-                let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
-                let mut screen_uv = frag_coord.as_vec2() / target_size;
-                screen_uv.y = 1.0 - screen_uv.y;
-                let ndc = screen_uv * 2.0 - Vec2::ONE;
-                let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
-
-                let mut vs_pos = proj_inv * clip_pos;
-                vs_pos /= vs_pos.w;
-                let direction = (Vec3A::from((view_inv * vs_pos).xyz()) - eye).normalize();
-                let ray = Ray::new(eye, direction, 0.0, f32::MAX);
-
-                let mut hit = RayHit::none();
-                if bvh.ray_traverse(ray, &mut hit, |ray, id| {
-                    let primitive_id = bvh.primitive_indices[id] as usize;
-                    let sphere = &physics.items[primitive_id];
-                    ray_sphere_intersect(&ray, sphere.position, sphere.radius)
-                }) {
-                    let primitive_id = bvh.primitive_indices[hit.primitive_id as usize];
-                    let sphere = &physics.items[primitive_id as usize];
-                    let hit_p = ray.origin + ray.direction * hit.t;
-                    let normal = (hit_p - sphere.position).normalize_or_zero();
-                    *color = color_to_minifb_pixel(normal.extend(1.0));
-                } else {
-                    *color = 0; // Clear
+    if RENDER {
+        let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
+        window.set_target_fps(FPS_LIMIT);
+        let mut buffer = vec![0u32; width * height];
+        while window.is_open() && !window.is_key_down(Key::Escape) {
+            if window.get_mouse_down(MouseButton::Left) {
+                if !spawn {
+                    spawn = true;
+                    physics.add_sphere_update_bvh(
+                        vec3a(0.0, 25.0, 0.0),
+                        vec3a(0.0, -100.0, 0.0),
+                        3.0,
+                        30.0,
+                    );
                 }
-            });
-            window.update_with_buffer(&buffer, width, height).unwrap();
+            } else {
+                spawn = false;
+            }
+
+            let physics_start = Instant::now();
+            physics_update(&mut physics);
+            let physics_end = physics_start.elapsed();
+
+            let render_start = Instant::now();
+            {
+                let bvh = &physics.bvh;
+                // Seems to be faster to convert to cwbvh each frame before rendering
+                let bvh = bvh2_to_cwbvh(&bvh, 3, true, false);
+
+                scope!("render");
+
+                #[cfg(feature = "parallel")]
+                let iter = buffer.par_iter_mut();
+                #[cfg(not(feature = "parallel"))]
+                let iter = buffer.iter_mut();
+
+                iter.enumerate().for_each(|(i, color)| {
+                    // TODO there seems to be precision issues with rendering if the sphere are far away from the camera.
+                    // This issue occurs regardless of using a BVH. Maybe something in the projection or ray calculation?
+                    let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
+                    let mut screen_uv = frag_coord.as_vec2() / target_size;
+                    screen_uv.y = 1.0 - screen_uv.y;
+                    let ndc = screen_uv * 2.0 - Vec2::ONE;
+                    let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
+
+                    let mut vs_pos = proj_inv * clip_pos;
+                    vs_pos /= vs_pos.w;
+                    let direction = (Vec3A::from((view_inv * vs_pos).xyz()) - eye).normalize();
+                    let ray = Ray::new(eye, direction, 0.0, f32::MAX);
+
+                    let mut hit = RayHit::none();
+                    if bvh.ray_traverse(ray, &mut hit, |ray, id| {
+                        let primitive_id = bvh.primitive_indices[id] as usize;
+                        let sphere = &physics.items[primitive_id];
+                        ray_sphere_intersect(&ray, sphere.position, sphere.radius)
+                    }) {
+                        let primitive_id = bvh.primitive_indices[hit.primitive_id as usize];
+                        let sphere = &physics.items[primitive_id as usize];
+                        let hit_p = ray.origin + ray.direction * hit.t;
+                        let normal = (hit_p - sphere.position).normalize_or_zero();
+                        *color = color_to_minifb_pixel(normal.extend(1.0));
+                    } else {
+                        *color = 0; // Clear
+                    }
+                });
+                let render_end = render_start.elapsed();
+                window.update_with_buffer(&buffer, width, height).unwrap();
+                window.set_title(&format!(
+                    "{}: physics, {}: render",
+                    PrettyDuration(physics_end),
+                    PrettyDuration(render_end)
+                ));
+            }
         }
-        let render_end = render_start.elapsed();
-        window.set_title(&format!(
-            "{}: physics, {}: render",
-            PrettyDuration(physics_end),
-            PrettyDuration(render_end)
-        ));
+    } else {
+        let start = std::time::Instant::now();
+        for _ in 0..BENCH_STEPS {
+            physics_update(&mut physics);
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "{:>8} bench | {} per iter",
+            format!("{}", PrettyDuration(elapsed)),
+            format!(
+                "{}",
+                PrettyDuration(Duration::from_secs_f32(
+                    elapsed.as_secs_f32() / BENCH_STEPS as f32
+                ))
+            ),
+        );
     }
-    let elapsed = start.elapsed();
-    println!(
-        "{:>8} bench | {} per iter",
-        format!("{}", PrettyDuration(elapsed)),
-        format!(
-            "{}",
-            PrettyDuration(Duration::from_secs_f32(
-                elapsed.as_secs_f32() / steps as f32
-            ))
-        ),
-    );
+
     dbg!(physics.bvh.depth(0));
 }
 
@@ -246,7 +255,7 @@ impl PhysicsWorld {
             }
         }
         self.bvh =
-            PlocSearchDistance::VeryLow.build(&self.temp_aabbs, indices, SortPrecision::U64, 1);
+            PlocSearchDistance::Minimum.build(&self.temp_aabbs, indices, SortPrecision::U64, 0);
     }
 
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
