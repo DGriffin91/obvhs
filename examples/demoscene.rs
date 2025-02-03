@@ -1,12 +1,15 @@
+use argh::FromArgs;
 // For fun, not pbr
 // Run with `--release --features parallel` unless you like waiting around for a very long time.
 use glam::*;
 use image::{ImageBuffer, Rgba};
+use minifb::{Key, Window, WindowOptions};
 use obvhs::{
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
     rt_triangle::RtTriangle,
     test_util::{
+        atomic_colors::{color_to_minifb_pixel, AtomicColorBuffer},
         geometry::demoscene,
         sampling::{
             build_orthonormal_basis, cosine_sample_hemisphere, hash_noise,
@@ -15,7 +18,28 @@ use obvhs::{
     },
     timeit, BvhBuildParams,
 };
-use std::{io::Write, time::Duration};
+use std::{io::Write, thread, time::Duration};
+
+#[derive(FromArgs)]
+/// `demoscene` example
+struct Args {
+    /// image resolution width (image height and mesh resolutions are also derived from this).
+    #[argh(option, default = "1280")]
+    width: usize,
+    /// AA sample count.
+    #[argh(option, default = "64")]
+    samples: usize,
+    /// if set, no window is created to show render progress.
+    #[argh(switch)]
+    no_window: bool,
+    /// mesh rng seed.
+    #[argh(option, default = "570")]
+    seed: usize,
+    /// save output render to file as png
+    #[argh(option, short = 'o')]
+    output: Option<String>,
+}
+
 pub const SUN_ANGULAR_DIAMETER: f32 = 0.00933;
 
 #[cfg(feature = "parallel")]
@@ -23,14 +47,13 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sky::Sky;
 
 fn main() {
-    let total_aa_samples = 64;
-    let resolution = 2560;
-    let seed = 57;
+    let args: Args = argh::from_env();
 
     timeit!["generate height map",
-    let tris = demoscene(resolution as usize, seed * 10);
+    let tris = demoscene(args.width as usize, args.seed as u32);
     ];
-    println!("{} triangles, {} AA samples", tris.len(), total_aa_samples);
+    let tris_count = tris.len();
+    println!("{tris_count} triangles, {} AA samples", args.samples);
     timeit!["generate bvh",
     let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut Duration::default());
     ];
@@ -44,8 +67,41 @@ fn main() {
     let intersection_fn = |ray: &Ray, id: usize| bvh_tris[id].intersect(ray);
 
     // Setup render target and camera
-    let width = resolution;
-    let height = ((resolution as f32) * 0.3711) as u32;
+    let width = args.width;
+    let height = ((width as f32) * 0.3711) as usize;
+    let exposure = -3.6;
+
+    // Optionally create a window to show render progress
+    let window_buffer;
+    let window_thread = if !args.no_window {
+        let shared_buffer = AtomicColorBuffer::new(width, height);
+        window_buffer = Some(shared_buffer.clone());
+        Some(thread::spawn(move || {
+            let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
+            window.set_target_fps(15);
+            let mut buffer = vec![0u32; width * height];
+            while window.is_open() && !window.is_key_down(Key::Escape) {
+                let mut sample = 0;
+                for (i, pixel) in buffer.iter_mut().enumerate() {
+                    let mut color = shared_buffer.get(i);
+                    sample = color.w as u32;
+                    color /= color.w; // Normalize by sample count stored in w
+                    color = post_process(exposure, &Vec3A::from_vec4(color)).extend(1.0);
+                    *pixel = color_to_minifb_pixel(color);
+                }
+                window.update_with_buffer(&buffer, width, height).unwrap();
+                window.set_title(&format!(
+                    "{tris_count} tris, {sample}/{} AA samples",
+                    args.samples
+                ));
+            }
+        }))
+    } else {
+        window_buffer = None;
+        None
+    };
+
+    let (width, height) = (width as u32, height as u32);
     let target_size = Vec2::new(width as f32, height as f32);
     let fov = 17.0f32;
     let eye = vec3a(0.0, 0.0, 1.35);
@@ -55,7 +111,6 @@ fn main() {
     let sky_bg = Sky::red_sunset(-vec3a(0.35, -0.1, 0.5).normalize()); // To extend the sun glow a bit in the BG
     let nee = 1.0 - SUN_ANGULAR_DIAMETER.cos();
     let material_color = vec3a(0.61, 0.59, 0.52).powf(2.2);
-    let exposure = -3.6;
 
     // Compute camera projection & view matrices
     let aspect_ratio = target_size.x / target_size.y;
@@ -66,11 +121,11 @@ fn main() {
 
     let mut fragments = vec![Vec3A::ZERO; (width * height) as usize];
 
-    println!("|{}|", " ".repeat(total_aa_samples as usize));
+    println!("|{}|", " ".repeat(args.samples as usize));
     print!(" ");
     timeit![
         "render",
-        for aa_sample in 0..total_aa_samples {
+        for aa_sample in 0..args.samples as u32 {
             print!("."); // Print progress
             std::io::stdout().flush().unwrap();
             let new_fragments: Vec<Vec3A>;
@@ -204,6 +259,12 @@ fn main() {
                         color += sky_bgc * 0.4 + sky_bgc * misc_grain_noise * 0.6;
                         color += 0.2 * fogc;
                     }
+
+                    if let Some(buffer) = &window_buffer {
+                        let accum_color = buffer.get(i as usize) + color.extend(1.0);
+                        buffer.set(i as usize, accum_color);
+                    }
+
                     color
                 })
                 .collect::<Vec<_>>();
@@ -215,21 +276,30 @@ fn main() {
         println!("");
     ];
 
-    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width, height);
+    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width as u32, height as u32);
     let pixels = img.as_mut();
     pixels.chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-        let mut col = (fragments[i] / total_aa_samples as f32).max(Vec3A::ZERO);
-        col *= Vec3A::splat(2.0).powf(exposure);
-        col = somewhat_boring_display_transform(col);
-        col = col.powf(1.7); // contrast
-        let luma = Vec3A::splat(col.dot(vec3a(0.2126, 0.7152, 0.0722)));
-        col = luma * -0.1 + col * 1.1; // saturation
-        let c = (col.clamp(Vec3A::ZERO, Vec3A::ONE) * 255.0).as_uvec3();
+        let mut color = (fragments[i] / args.samples as f32).max(Vec3A::ZERO);
+        color = post_process(exposure, &color);
+        let c = (color.clamp(Vec3A::ZERO, Vec3A::ONE) * 255.0).as_uvec3();
         chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
     });
 
-    img.save(format!("demoscene_{}_rend.png", seed))
-        .expect("Failed to save image");
+    if let Some(output) = args.output {
+        img.save(output).expect("Failed to save image");
+    }
+
+    if let Some(window_thread) = window_thread {
+        window_thread.join().unwrap();
+    }
+}
+
+fn post_process(exposure: f32, color: &Vec3A) -> Vec3A {
+    let mut color = color * Vec3A::splat(2.0).powf(exposure);
+    color = somewhat_boring_display_transform(color);
+    color = color.powf(1.7); // contrast
+    let luma = Vec3A::splat(color.dot(vec3a(0.2126, 0.7152, 0.0722)));
+    luma * -0.1 + color * 1.1 // saturation
 }
 
 mod sky {

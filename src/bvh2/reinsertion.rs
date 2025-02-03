@@ -61,7 +61,7 @@ impl ReinsertionOptimizer<'_> {
     /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
     /// that potentially limit the proportion of reinsertions in a single pass.
     pub fn run_with_candidates(bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
-        crate::scope!("reinsertion_optimize");
+        crate::scope!("reinsertion_optimize_candidates");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
             return;
