@@ -99,5 +99,5 @@ impl AtomicColorBuffer {
 #[allow(dead_code)]
 pub fn color_to_minifb_pixel(color: Vec4) -> u32 {
     let c = (color.xyz().clamp(Vec3::ZERO, Vec3::ONE) * 255.0).as_uvec3();
-    (c.x << 16) | (c.y << 8) | c.z
+    ((c.x & 0xff) << 16) | ((c.y & 0xff) << 8) | (c.z & 0xff)
 }
