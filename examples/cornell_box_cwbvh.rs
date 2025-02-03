@@ -10,6 +10,10 @@ use obvhs::{
     BvhBuildParams, Transformable,
 };
 
+#[path = "./helpers/debug.rs"]
+mod debug;
+use debug::simple_debug_window;
+
 // Generate triangles for cornell box
 fn generate_cornell_box() -> Vec<Triangle> {
     let floor = PLANE;
@@ -87,12 +91,14 @@ fn main() {
     let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
 
     // Init image buffer
-    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width, height);
+    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width as u32, height as u32);
     let pixels = img.as_mut();
+
+    let (window_buffer, window_thread) = simple_debug_window(width, height);
 
     // For each pixel trace ray into scene and write normal as color to image buffer
     pixels.chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-        let frag_coord = uvec2(i as u32 % width, i as u32 / width);
+        let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
         let mut screen_uv = frag_coord.as_vec2() / target_size;
         screen_uv.y = 1.0 - screen_uv.y;
         let ndc = screen_uv * 2.0 - Vec2::ONE;
@@ -109,9 +115,12 @@ fn main() {
             normal *= normal.dot(-ray.direction).signum(); // Double sided
             let c = (normal * 255.0).as_uvec3();
             chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
+            window_buffer.set(i as usize, normal.extend(0.0));
         }
     });
 
     img.save("basic_cornell_box_rend.png")
         .expect("Failed to save image");
+
+    window_thread.join().unwrap(); // Wait for window to close.
 }

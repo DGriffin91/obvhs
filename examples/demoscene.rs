@@ -3,13 +3,11 @@ use argh::FromArgs;
 // Run with `--release --features parallel` unless you like waiting around for a very long time.
 use glam::*;
 use image::{ImageBuffer, Rgba};
-use minifb::{Key, Window, WindowOptions};
 use obvhs::{
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
     rt_triangle::RtTriangle,
     test_util::{
-        atomic_colors::{color_to_minifb_pixel, AtomicColorBuffer},
         geometry::demoscene,
         sampling::{
             build_orthonormal_basis, cosine_sample_hemisphere, hash_noise,
@@ -18,7 +16,13 @@ use obvhs::{
     },
     timeit, BvhBuildParams,
 };
-use std::{io::Write, thread, time::Duration};
+use std::{io::Write, time::Duration};
+
+#[path = "./helpers/debug.rs"]
+mod debug;
+use debug::{
+    debug_window, {color_to_minifb_pixel, AtomicColorBuffer},
+};
 
 #[derive(FromArgs)]
 /// `demoscene` example
@@ -72,15 +76,17 @@ fn main() {
     let exposure = -3.6;
 
     // Optionally create a window to show render progress
-    let window_buffer;
-    let window_thread = if !args.no_window {
+
+    let mut window_thread = None;
+    let mut window_buffer = None;
+    if !args.no_window {
         let shared_buffer = AtomicColorBuffer::new(width, height);
         window_buffer = Some(shared_buffer.clone());
-        Some(thread::spawn(move || {
-            let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
-            window.set_target_fps(15);
-            let mut buffer = vec![0u32; width * height];
-            while window.is_open() && !window.is_key_down(Key::Escape) {
+        window_thread = Some(debug_window(
+            width,
+            height,
+            Default::default(),
+            move |window, buffer| {
                 let mut sample = 0;
                 for (i, pixel) in buffer.iter_mut().enumerate() {
                     let mut color = shared_buffer.get(i);
@@ -89,16 +95,12 @@ fn main() {
                     color = post_process(exposure, &Vec3A::from_vec4(color)).extend(1.0);
                     *pixel = color_to_minifb_pixel(color);
                 }
-                window.update_with_buffer(&buffer, width, height).unwrap();
                 window.set_title(&format!(
                     "{tris_count} tris, {sample}/{} AA samples",
                     args.samples
                 ));
-            }
-        }))
-    } else {
-        window_buffer = None;
-        None
+            },
+        ));
     };
 
     let (width, height) = (width as u32, height as u32);
@@ -290,7 +292,7 @@ fn main() {
     }
 
     if let Some(window_thread) = window_thread {
-        window_thread.join().unwrap();
+        window_thread.join().unwrap(); // Wait for window to close.
     }
 }
 
