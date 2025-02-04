@@ -1,12 +1,16 @@
 use core::f32;
-use std::time::{Duration, Instant};
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
+use argh::FromArgs;
 use glam::*;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
     aabb::Aabb,
     bvh2::{insertion_removal::SiblingInsertionCandidate, Bvh2},
-    cwbvh::bvh2_to_cwbvh::bvh2_to_cwbvh,
+    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
     heapstack::HeapStack,
     ploc::{PlocSearchDistance, SortPrecision},
     ray::{Ray, RayHit},
@@ -20,42 +24,56 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelI
 mod debug;
 use debug::color_to_minifb_pixel;
 
-const NO_BVH: bool = false;
-
-const VERIFY_PAIRS: bool = false;
-
-const AABB_OVERSIZE_FACTOR: f32 = 1.0;
-
-const FPS_LIMIT: usize = 120; // 0 for none
-
-const DT: f32 = 0.015; // Constant so it's deterministic
-
-const COUNT: u32 = 3000;
-
-const BENCH_STEPS: u32 = 1000;
-
-const RENDER: bool = true;
+#[derive(FromArgs, Default)]
+/// `physics` example.
+/// Runs an extremely simple physics simulation, optionally using a bvh for the broad phase and real time CPU ray
+/// tracing. Click the window to drop another ball. Run with `--release` and `--features parallel` for best performance.
+struct Args {
+    /// disables the renderer and window. Only runs physics sim for `count` steps, disables ray tracing.
+    #[argh(switch)]
+    no_render: bool,
+    /// disables using the bvh for physics broad phase (still uses it for rendering)
+    #[argh(switch)]
+    no_physics_bvh: bool,
+    /// rebuild method. Modes: 'full', 'reinsert', 'remove_and_insert'
+    #[argh(option, default = "BvhRebuid::Full")]
+    rebuild_method: BvhRebuid,
+    /// check that we got the same list of pairs from the bvh broad phase as brute force method
+    #[argh(switch)]
+    verify_pairs: bool,
+    /// how much to oversize the AABBs when using Reinsert or RemoveAndInsert `min_aabb + radius * aabb_oversize_factor`
+    #[argh(option, default = "1.0")]
+    aabb_oversize_factor: f32,
+    /// physics delta step. Constant so it's deterministic.
+    #[argh(option, default = "0.015")]
+    dt: f32,
+    /// initial sphere count
+    #[argh(option, default = "3000")]
+    count: u32,
+    /// how many steps to take when the renderer is disabled
+    #[argh(option, default = "1500")]
+    bench_steps: u32,
+    /// fps limit when rending output (also limits physics sim), 0 for none
+    #[argh(option, default = "120")]
+    fps_limit: usize,
+    /// render resolution (width:height are 1:1)
+    #[argh(option, default = "512")]
+    render_res: usize,
+}
 
 fn main() {
+    let config: Args = argh::from_env();
     let mut physics = PhysicsWorld {
-        rebuild_method: BvhRebuid::Full,
+        config,
         ..Default::default()
     };
 
     // Setup render target and camera
-    let width = 512;
-    let height = 512;
-    let target_size = Vec2::new(width as f32, height as f32);
-    let fov = 55.0f32;
-    let eye = vec3a(30.0, 15.0, 30.0);
-    let look_at = vec3(0.0, 12.0, 0.0);
-    // Compute camera projection & view matrices
-    let aspect_ratio = target_size.x / target_size.y;
-    let proj_inv =
-        Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
-    let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+    let width = physics.config.render_res;
+    let height = physics.config.render_res;
+    let debug_renderer = DebugRenderer::new(width, height);
 
-    for i in 0..COUNT {
+    for i in 0..physics.config.count {
         let x = (i as f32 * 0.001).sin() * 1.0;
         let z = (i as f32 * 0.001).cos() * 1.0;
         physics.add_sphere(vec3a(x, i as f32 * 0.25, z), Vec3A::ZERO, 0.5, 0.5);
@@ -64,9 +82,27 @@ fn main() {
 
     let mut spawn = false;
 
-    if RENDER {
+    if physics.config.no_render {
+        println!("Initial bvh depth: {}", physics.bvh.depth(0));
+        let start = std::time::Instant::now();
+        for _ in 0..physics.config.bench_steps {
+            physics_update(&mut physics);
+        }
+        let elapsed = start.elapsed();
+        println!("End bvh depth: {}", physics.bvh.depth(0));
+        println!(
+            "{:>8} bench | {} per iter",
+            format!("{}", PrettyDuration(elapsed)),
+            format!(
+                "{}",
+                PrettyDuration(Duration::from_secs_f32(
+                    elapsed.as_secs_f32() / physics.config.bench_steps as f32
+                ))
+            ),
+        );
+    } else {
         let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
-        window.set_target_fps(FPS_LIMIT);
+        window.set_target_fps(physics.config.fps_limit);
         let mut buffer = vec![0u32; width * height];
         while window.is_open() && !window.is_key_down(Key::Escape) {
             if window.get_mouse_down(MouseButton::Left) {
@@ -87,49 +123,17 @@ fn main() {
             physics_update(&mut physics);
             let physics_end = physics_start.elapsed();
 
-            let render_start = Instant::now();
             {
-                let bvh = &physics.bvh;
                 // Seems to be faster to convert to cwbvh each frame before rendering
-                let bvh = bvh2_to_cwbvh(&bvh, 3, true, false);
+                let bvh = {
+                    scope!("bvh2_to_cwbvh for debug render");
+                    bvh2_to_cwbvh(&physics.bvh, 3, true, false)
+                };
 
-                scope!("render");
-
-                #[cfg(feature = "parallel")]
-                let iter = buffer.par_iter_mut();
-                #[cfg(not(feature = "parallel"))]
-                let iter = buffer.iter_mut();
-
-                iter.enumerate().for_each(|(i, color)| {
-                    // TODO there seems to be precision issues with rendering if the sphere are far away from the camera.
-                    // This issue occurs regardless of using a BVH. Maybe something in the projection or ray calculation?
-                    let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
-                    let mut screen_uv = frag_coord.as_vec2() / target_size;
-                    screen_uv.y = 1.0 - screen_uv.y;
-                    let ndc = screen_uv * 2.0 - Vec2::ONE;
-                    let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
-
-                    let mut vs_pos = proj_inv * clip_pos;
-                    vs_pos /= vs_pos.w;
-                    let direction = (Vec3A::from((view_inv * vs_pos).xyz()) - eye).normalize();
-                    let ray = Ray::new(eye, direction, 0.0, f32::MAX);
-
-                    let mut hit = RayHit::none();
-                    if bvh.ray_traverse(ray, &mut hit, |ray, id| {
-                        let primitive_id = bvh.primitive_indices[id] as usize;
-                        let sphere = &physics.items[primitive_id];
-                        ray_sphere_intersect(&ray, sphere.position, sphere.radius)
-                    }) {
-                        let primitive_id = bvh.primitive_indices[hit.primitive_id as usize];
-                        let sphere = &physics.items[primitive_id as usize];
-                        let hit_p = ray.origin + ray.direction * hit.t;
-                        let normal = (hit_p - sphere.position).normalize_or_zero();
-                        *color = color_to_minifb_pixel(normal.extend(1.0));
-                    } else {
-                        *color = 0; // Clear
-                    }
-                });
+                let render_start = Instant::now();
+                debug_renderer.render(&physics, &mut buffer, bvh);
                 let render_end = render_start.elapsed();
+
                 window.update_with_buffer(&buffer, width, height).unwrap();
                 window.set_title(&format!(
                     "{}: physics, {}: render",
@@ -138,25 +142,76 @@ fn main() {
                 ));
             }
         }
-    } else {
-        let start = std::time::Instant::now();
-        for _ in 0..BENCH_STEPS {
-            physics_update(&mut physics);
+    }
+}
+
+pub struct DebugRenderer {
+    pub target_size: Vec2,
+    pub eye: Vec3A,
+    pub proj_inv: Mat4,
+    pub view_inv: Mat4,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl DebugRenderer {
+    fn new(width: usize, height: usize) -> Self {
+        let target_size = Vec2::new(width as f32, height as f32);
+        let fov = 55.0f32;
+        let eye = vec3a(30.0, 15.0, 30.0);
+        let look_at = vec3(0.0, 9.0, 0.0);
+        // Compute camera projection & view matrices
+        let aspect_ratio = target_size.x / target_size.y;
+        let proj_inv =
+            Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
+        let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+        Self {
+            target_size,
+            eye,
+            proj_inv,
+            view_inv,
+            width,
+            height,
         }
-        let elapsed = start.elapsed();
-        println!(
-            "{:>8} bench | {} per iter",
-            format!("{}", PrettyDuration(elapsed)),
-            format!(
-                "{}",
-                PrettyDuration(Duration::from_secs_f32(
-                    elapsed.as_secs_f32() / BENCH_STEPS as f32
-                ))
-            ),
-        );
     }
 
-    dbg!(physics.bvh.depth(0));
+    fn render(&self, physics: &PhysicsWorld, buffer: &mut Vec<u32>, bvh: CwBvh) {
+        scope!("render");
+        #[cfg(feature = "parallel")]
+        let iter = buffer.par_iter_mut();
+        #[cfg(not(feature = "parallel"))]
+        let iter = buffer.iter_mut();
+
+        iter.enumerate().for_each(|(i, color)| {
+            // TODO there seems to be precision issues with rendering if the sphere are far away from the camera.
+            // This issue occurs regardless of using a BVH. Maybe something in the projection or ray calculation?
+            let frag_coord = uvec2((i % self.width) as u32, (i / self.width) as u32);
+            let mut screen_uv = frag_coord.as_vec2() / self.target_size;
+            screen_uv.y = 1.0 - screen_uv.y;
+            let ndc = screen_uv * 2.0 - Vec2::ONE;
+            let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
+
+            let mut vs_pos = self.proj_inv * clip_pos;
+            vs_pos /= vs_pos.w;
+            let direction = (Vec3A::from((self.view_inv * vs_pos).xyz()) - self.eye).normalize();
+            let ray = Ray::new(self.eye, direction, 0.0, f32::MAX);
+
+            let mut hit = RayHit::none();
+            if bvh.ray_traverse(ray, &mut hit, |ray, id| {
+                let primitive_id = bvh.primitive_indices[id] as usize;
+                let sphere = &physics.items[primitive_id];
+                ray_sphere_intersect(&ray, sphere.position, sphere.radius)
+            }) {
+                let primitive_id = bvh.primitive_indices[hit.primitive_id as usize];
+                let sphere = &physics.items[primitive_id as usize];
+                let hit_p = ray.origin + ray.direction * hit.t;
+                let normal = (hit_p - sphere.position).normalize_or_zero();
+                *color = color_to_minifb_pixel(normal.extend(1.0));
+            } else {
+                *color = 0; // Clear
+            }
+        });
+    }
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -187,13 +242,28 @@ enum BvhRebuid {
     RemoveAndInsert,
 }
 
+impl FromStr for BvhRebuid {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "full" => Ok(Self::Full),
+            "reinsert" => Ok(Self::Reinsert),
+            "remove_and_insert" => Ok(Self::RemoveAndInsert),
+            _ => Err(format!(
+                "Unknown mode: '{s}', valid modes: 'full', 'reinsert', 'remove_and_insert'"
+            )),
+        }
+    }
+}
+
 struct PhysicsWorld {
     items: Vec<SphereCollider>,
     bvh: Bvh2,
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
     temp_aabbs: Vec<Aabb>,
     collision_pairs: Vec<Pair>,
-    rebuild_method: BvhRebuid,
+    config: Args,
 }
 
 impl Default for PhysicsWorld {
@@ -204,7 +274,7 @@ impl Default for PhysicsWorld {
             bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(1000),
             temp_aabbs: Default::default(),
             collision_pairs: Vec::new(),
-            rebuild_method: Default::default(),
+            config: Args::default(),
         }
     }
 }
@@ -230,7 +300,7 @@ impl PhysicsWorld {
         mass: f32,
     ) -> u32 {
         let id = self.add_sphere(position, velocity, radius, mass);
-        let aabb = match self.rebuild_method {
+        let aabb = match self.config.rebuild_method {
             BvhRebuid::Full => self.items[id as usize].min_aabb,
             BvhRebuid::Reinsert | BvhRebuid::RemoveAndInsert => {
                 self.items[id as usize].oversized_aabb
@@ -242,13 +312,14 @@ impl PhysicsWorld {
     }
 
     pub fn bvh_full_rebuild(&mut self) {
+        scope!("bvh_full_rebuild");
         let oversize_factor = self.oversize_factor();
         self.temp_aabbs.clear();
         let indices = (0..self.items.len() as u32).collect::<Vec<_>>();
         for item in &mut self.items {
             item.update_minimum_aabb();
-            item.update_oversized_aabb(oversize_factor);
-            if self.rebuild_method == BvhRebuid::Full {
+            item.update_oversized_aabb(oversize_factor); // Currently unused in full rebuild
+            if self.config.rebuild_method == BvhRebuid::Full {
                 self.temp_aabbs.push(item.min_aabb);
             } else {
                 self.temp_aabbs.push(item.oversized_aabb);
@@ -258,7 +329,22 @@ impl PhysicsWorld {
             PlocSearchDistance::Minimum.build(&self.temp_aabbs, indices, SortPrecision::U64, 0);
     }
 
+    pub fn bvh_partial_rebuild_reinsert(&mut self) {
+        scope!("bvh_partial_rebuild_reinsert");
+        let oversize_factor = self.oversize_factor();
+        self.bvh.init_primitives_to_nodes();
+        let mut stack = HeapStack::new_with_capacity(2000);
+        for (primitive_id, item) in self.items.iter_mut().enumerate() {
+            if item.update_oversized_aabb(oversize_factor) {
+                let node_id = self.bvh.primitives_to_nodes[primitive_id];
+                self.bvh.resize_node(node_id as usize, item.oversized_aabb);
+                self.bvh.reinsert_node(node_id as usize, &mut stack);
+            }
+        }
+    }
+
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
+        scope!("bvh_partial_rebuild_remove_insert");
         let oversize_factor = self.oversize_factor();
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
@@ -272,24 +358,10 @@ impl PhysicsWorld {
         }
     }
 
-    pub fn bvh_partial_rebuild_reinsert(&mut self) {
-        let oversize_factor = self.oversize_factor();
-        self.bvh.init_primitives_to_nodes();
-        let mut stack = HeapStack::new_with_capacity(2000);
-        for (primitive_id, item) in self.items.iter_mut().enumerate() {
-            if item.update_oversized_aabb(oversize_factor) {
-                let node_id = self.bvh.primitives_to_nodes[primitive_id];
-                self.bvh.resize_node(node_id as usize, item.oversized_aabb);
-                self.bvh.reinsert_node(node_id as usize, &mut stack);
-            }
-        }
-    }
-
     pub fn oversize_factor(&self) -> f32 {
-        match self.rebuild_method {
+        match self.config.rebuild_method {
             BvhRebuid::Full => 0.0,
-            BvhRebuid::Reinsert => 0.0,
-            BvhRebuid::RemoveAndInsert => AABB_OVERSIZE_FACTOR,
+            BvhRebuid::Reinsert | BvhRebuid::RemoveAndInsert => self.config.aabb_oversize_factor,
         }
     }
 }
@@ -335,8 +407,8 @@ fn physics_update(physics: &mut PhysicsWorld) {
     {
         scope!("gravity and walls");
         for sphere in &mut physics.items {
-            sphere.velocity += gravity * DT;
-            sphere.position += sphere.velocity * DT;
+            sphere.velocity += gravity * physics.config.dt;
+            sphere.position += sphere.velocity * physics.config.dt;
 
             // Ground collision
             if sphere.position.y - sphere.radius < 0.0 {
@@ -359,18 +431,15 @@ fn physics_update(physics: &mut PhysicsWorld) {
         }
     }
 
-    if !NO_BVH {
-        scope!("rebuild");
-        match physics.rebuild_method {
-            BvhRebuid::Full => physics.bvh_full_rebuild(),
-            BvhRebuid::Reinsert => physics.bvh_partial_rebuild_reinsert(),
-            BvhRebuid::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
-        }
+    match physics.config.rebuild_method {
+        BvhRebuid::Full => physics.bvh_full_rebuild(),
+        BvhRebuid::Reinsert => physics.bvh_partial_rebuild_reinsert(),
+        BvhRebuid::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
     }
 
     physics.collision_pairs.clear();
 
-    if NO_BVH {
+    if physics.config.no_physics_bvh {
         scope!("find collision pairs, brute force");
         let len = physics.items.len();
         for s1 in 0..len {
@@ -418,7 +487,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
         physics.collision_pairs.dedup(); // dedup not needed with brute force method?
     }
 
-    if VERIFY_PAIRS {
+    if physics.config.verify_pairs {
         verify_pairs(&physics);
     }
 
@@ -428,6 +497,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
         let (pairs, mut items) = (&physics.collision_pairs, &mut physics.items);
         for pair in pairs {
             let (s1, s2) = pair.get();
+            // TODO resolve in parallel?
             resolve_collision(&mut items, s1 as usize, s2 as usize, sphere_damping);
         }
     }
