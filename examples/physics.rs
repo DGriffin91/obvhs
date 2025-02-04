@@ -14,7 +14,7 @@ use obvhs::{
     heapstack::HeapStack,
     ploc::{PlocSearchDistance, SortPrecision},
     ray::{Ray, RayHit},
-    scope, PrettyDuration,
+    PrettyDuration,
 };
 
 #[cfg(feature = "parallel")]
@@ -22,7 +22,7 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelI
 
 #[path = "./helpers/debug.rs"]
 mod debug;
-use debug::color_to_minifb_pixel;
+use debug::{color_to_minifb_pixel, text::Text, timer::reset_timers};
 
 #[derive(FromArgs, Default)]
 /// `physics` example.
@@ -35,15 +35,15 @@ struct Args {
     /// disables using the bvh for physics broad phase (still uses it for rendering)
     #[argh(switch)]
     no_physics_bvh: bool,
-    /// rebuild method. Modes: 'full', 'reinsert', 'remove_and_insert'
-    #[argh(option, default = "BvhRebuid::Full")]
-    rebuild_method: BvhRebuid,
+    /// bvh update method. Modes: 'rebuild', 'reinsert', 'remove_and_insert'
+    #[argh(option, default = "BvhUpdate::Reinsert")]
+    bvh_update: BvhUpdate,
     /// check that we got the same list of pairs from the bvh broad phase as brute force method
     #[argh(switch)]
     verify_pairs: bool,
     /// how much to oversize the AABBs when using Reinsert or RemoveAndInsert `min_aabb + radius * aabb_oversize_factor`
-    #[argh(option, default = "1.0")]
-    aabb_oversize_factor: f32,
+    #[argh(option, default = "0.1")]
+    aabb_oversize: f32,
     /// physics delta step. Constant so it's deterministic.
     #[argh(option, default = "0.015")]
     dt: f32,
@@ -51,7 +51,7 @@ struct Args {
     #[argh(option, default = "3000")]
     count: u32,
     /// how many steps to take when the renderer is disabled
-    #[argh(option, default = "1500")]
+    #[argh(option, default = "2000")]
     bench_steps: u32,
     /// fps limit when rending output (also limits physics sim), 0 for none
     #[argh(option, default = "120")]
@@ -80,8 +80,6 @@ fn main() {
     }
     physics.bvh_full_rebuild();
 
-    let mut spawn = false;
-
     if physics.config.no_render {
         println!("Initial bvh depth: {}", physics.bvh.depth(0));
         let start = std::time::Instant::now();
@@ -101,10 +99,13 @@ fn main() {
             ),
         );
     } else {
+        let mut text = Text::new(width, height, 1);
         let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
         window.set_target_fps(physics.config.fps_limit);
         let mut buffer = vec![0u32; width * height];
+        let mut spawn = false;
         while window.is_open() && !window.is_key_down(Key::Escape) {
+            reset_timers();
             if window.get_mouse_down(MouseButton::Left) {
                 if !spawn {
                     spawn = true;
@@ -123,24 +124,33 @@ fn main() {
             physics_update(&mut physics);
             let physics_end = physics_start.elapsed();
 
-            {
-                // Seems to be faster to convert to cwbvh each frame before rendering
-                let bvh = {
-                    scope!("bvh2_to_cwbvh for debug render");
-                    bvh2_to_cwbvh(&physics.bvh, 3, true, false)
-                };
+            // Seems to be faster to convert to cwbvh each frame before rendering
+            let bvh = {
+                dbg_scope!("bvh2_to_cwbvh for debug render");
+                bvh2_to_cwbvh(&physics.bvh, 3, true, false)
+            };
 
-                let render_start = Instant::now();
-                debug_renderer.render(&physics, &mut buffer, bvh);
-                let render_end = render_start.elapsed();
+            let render_start = Instant::now();
+            debug_renderer.render(&physics, &mut buffer, bvh);
+            let render_end = render_start.elapsed();
 
-                window.update_with_buffer(&buffer, width, height).unwrap();
-                window.set_title(&format!(
-                    "{}: physics, {}: render",
-                    PrettyDuration(physics_end),
-                    PrettyDuration(render_end)
-                ));
-            }
+            text.draw_timers(&mut buffer, (4, 4), 10);
+            text.dbg_pt(
+                &mut buffer,
+                &format!(
+                    "{}/{}",
+                    physics.updated_leaves_this_frame,
+                    physics.items.len(),
+                ),
+                "updated",
+            );
+
+            window.update_with_buffer(&buffer, width, height).unwrap();
+            window.set_title(&format!(
+                "{} physics, {} render",
+                PrettyDuration(physics_end),
+                PrettyDuration(render_end),
+            ));
         }
     }
 }
@@ -176,7 +186,7 @@ impl DebugRenderer {
     }
 
     fn render(&self, physics: &PhysicsWorld, buffer: &mut Vec<u32>, bvh: CwBvh) {
-        scope!("render");
+        dbg_scope!("render");
         #[cfg(feature = "parallel")]
         let iter = buffer.par_iter_mut();
         #[cfg(not(feature = "parallel"))]
@@ -235,23 +245,23 @@ impl Pair {
 
 #[derive(PartialEq, Eq, Default)]
 #[allow(dead_code)]
-enum BvhRebuid {
+enum BvhUpdate {
     #[default]
-    Full,
+    Rebuild,
     Reinsert,
     RemoveAndInsert,
 }
 
-impl FromStr for BvhRebuid {
+impl FromStr for BvhUpdate {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "full" => Ok(Self::Full),
+            "rebuild" => Ok(Self::Rebuild),
             "reinsert" => Ok(Self::Reinsert),
             "remove_and_insert" => Ok(Self::RemoveAndInsert),
             _ => Err(format!(
-                "Unknown mode: '{s}', valid modes: 'full', 'reinsert', 'remove_and_insert'"
+                "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'remove_and_insert'"
             )),
         }
     }
@@ -264,6 +274,7 @@ struct PhysicsWorld {
     temp_aabbs: Vec<Aabb>,
     collision_pairs: Vec<Pair>,
     config: Args,
+    updated_leaves_this_frame: usize,
 }
 
 impl Default for PhysicsWorld {
@@ -275,6 +286,7 @@ impl Default for PhysicsWorld {
             temp_aabbs: Default::default(),
             collision_pairs: Vec::new(),
             config: Args::default(),
+            updated_leaves_this_frame: Default::default(),
         }
     }
 }
@@ -300,9 +312,9 @@ impl PhysicsWorld {
         mass: f32,
     ) -> u32 {
         let id = self.add_sphere(position, velocity, radius, mass);
-        let aabb = match self.config.rebuild_method {
-            BvhRebuid::Full => self.items[id as usize].min_aabb,
-            BvhRebuid::Reinsert | BvhRebuid::RemoveAndInsert => {
+        let aabb = match self.config.bvh_update {
+            BvhUpdate::Rebuild => self.items[id as usize].min_aabb,
+            BvhUpdate::Reinsert | BvhUpdate::RemoveAndInsert => {
                 self.items[id as usize].oversized_aabb
             }
         };
@@ -312,14 +324,15 @@ impl PhysicsWorld {
     }
 
     pub fn bvh_full_rebuild(&mut self) {
-        scope!("bvh_full_rebuild");
+        dbg_scope!("bvh_full_rebuild");
         let oversize_factor = self.oversize_factor();
         self.temp_aabbs.clear();
         let indices = (0..self.items.len() as u32).collect::<Vec<_>>();
+        self.updated_leaves_this_frame = self.items.len();
         for item in &mut self.items {
             item.update_minimum_aabb();
             item.update_oversized_aabb(oversize_factor); // Currently unused in full rebuild
-            if self.config.rebuild_method == BvhRebuid::Full {
+            if self.config.bvh_update == BvhUpdate::Rebuild {
                 self.temp_aabbs.push(item.min_aabb);
             } else {
                 self.temp_aabbs.push(item.oversized_aabb);
@@ -330,22 +343,25 @@ impl PhysicsWorld {
     }
 
     pub fn bvh_partial_rebuild_reinsert(&mut self) {
-        scope!("bvh_partial_rebuild_reinsert");
+        dbg_scope!("bvh_partial_rebuild_reinsert");
         let oversize_factor = self.oversize_factor();
         self.bvh.init_primitives_to_nodes();
         let mut stack = HeapStack::new_with_capacity(2000);
+        self.updated_leaves_this_frame = 0;
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 let node_id = self.bvh.primitives_to_nodes[primitive_id];
                 self.bvh.resize_node(node_id as usize, item.oversized_aabb);
                 self.bvh.reinsert_node(node_id as usize, &mut stack);
+                self.updated_leaves_this_frame += 1;
             }
         }
     }
 
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
-        scope!("bvh_partial_rebuild_remove_insert");
+        dbg_scope!("bvh_partial_rebuild_remove_insert");
         let oversize_factor = self.oversize_factor();
+        self.updated_leaves_this_frame = 0;
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 self.bvh.remove_primitive(primitive_id as u32);
@@ -354,14 +370,15 @@ impl PhysicsWorld {
                     primitive_id as u32,
                     &mut self.bvh_insertion_stack,
                 );
+                self.updated_leaves_this_frame += 1;
             }
         }
     }
 
     pub fn oversize_factor(&self) -> f32 {
-        match self.config.rebuild_method {
-            BvhRebuid::Full => 0.0,
-            BvhRebuid::Reinsert | BvhRebuid::RemoveAndInsert => self.config.aabb_oversize_factor,
+        match self.config.bvh_update {
+            BvhUpdate::Rebuild => 0.0,
+            BvhUpdate::Reinsert | BvhUpdate::RemoveAndInsert => self.config.aabb_oversize,
         }
     }
 }
@@ -405,7 +422,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     let sphere_damping = 0.8;
 
     {
-        scope!("gravity and walls");
+        dbg_scope!("gravity and walls");
         for sphere in &mut physics.items {
             sphere.velocity += gravity * physics.config.dt;
             sphere.position += sphere.velocity * physics.config.dt;
@@ -431,16 +448,16 @@ fn physics_update(physics: &mut PhysicsWorld) {
         }
     }
 
-    match physics.config.rebuild_method {
-        BvhRebuid::Full => physics.bvh_full_rebuild(),
-        BvhRebuid::Reinsert => physics.bvh_partial_rebuild_reinsert(),
-        BvhRebuid::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
+    match physics.config.bvh_update {
+        BvhUpdate::Rebuild => physics.bvh_full_rebuild(),
+        BvhUpdate::Reinsert => physics.bvh_partial_rebuild_reinsert(),
+        BvhUpdate::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
     }
 
     physics.collision_pairs.clear();
 
     if physics.config.no_physics_bvh {
-        scope!("find collision pairs, brute force");
+        dbg_scope!("find collision pairs, brute force");
         let len = physics.items.len();
         for s1 in 0..len {
             let s1_min_aabb = physics.items[s1].min_aabb;
@@ -453,7 +470,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
             }
         }
     } else {
-        scope!("find collision pairs, bvh");
+        dbg_scope!("find collision pairs, bvh");
         let mut traversal_stack = HeapStack::new_with_capacity(2000);
         for s1 in 0..physics.items.len() {
             let s1_min_aabb = physics.items[s1].min_aabb;
@@ -482,7 +499,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     }
 
     {
-        scope!("sort pairs and dedup");
+        dbg_scope!("sort pairs and dedup");
         physics.collision_pairs.sort_unstable(); // unstable should be still deterministic in this case since no dup
         physics.collision_pairs.dedup(); // dedup not needed with brute force method?
     }
@@ -492,7 +509,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     }
 
     {
-        scope!("resolve collisions");
+        dbg_scope!("resolve collisions");
         // Split borrows (WHYYYYYYYYYYYYYYYYYYYYY)
         let (pairs, mut items) = (&physics.collision_pairs, &mut physics.items);
         for pair in pairs {
