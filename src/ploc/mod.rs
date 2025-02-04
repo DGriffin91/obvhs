@@ -406,57 +406,139 @@ impl RadixKey for Morton64 {
 fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m128");
 
-    #[cfg(feature = "parallel")]
-    let iter = current_nodes.par_iter();
-    #[cfg(not(feature = "parallel"))]
-    let iter = current_nodes.iter();
+    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+        let center = leaf.aabb.center().as_dvec3() * scale + offset;
+        Morton128 {
+            index,
+            code: morton_encode_u128_unorm(center),
+        }
+    };
 
-    let mut indexed_mortons: Vec<Morton128> = iter
-        .enumerate()
-        .map(|(index, leaf)| {
-            let center = leaf.aabb.center().as_dvec3() * scale + offset;
-            Morton128 {
-                index,
-                code: morton_encode_u128_unorm(center),
-            }
-        })
-        .collect();
+    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
+    // 100k chosen from testing various tri counts with the demoscene example
+    #[cfg(feature = "parallel")]
+    let max_parallel = 100_000;
+
+    let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
+
+    #[cfg(feature = "parallel")]
+    {
+        if current_nodes.len() > max_parallel {
+            *indexed_mortons = current_nodes
+                .par_iter()
+                .enumerate()
+                .map(morton_code_proc)
+                .collect();
+        } else {
+            *indexed_mortons = current_nodes
+                .iter()
+                .enumerate()
+                .map(morton_code_proc)
+                .collect();
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        *indexed_mortons = current_nodes
+            .iter()
+            .enumerate()
+            .map(morton_code_proc)
+            .collect();
+    }
 
     indexed_mortons.radix_sort_unstable();
 
     #[cfg(feature = "parallel")]
-    let iter = indexed_mortons.into_par_iter();
-    #[cfg(not(feature = "parallel"))]
-    let iter = indexed_mortons.iter();
+    {
+        if current_nodes.len() > max_parallel {
+            *current_nodes = indexed_mortons
+                .into_par_iter()
+                .map(|m| current_nodes[m.index])
+                .collect();
+        } else {
+            *current_nodes = indexed_mortons
+                .into_iter()
+                .map(|m| current_nodes[m.index])
+                .collect();
+        };
+    }
 
-    *current_nodes = iter.map(|m| current_nodes[m.index]).collect();
+    #[cfg(not(feature = "parallel"))]
+    {
+        *current_nodes = indexed_mortons
+            .into_iter()
+            .map(|m| current_nodes[m.index])
+            .collect();
+    }
 }
 
 fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m64");
 
-    #[cfg(feature = "parallel")]
-    let iter = current_nodes.par_iter();
-    #[cfg(not(feature = "parallel"))]
-    let iter = current_nodes.iter();
+    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+        let center = leaf.aabb.center().as_dvec3() * scale + offset;
+        Morton64 {
+            index,
+            code: morton_encode_u64_unorm(center),
+        }
+    };
 
-    let mut indexed_mortons: Vec<Morton64> = iter
-        .enumerate()
-        .map(|(index, leaf)| {
-            let center = leaf.aabb.center().as_dvec3() * scale + offset;
-            Morton64 {
-                index,
-                code: morton_encode_u64_unorm(center),
-            }
-        })
-        .collect();
+    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
+    // 100k chosen from testing various tri counts with the demoscene example
+    #[cfg(feature = "parallel")]
+    let max_parallel = 100_000;
+
+    let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
+
+    #[cfg(feature = "parallel")]
+    {
+        if current_nodes.len() > max_parallel {
+            *indexed_mortons = current_nodes
+                .par_iter()
+                .enumerate()
+                .map(morton_code_proc)
+                .collect();
+        } else {
+            *indexed_mortons = current_nodes
+                .iter()
+                .enumerate()
+                .map(morton_code_proc)
+                .collect();
+        }
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    {
+        *indexed_mortons = current_nodes
+            .iter()
+            .enumerate()
+            .map(morton_code_proc)
+            .collect();
+    }
 
     indexed_mortons.radix_sort_unstable();
 
     #[cfg(feature = "parallel")]
-    let iter = indexed_mortons.into_par_iter();
-    #[cfg(not(feature = "parallel"))]
-    let iter = indexed_mortons.iter();
+    {
+        if current_nodes.len() > max_parallel {
+            *current_nodes = indexed_mortons
+                .into_par_iter()
+                .map(|m| current_nodes[m.index])
+                .collect();
+        } else {
+            *current_nodes = indexed_mortons
+                .into_iter()
+                .map(|m| current_nodes[m.index])
+                .collect();
+        };
+    }
 
-    *current_nodes = iter.map(|m| current_nodes[m.index]).collect();
+    #[cfg(not(feature = "parallel"))]
+    {
+        *current_nodes = indexed_mortons
+            .into_iter()
+            .map(|m| current_nodes[m.index])
+            .collect();
+    }
 }

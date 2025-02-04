@@ -34,7 +34,7 @@ const COUNT: u32 = 3000;
 
 const BENCH_STEPS: u32 = 1000;
 
-const RENDER: bool = false;
+const RENDER: bool = true;
 
 fn main() {
     let mut physics = PhysicsWorld {
