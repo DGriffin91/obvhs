@@ -18,7 +18,9 @@ use obvhs::{
 };
 
 #[cfg(feature = "parallel")]
-use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 #[path = "./helpers/debug.rs"]
 mod debug;
@@ -471,36 +473,64 @@ fn physics_update(physics: &mut PhysicsWorld) {
         }
     } else {
         dbg_scope!("find collision pairs, bvh");
-        let mut traversal_stack = HeapStack::new_with_capacity(2000);
-        for s1 in 0..physics.items.len() {
-            let s1_min_aabb = physics.items[s1].min_aabb;
 
-            // Split borrows (WHYYYYYYYYYYYYYYYYYYYYY)
-            let (pairs, bvh, items) = (
-                &mut physics.collision_pairs,
-                &physics.bvh,
-                &mut physics.items,
-            );
+        #[cfg(not(feature = "parallel"))]
+        let mut traversal_stack = HeapStack::new_with_capacity(256);
+        let traverse_closure = |s1| {
+            #[cfg(feature = "parallel")]
+            let mut traversal_stack = HeapStack::new_with_capacity(256); // TODO re-use allocation
 
-            bvh.aabb_traverse(&mut traversal_stack, s1_min_aabb, |bvh, node_id| {
-                let node = &bvh.nodes[node_id as usize];
-                let start = node.first_index as usize;
-                let end = start + node.prim_count as usize;
-                for node_prim_id in start..end {
-                    let s2 = bvh.primitive_indices[node_prim_id] as usize;
-                    // Check against all primitives in this leaf node
-                    if items[s2].min_aabb.intersect_aabb(&s1_min_aabb) && s1 != s2 {
-                        pairs.push(Pair::new(s1 as u32, s2 as u32));
+            #[cfg(feature = "parallel")]
+            let mut pairs = Vec::new(); // TODO re-use allocation
+            #[cfg(not(feature = "parallel"))]
+            let pairs = &mut physics.collision_pairs;
+
+            let item: &SphereCollider = &physics.items[s1];
+            let s1_min_aabb = item.min_aabb;
+
+            physics
+                .bvh
+                .aabb_traverse(&mut traversal_stack, s1_min_aabb, |bvh, node_id| {
+                    let node = &bvh.nodes[node_id as usize];
+                    let start = node.first_index as usize;
+                    let end = start + node.prim_count as usize;
+                    for node_prim_id in start..end {
+                        let s2 = bvh.primitive_indices[node_prim_id] as usize;
+                        // Check against all primitives in this leaf node
+                        if physics.items[s2].min_aabb.intersect_aabb(&s1_min_aabb) && s1 != s2 {
+                            pairs.push(Pair::new(s1 as u32, s2 as u32));
+                        }
                     }
-                }
-                true
-            });
+                    true
+                });
+
+            #[cfg(feature = "parallel")]
+            pairs.into_iter()
+        };
+
+        let range = 0..physics.items.len();
+
+        #[cfg(feature = "parallel")]
+        {
+            physics.collision_pairs = range
+                .into_par_iter()
+                .flat_map_iter(traverse_closure)
+                .collect::<Vec<_>>();
         }
+
+        #[cfg(not(feature = "parallel"))]
+        range.into_iter().for_each(traverse_closure);
     }
 
     {
-        dbg_scope!("sort pairs and dedup");
-        physics.collision_pairs.sort_unstable(); // unstable should be still deterministic in this case since no dup
+        dbg_scope!("sort pairs");
+        // unstable should be still deterministic in this case since no dup
+        // TODO perf/forte Tried using rdst, was a bit faster without parallel feature, but much slower with parallel feature
+        physics.collision_pairs.sort_unstable();
+    }
+
+    {
+        dbg_scope!("dedup pairs");
         physics.collision_pairs.dedup(); // dedup not needed with brute force method?
     }
 
