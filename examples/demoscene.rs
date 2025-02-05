@@ -27,15 +27,18 @@ use debug::{
 #[derive(FromArgs)]
 /// `demoscene` example
 struct Args {
+    /// if set, no window is created to show render progress.
+    #[argh(switch)]
+    no_window: bool,
+    /// just generates the mesh and BVH then returns.
+    #[argh(switch)]
+    no_render: bool,
     /// image resolution width (image height and mesh resolutions are also derived from this).
     #[argh(option, default = "1280")]
     width: usize,
     /// AA sample count.
     #[argh(option, default = "64")]
     samples: usize,
-    /// if set, no window is created to show render progress.
-    #[argh(switch)]
-    no_window: bool,
     /// mesh rng seed.
     #[argh(option, default = "570")]
     seed: usize,
@@ -61,6 +64,10 @@ fn main() {
     timeit!["generate bvh",
     let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut Duration::default());
     ];
+
+    if args.no_render {
+        return;
+    }
 
     let bvh_tris = bvh
         .primitive_indices
