@@ -7,10 +7,16 @@
 /// `HeapStack::new_with_capacity` and `HeapStack::reserve`.
 ///
 /// The elements must implement the `Clone` and `Default` traits.
-#[derive(Default)]
 pub struct HeapStack<T: Clone + Default> {
     data: Vec<T>,
     index: usize,
+}
+
+impl<T: Clone + Default> Default for HeapStack<T> {
+    // For safety, HeapStack cannot have a capacity of zero.
+    fn default() -> Self {
+        Self::new_with_capacity(1)
+    }
 }
 
 impl<T: Clone + Default> HeapStack<T> {

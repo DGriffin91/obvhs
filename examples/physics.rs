@@ -21,6 +21,10 @@ use obvhs::{
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
+#[cfg(feature = "parallel")]
+use std::cell::RefCell;
+#[cfg(feature = "parallel")]
+use thread_local::ThreadLocal;
 
 #[path = "./helpers/debug.rs"]
 mod debug;
@@ -277,6 +281,10 @@ struct PhysicsWorld {
     collision_pairs: Vec<Pair>,
     config: Args,
     updated_leaves_this_frame: usize,
+    #[cfg(not(feature = "parallel"))]
+    traversal_stack: HeapStack<u32>,
+    #[cfg(feature = "parallel")]
+    traversal_stack: ThreadLocal<RefCell<HeapStack<u32>>>,
 }
 
 impl Default for PhysicsWorld {
@@ -289,6 +297,10 @@ impl Default for PhysicsWorld {
             collision_pairs: Vec::new(),
             config: Args::default(),
             updated_leaves_this_frame: Default::default(),
+            #[cfg(not(feature = "parallel"))]
+            traversal_stack: HeapStack::new_with_capacity(256),
+            #[cfg(feature = "parallel")]
+            traversal_stack: ThreadLocal::new(),
         }
     }
 }
@@ -474,11 +486,15 @@ fn physics_update(physics: &mut PhysicsWorld) {
     } else {
         dbg_scope!("find collision pairs, bvh");
 
-        #[cfg(not(feature = "parallel"))]
-        let mut traversal_stack = HeapStack::new_with_capacity(256);
         let traverse_closure = |s1| {
             #[cfg(feature = "parallel")]
-            let mut traversal_stack = HeapStack::new_with_capacity(256); // TODO re-use allocation
+            let traversal_stack = &mut {
+                let mut traversal_stack = physics.traversal_stack.get_or_default().borrow_mut();
+                traversal_stack.reserve(256);
+                traversal_stack
+            };
+            #[cfg(not(feature = "parallel"))]
+            let traversal_stack = &mut physics.traversal_stack;
 
             #[cfg(feature = "parallel")]
             let mut pairs = Vec::new(); // TODO re-use allocation
@@ -490,7 +506,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
 
             physics
                 .bvh
-                .aabb_traverse(&mut traversal_stack, s1_min_aabb, |bvh, node_id| {
+                .aabb_traverse(traversal_stack, s1_min_aabb, |bvh, node_id| {
                     let node = &bvh.nodes[node_id as usize];
                     let start = node.first_index as usize;
                     let end = start + node.prim_count as usize;

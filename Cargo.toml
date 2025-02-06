@@ -17,6 +17,7 @@ half = "2.3.1"
 bytemuck = "1.15"
 rdst = { version = "0.20.14", default-features = false }
 rayon = { version = "1.9.0", optional = true }
+thread_local = { version = "1.1.8", optional = true }
 
 # Noop unless one of the profile-with features below is also used
 profiling = { version = "1.0", optional = true }
@@ -28,8 +29,8 @@ argh = "0.1.13"
 
 
 [features]
-#default = []
-parallel = ["dep:rayon", "rdst/multi-threaded"]
+default = ["parallel"]
+parallel = ["dep:rayon", "dep:thread_local", "rdst/multi-threaded"]
 timeit = []
 
 profile = ["dep:profiling"]
