@@ -279,6 +279,8 @@ struct PhysicsWorld {
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
     temp_aabbs: Vec<Aabb>,
     collision_pairs: Vec<Pair>,
+    #[cfg(feature = "parallel")]
+    temp_pairs: ThreadLocal<RefCell<Vec<Pair>>>,
     config: Args,
     updated_leaves_this_frame: usize,
     #[cfg(not(feature = "parallel"))]
@@ -295,6 +297,8 @@ impl Default for PhysicsWorld {
             bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(1000),
             temp_aabbs: Default::default(),
             collision_pairs: Vec::new(),
+            #[cfg(feature = "parallel")]
+            temp_pairs: ThreadLocal::new(),
             config: Args::default(),
             updated_leaves_this_frame: Default::default(),
             #[cfg(not(feature = "parallel"))]
@@ -470,6 +474,13 @@ fn physics_update(physics: &mut PhysicsWorld) {
 
     physics.collision_pairs.clear();
 
+    #[cfg(feature = "parallel")]
+    {
+        for p in physics.temp_pairs.iter_mut() {
+            p.borrow_mut().clear();
+        }
+    }
+
     if physics.config.no_physics_bvh {
         dbg_scope!("find collision pairs, brute force");
         let len = physics.items.len();
@@ -493,11 +504,11 @@ fn physics_update(physics: &mut PhysicsWorld) {
                 traversal_stack.reserve(256);
                 traversal_stack
             };
+            #[cfg(feature = "parallel")]
+            let pairs = &mut physics.temp_pairs.get_or_default().borrow_mut();
+
             #[cfg(not(feature = "parallel"))]
             let traversal_stack = &mut physics.traversal_stack;
-
-            #[cfg(feature = "parallel")]
-            let mut pairs = Vec::new(); // TODO re-use allocation
             #[cfg(not(feature = "parallel"))]
             let pairs = &mut physics.collision_pairs;
 
@@ -519,19 +530,16 @@ fn physics_update(physics: &mut PhysicsWorld) {
                     }
                     true
                 });
-
-            #[cfg(feature = "parallel")]
-            pairs.into_iter()
         };
 
         let range = 0..physics.items.len();
 
         #[cfg(feature = "parallel")]
         {
-            physics.collision_pairs = range
-                .into_par_iter()
-                .flat_map_iter(traverse_closure)
-                .collect::<Vec<_>>();
+            range.into_par_iter().for_each(traverse_closure);
+            for p in physics.temp_pairs.iter_mut() {
+                physics.collision_pairs.append(&mut p.borrow_mut());
+            }
         }
 
         #[cfg(not(feature = "parallel"))]
