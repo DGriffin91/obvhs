@@ -85,21 +85,26 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         return Bvh2::default();
     }
 
-    let mut init_leafs = Vec::with_capacity(prim_count);
     let mut total_aabb = Aabb::empty();
 
-    for (i, prim_index) in indices.iter().enumerate() {
-        let aabb = aabbs[i];
-        debug_assert!(!aabb.min.is_nan());
-        debug_assert!(!aabb.max.is_nan());
-        total_aabb.extend(aabb.min);
-        total_aabb.extend(aabb.max);
-        init_leafs.push(Bvh2Node {
-            aabb,
-            prim_count: 1,
-            first_index: *prim_index,
-        });
-    }
+    // TODO perf, could make parallel if each thread tracks its own min/max and then combines afterward.
+    // (Or use atomics but idk if contention would be an issue)
+    let init_leafs = indices
+        .iter()
+        .enumerate()
+        .map(|(i, prim_index)| {
+            let aabb = aabbs[i];
+            debug_assert!(!aabb.min.is_nan());
+            debug_assert!(!aabb.max.is_nan());
+            total_aabb.extend(aabb.min);
+            total_aabb.extend(aabb.max);
+            Bvh2Node {
+                aabb,
+                prim_count: 1,
+                first_index: *prim_index,
+            }
+        })
+        .collect::<Vec<_>>();
 
     let nodes = build_ploc_from_leafs::<SEARCH_DISTANCE>(
         init_leafs,
