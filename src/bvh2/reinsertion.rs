@@ -7,6 +7,11 @@
 
 #[cfg(feature = "parallel")]
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+#[cfg(feature = "parallel")]
+use std::cell::RefCell;
+#[cfg(feature = "parallel")]
+use thread_local::ThreadLocal;
+
 use rdst::{RadixKey, RadixSort};
 
 use crate::{
@@ -16,6 +21,10 @@ use crate::{
 
 use super::update_primitives_to_nodes_for_node;
 
+// In most scenes 16 would be enough. If more than 256 is needed the scene might have something pathological and may
+// take untenable amounts of time to render.
+const REINSERTION_STACK_CAP: usize = 256;
+
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
 pub struct ReinsertionOptimizer<'a> {
     candidates: Vec<Candidate>,
@@ -23,6 +32,10 @@ pub struct ReinsertionOptimizer<'a> {
     touched: Vec<bool>,
     bvh: &'a mut Bvh2,
     batch_size_ratio: f32,
+    #[cfg(not(feature = "parallel"))]
+    reinsertion_stack: HeapStack<(f32, u32)>,
+    #[cfg(feature = "parallel")]
+    reinsertion_stack: ThreadLocal<RefCell<HeapStack<(f32, u32)>>>,
 }
 
 impl ReinsertionOptimizer<'_> {
@@ -49,6 +62,10 @@ impl ReinsertionOptimizer<'_> {
             touched: vec![false; bvh.nodes.len()],
             bvh,
             batch_size_ratio,
+            #[cfg(not(feature = "parallel"))]
+            reinsertion_stack: HeapStack::<(f32, u32)>::new_with_capacity(REINSERTION_STACK_CAP),
+            #[cfg(feature = "parallel")]
+            reinsertion_stack: ThreadLocal::new(),
         }
         .optimize_impl(ratio_sequence);
         bvh.children_are_ordered_after_parents = false;
@@ -88,6 +105,10 @@ impl ReinsertionOptimizer<'_> {
             touched: vec![false; bvh.nodes.len()],
             bvh,
             batch_size_ratio: 0.0,
+            #[cfg(not(feature = "parallel"))]
+            reinsertion_stack: HeapStack::<(f32, u32)>::new_with_capacity(REINSERTION_STACK_CAP),
+            #[cfg(feature = "parallel")]
+            reinsertion_stack: ThreadLocal::new(),
         }
         .optimize_specific_candidates(iterations);
         bvh.children_are_ordered_after_parents = false;
@@ -104,20 +125,18 @@ impl ReinsertionOptimizer<'_> {
                 .collect::<Vec<_>>(),
         );
 
-        let mut reinsertion_stack = HeapStack::<(f32, u32)>::new_with_capacity(256); // Can't put in Self because of borrows
         ratio_sequence.iter().for_each(|ratio| {
             let batch_size =
                 (((self.bvh.nodes.len() as f32 * self.batch_size_ratio) * ratio) as usize).max(1);
             let node_count = self.bvh.nodes.len().min(batch_size + 1);
             self.find_candidates(node_count);
-            self.optimize_candidates(&mut reinsertion_stack, node_count - 1);
+            self.optimize_candidates(node_count - 1);
         });
     }
 
     pub fn optimize_specific_candidates(&mut self, iterations: u32) {
-        let mut reinsertion_stack = HeapStack::<(f32, u32)>::new_with_capacity(256); // Can't put in Self because of borrows
         for _ in 0..iterations {
-            self.optimize_candidates(&mut reinsertion_stack, self.candidates.len());
+            self.optimize_candidates(self.candidates.len());
         }
     }
 
@@ -144,7 +163,7 @@ impl ReinsertionOptimizer<'_> {
     }
 
     #[allow(unused_variables)]
-    fn optimize_candidates(&mut self, reinsertion_stack: &mut HeapStack<(f32, u32)>, count: usize) {
+    fn optimize_candidates(&mut self, count: usize) {
         self.reinsertions.clear();
         self.touched.fill(false);
 
@@ -153,9 +172,13 @@ impl ReinsertionOptimizer<'_> {
             let mut reinsertions_map = (0..count)
                 .into_par_iter()
                 .map(|i| {
-                    // TODO figure out a way to create a limited number of these just once and reuse from the rayon
-                    let mut stack = HeapStack::<(f32, u32)>::new_with_capacity(256);
-                    find_reinsertion(self.bvh, self.candidates[i].node_id as usize, &mut stack)
+                    let stack = &mut {
+                        let mut stack = self.reinsertion_stack.get_or_default().borrow_mut();
+                        stack.reserve(REINSERTION_STACK_CAP);
+                        stack
+                    };
+
+                    find_reinsertion(self.bvh, self.candidates[i].node_id as usize, stack)
                 })
                 .collect::<Vec<_>>();
             reinsertions_map.drain(..).for_each(|r| {
@@ -171,7 +194,7 @@ impl ReinsertionOptimizer<'_> {
                 let r = find_reinsertion(
                     self.bvh,
                     self.candidates[i].node_id as usize,
-                    reinsertion_stack,
+                    &mut self.reinsertion_stack,
                 );
                 if r.area_diff > 0.0 {
                     self.reinsertions.push(r)
@@ -294,10 +317,12 @@ pub fn find_reinsertion(
     let parent_id = bvh.parents[node_id] as usize;
     let mut pivot_id = parent_id;
     let aabb = bvh.nodes[node_id].aabb;
+    let mut longest = 0;
     stack.clear();
     loop {
         stack.push((area_diff, sibling_id as u32));
         while !stack.is_empty() {
+            longest = stack.len().max(longest);
             let (top_area_diff, top_sibling_id) = stack.pop_fast();
             if top_area_diff - node_area <= best_reinsertion.area_diff {
                 continue;
@@ -330,7 +355,6 @@ pub fn find_reinsertion(
         sibling_id = Bvh2Node::get_sibling_id(pivot_id);
         pivot_id = bvh.parents[pivot_id] as usize;
     }
-
     if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
         || best_reinsertion.to == bvh.parents[best_reinsertion.from as usize]
     {

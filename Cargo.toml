@@ -29,7 +29,7 @@ argh = "0.1.13"
 
 
 [features]
-default = ["parallel"]
+#default = ["parallel"]
 parallel = ["dep:rayon", "dep:thread_local", "rdst/multi-threaded"]
 timeit = []
 

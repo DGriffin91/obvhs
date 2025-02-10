@@ -62,7 +62,7 @@ fn main() {
     let tris_count = tris.len();
     println!("{tris_count} triangles, {} AA samples", args.samples);
     timeit!["generate bvh",
-    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut Duration::default());
+    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_slow_build(), &mut Duration::default());
     ];
 
     if args.no_render {
