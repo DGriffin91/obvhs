@@ -603,7 +603,7 @@ impl Bvh2 {
                     );
                 }
             }
-            if result.require_tight_fit {
+            if result.require_tight_fit && !result.splits {
                 assert_eq!(
                     temp_aabb, node.aabb,
                     "Primitive do not fit in tightly in parent {node_index}",
