@@ -430,7 +430,12 @@ impl Bvh2 {
             self.primitive_indices.len()
         );
         assert_eq!(result.prim_count, self.primitive_indices.len());
-        assert!(result.max_depth < self.max_depth as u32);
+        assert!(
+            result.max_depth < self.max_depth as u32,
+            "result.max_depth ({}) must be less than self.max_depth ({})",
+            result.max_depth,
+            self.max_depth as u32
+        );
 
         result
     }
