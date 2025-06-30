@@ -245,7 +245,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
 
     insert_index = insert_index.saturating_sub(1);
     bvh.nodes[insert_index] = current_nodes[0];
-    bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth);
+    bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth + 1);
 }
 
 #[cfg(feature = "parallel")]
