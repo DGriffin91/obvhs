@@ -146,7 +146,7 @@ impl RayTraversal {
 }
 
 /// A binary BVH
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Bvh2 {
     /// List of nodes contained in this bvh. first_index in Bvh2Node indexes into this list.
     pub nodes: Vec<Bvh2Node>,
@@ -157,17 +157,27 @@ pub struct Bvh2 {
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub primitive_indices: Vec<u32>,
     /// Maximum bvh hierarchy depth. Used to determine stack depth for cpu bvh2 traversal.
-    /// Stack defaults to 96 if max_depth isn't set, which much deeper than most bvh's even
-    /// for large scenes without a tlas.
-    pub max_depth: Option<usize>,
+    /// Stack defaults to 96 or the max depth during initial ploc building, whichever is larger. This may be larger than
+    /// needed depending on what post processing steps (like collapse, reinsertion, etc...), but the cost of
+    /// recalculating it may not be worth it so it is not done automatically.
+    pub max_depth: usize,
 }
-const DEFAULT_MAX_STACK_DEPTH: usize = 96;
+pub const DEFAULT_MAX_STACK_DEPTH: usize = 96;
+
+impl Default for Bvh2 {
+    fn default() -> Self {
+        Self {
+            nodes: Default::default(),
+            primitive_indices: Default::default(),
+            max_depth: DEFAULT_MAX_STACK_DEPTH,
+        }
+    }
+}
 
 impl Bvh2 {
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
-        let mut stack =
-            HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
+        let mut stack = HeapStack::new_with_capacity(self.max_depth);
         if !self.nodes.is_empty() {
             stack.push(0);
         }
@@ -281,8 +291,7 @@ impl Bvh2 {
     /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
     pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
-        let mut stack =
-            HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
+        let mut stack = HeapStack::new_with_capacity(self.max_depth);
         stack.push(0);
         while let Some(current_node_index) = stack.pop() {
             let node = &self.nodes[*current_node_index as usize];
@@ -421,7 +430,7 @@ impl Bvh2 {
             self.primitive_indices.len()
         );
         assert_eq!(result.prim_count, self.primitive_indices.len());
-        assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
+        assert!(result.max_depth < self.max_depth as u32);
 
         result
     }
