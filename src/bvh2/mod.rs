@@ -436,6 +436,9 @@ impl Bvh2 {
             result.max_depth,
             self.max_depth as u32
         );
+        if result.max_depth > DEFAULT_MAX_STACK_DEPTH as u32 {
+            log::warn!("bvh depth is: {}, a depth beyond {} may be indicative of something pathological in the scene (like thousands of instances perfectly overlapping geometry) that will result in a BVH that is very slow to traverse.", result.max_depth, DEFAULT_MAX_STACK_DEPTH);
+        }
 
         result
     }
