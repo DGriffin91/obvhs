@@ -364,15 +364,15 @@ mod tests {
                         let child_node_self_compressed_aabb = cwbvh.nodes[child_node_index].aabb();
                         let exact_aabb = &exact_node_aabbs[child_node_index];
 
-                        assert!(exact_aabb.min.cmpge((compressed_aabb.min)).all());
-                        assert!(exact_aabb.max.cmple((compressed_aabb.max)).all());
+                        assert!(exact_aabb.min.cmpge(compressed_aabb.min).all());
+                        assert!(exact_aabb.max.cmple(compressed_aabb.max).all());
                         assert!(exact_aabb
                             .min
-                            .cmpge((child_node_self_compressed_aabb.min))
+                            .cmpge(child_node_self_compressed_aabb.min)
                             .all());
                         assert!(exact_aabb
                             .max
-                            .cmple((child_node_self_compressed_aabb.max))
+                            .cmple(child_node_self_compressed_aabb.max)
                             .all());
                     }
                 }

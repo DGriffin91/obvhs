@@ -565,7 +565,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     {
         dbg_scope!("resolve collisions");
         // Split borrows (WHYYYYYYYYYYYYYYYYYYYYY)
-        let (pairs, mut items) = (&physics.collision_pairs, &mut physics.items);
+        let (pairs, items) = (&physics.collision_pairs, &mut physics.items);
         for pair in pairs {
             let (s1, s2) = pair.get();
             // TODO resolve in parallel?
