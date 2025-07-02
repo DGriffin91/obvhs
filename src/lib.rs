@@ -1,3 +1,6 @@
+// TODO re-enable needless_range_loop lint and evaluate performance / clarity
+#![allow(clippy::needless_range_loop)]
+
 //! # BVH Construction and Traversal Library
 //!
 //! - [PLOC](https://meistdan.github.io/publications/ploc/paper.pdf) BVH2 builder with [Parallel Reinsertion](https://meistdan.github.io/publications/prbvh/paper.pdf) and spatial pre-splits.
