@@ -251,7 +251,7 @@ pub struct BvhBuildParams {
 }
 
 impl BvhBuildParams {
-    pub fn fastest_build() -> Self {
+    pub const fn fastest_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Minimum,
@@ -263,7 +263,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 1.0,
         }
     }
-    pub fn very_fast_build() -> Self {
+    pub const fn very_fast_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Minimum,
@@ -275,7 +275,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn fast_build() -> Self {
+    pub const fn fast_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Low,
@@ -288,7 +288,7 @@ impl BvhBuildParams {
         }
     }
     /// Tries to be around the same build time as embree but with faster traversal
-    pub fn medium_build() -> Self {
+    pub const fn medium_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Medium,
@@ -300,7 +300,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn slow_build() -> Self {
+    pub const fn slow_build() -> Self {
         BvhBuildParams {
             pre_split: true,
             ploc_search_distance: PlocSearchDistance::High,
@@ -312,7 +312,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn very_slow_build() -> Self {
+    pub const fn very_slow_build() -> Self {
         BvhBuildParams {
             pre_split: true,
             ploc_search_distance: PlocSearchDistance::Medium,

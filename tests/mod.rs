@@ -25,50 +25,51 @@ mod tests {
         BvhBuildParams,
     };
 
+    const BUILD_PARAM_SET: [BvhBuildParams; 6] = [
+        BvhBuildParams::fastest_build(),
+        BvhBuildParams::very_fast_build(),
+        BvhBuildParams::fast_build(),
+        BvhBuildParams::medium_build(),
+        BvhBuildParams::slow_build(),
+        BvhBuildParams::very_slow_build(),
+    ];
+
     #[test]
     pub fn build_bvh2_with_empty_aabb() {
-        let bvh = build_bvh2(
-            &[Aabb::empty()],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_bvh2(&[Aabb::empty()], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_cwbvh_with_empty_aabb() {
-        let bvh = build_cwbvh(
-            &[Aabb::empty()],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_cwbvh(&[Aabb::empty()], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_bvh2_with_nothing() {
-        let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_bvh2(
-            &aabbs,
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let aabbs: Vec<Aabb> = Vec::new();
+            let bvh = build_bvh2(&aabbs, build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_cwbvh_with_nothing() {
-        let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_cwbvh(
-            &aabbs,
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let aabbs: Vec<Aabb> = Vec::new();
+            let bvh = build_cwbvh(&aabbs, build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
