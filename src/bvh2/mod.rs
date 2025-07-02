@@ -300,7 +300,7 @@ impl Bvh2 {
     }
 
     /// Compute parents and update cache only if they have not already been computed
-    pub fn init_parents(&mut self) {
+    pub fn init_parents_if_uninit(&mut self) {
         if self.parents.is_empty() {
             self.update_parents();
         }
@@ -416,7 +416,7 @@ impl Bvh2 {
     /// This recomputes the Aabbs for all the parents of the given node index.
     /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from(&mut self, mut index: usize) {
-        self.init_parents();
+        self.init_parents_if_uninit();
         loop {
             let node = &self.nodes[index];
             if !node.is_leaf() {
@@ -436,7 +436,7 @@ impl Bvh2 {
     /// Halts if the parents are the same size. Panics in debug if some parents still needed to be resized.
     /// This can only be used to refit when a single node has changed or moved.
     pub fn refit_from_fast(&mut self, mut index: usize) {
-        self.init_parents();
+        self.init_parents_if_uninit();
         let mut same_count = 0;
         loop {
             let node = &self.nodes[index];
@@ -830,7 +830,7 @@ mod tests {
         );
 
         bvh.init_primitives_to_nodes();
-        bvh.init_parents();
+        bvh.init_parents_if_uninit();
 
         let mut stack = HeapStack::new_with_capacity(256);
         for node_id in 1..bvh.nodes.len() {

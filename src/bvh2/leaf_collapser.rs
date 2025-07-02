@@ -25,7 +25,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
     let previously_had_parents = !bvh.parents.is_empty();
 
-    bvh.init_parents();
+    bvh.init_parents_if_uninit();
 
     let mut indices_copy = Vec::new();
     let mut nodes_copy = Vec::new();
@@ -338,7 +338,7 @@ mod tests {
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false, true);
             bvh.init_primitives_to_nodes();
-            bvh.init_parents();
+            bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false, true);
             collapse(&mut bvh, 8, 1.0);
             bvh.validate(&tris, false, false, true);

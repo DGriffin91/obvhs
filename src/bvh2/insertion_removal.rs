@@ -293,7 +293,7 @@ impl Bvh2 {
     /// * `primitive_id` - The index of the primitive being removed.
     pub fn remove_primitive(&mut self, primitive_id: u32) {
         let remove_primitive_id = primitive_id;
-        self.init_parents();
+        self.init_parents_if_uninit();
         self.init_primitives_to_nodes();
 
         let node_id = self.primitives_to_nodes[remove_primitive_id as usize];
@@ -361,7 +361,7 @@ impl Bvh2 {
         stack: &mut HeapStack<SiblingInsertionCandidate>,
     ) -> usize {
         self.init_primitives_to_nodes();
-        self.init_parents();
+        self.init_parents_if_uninit();
         if self.primitives_to_nodes.len() <= primitive_id as usize {
             self.primitives_to_nodes
                 .resize(primitive_id as usize + 1, INVALID);
@@ -472,7 +472,7 @@ mod tests {
                 &mut Duration::default(),
             );
             bvh.init_primitives_to_nodes();
-            bvh.init_parents();
+            bvh.init_parents_if_uninit();
             slow_leaf_reinsertion(&mut bvh);
             bvh.validate(&tris, false, false, true);
             bvh.reorder_in_stack_traversal_order();
@@ -510,7 +510,7 @@ mod tests {
 
         for bvh in &mut [bvh1, bvh2] {
             bvh.init_primitives_to_nodes();
-            bvh.init_parents();
+            bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false, true);
 
             for primitive_id in 0..tris.len() as u32 {

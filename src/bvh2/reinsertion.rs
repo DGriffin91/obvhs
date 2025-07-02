@@ -52,7 +52,7 @@ impl ReinsertionOptimizer<'_> {
             return;
         }
 
-        bvh.init_parents();
+        bvh.init_parents_if_uninit();
 
         let cap = (bvh.nodes.len() as f32 * batch_size_ratio.min(1.0)).ceil() as usize;
 
@@ -84,7 +84,7 @@ impl ReinsertionOptimizer<'_> {
             return;
         }
 
-        bvh.init_parents();
+        bvh.init_parents_if_uninit();
 
         let cap = candidates.len();
 
@@ -447,7 +447,7 @@ mod tests {
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false, true);
             bvh.init_primitives_to_nodes();
-            bvh.init_parents();
+            bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false, true);
             ReinsertionOptimizer::run(&mut bvh, 0.25, None);
             bvh.validate(&tris, false, false, true);
