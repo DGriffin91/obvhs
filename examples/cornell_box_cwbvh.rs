@@ -18,11 +18,11 @@ use debug::simple_debug_window;
 fn generate_cornell_box() -> Vec<Triangle> {
     let floor = PLANE;
     let mut box1 = CUBE;
-    let mut box2 = box1.clone();
-    let mut ceiling = floor.clone();
-    let mut wall1 = floor.clone();
-    let mut wall2 = floor.clone();
-    let mut wall3 = floor.clone();
+    let mut box2 = box1;
+    let mut ceiling = floor;
+    let mut wall1 = floor;
+    let mut wall2 = floor;
+    let mut wall3 = floor;
     box1.transform(&Mat4::from_scale_rotation_translation(
         Vec3::splat(0.3),
         Quat::from_rotation_y(-17.5f32.to_radians()),
@@ -115,7 +115,7 @@ fn main() {
             normal *= normal.dot(-ray.direction).signum(); // Double sided
             let c = (normal * 255.0).as_uvec3();
             chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
-            window_buffer.set(i as usize, normal.extend(0.0));
+            window_buffer.set(i, normal.extend(0.0));
         }
     });
 

@@ -66,7 +66,7 @@ impl Debug for CwBvhNode {
                 &self
                     .child_meta
                     .iter()
-                    .map(|c| format!("{:#010b}", c))
+                    .map(|c| format!("{c:#010b}"))
                     .collect::<Vec<_>>(),
             )
             .field("child_min_x", &self.child_min_x)

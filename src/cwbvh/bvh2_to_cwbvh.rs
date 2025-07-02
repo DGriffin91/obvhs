@@ -86,7 +86,7 @@ impl<'a> Bvh2Converter<'a> {
             .log2()
             .ceil()
             .exp2();
-        debug_assert!(e.cmpgt(Vec3A::ZERO).all(), "aabb: {:?} e: {}", aabb, e);
+        debug_assert!(e.cmpgt(Vec3A::ZERO).all(), "aabb: {aabb:?} e: {e}");
 
         let rcp_e = 1.0 / e;
         let e: UVec3 = e.per_comp(|c: f32| {
@@ -152,7 +152,7 @@ impl<'a> Bvh2Converter<'a> {
                             1 => 0b0010_0000,
                             2 => 0b0110_0000,
                             3 => 0b1110_0000,
-                            _ => panic!("Incorrect leaf primitive count: {}", primitive_count),
+                            _ => panic!("Incorrect leaf primitive count: {primitive_count}"),
                         };
 
                     num_primitives += primitive_count;

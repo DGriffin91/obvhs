@@ -244,7 +244,7 @@ fn bottom_up_traverse<F>(
             process_node(true, i);
 
             // Process inner nodes on the path from that leaf up to the root
-            let mut j = i as usize;
+            let mut j = i;
             while j != 0 {
                 // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
                 j = bvh.parents[j] as usize;

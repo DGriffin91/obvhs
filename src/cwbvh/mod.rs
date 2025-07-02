@@ -213,7 +213,7 @@ impl CwBvh {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut traverse_ray = ray.clone();
+        let mut traverse_ray = ray;
         let mut state = self.new_traversal(ray.direction);
         let mut node;
         crate::traverse!(
@@ -632,7 +632,7 @@ impl CwBvh {
             assignment[min_index] = min_slot;
         }
 
-        let mut new_node = old_node.clone();
+        let mut new_node = old_node;
         new_node.imask = 0;
 
         for ch in 0..BRANCHING {
@@ -887,11 +887,7 @@ impl CwBvh {
                             assert!(
                                 prim_aabb.min.cmpge(parent_bounds.min - 1.0e-5).all()
                                     && prim_aabb.max.cmple(parent_bounds.max + 1.0e-5).all(),
-                                "Primitive {} does not fit in parent {}:\nprimitive: {:?}\nparent:    {:?}",
-                                prim_index,
-                                node_idx,
-                                prim_aabb,
-                                parent_bounds
+                                "Primitive {prim_index} does not fit in parent {node_idx}:\nprimitive: {prim_aabb:?}\nparent:    {parent_bounds:?}"
                             );
                         }
                     }
@@ -958,7 +954,7 @@ impl CwBvh {
     #[allow(dead_code)]
     fn print_nodes(&self) {
         for (i, node) in self.nodes.iter().enumerate() {
-            println!("node: {}", i);
+            println!("node: {i}");
             for ch in 0..8 {
                 let child_meta = node.child_meta[ch];
                 if child_meta == 0 {
@@ -979,7 +975,7 @@ impl CwBvh {
                             prims += 1;
                         }
                     }
-                    println!("leaf, prims: {}", prims);
+                    println!("leaf, prims: {prims}");
                 }
             }
         }

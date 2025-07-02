@@ -216,7 +216,7 @@ impl DebugRenderer {
             if bvh.ray_traverse(ray, &mut hit, |ray, id| {
                 let primitive_id = bvh.primitive_indices[id] as usize;
                 let sphere = &physics.items[primitive_id];
-                ray_sphere_intersect(&ray, sphere.position, sphere.radius)
+                ray_sphere_intersect(ray, sphere.position, sphere.radius)
             }) {
                 let primitive_id = bvh.primitive_indices[hit.primitive_id as usize];
                 let sphere = &physics.items[primitive_id as usize];
@@ -559,7 +559,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     }
 
     if physics.config.verify_pairs {
-        verify_pairs(&physics);
+        verify_pairs(physics);
     }
 
     {
@@ -569,7 +569,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
         for pair in pairs {
             let (s1, s2) = pair.get();
             // TODO resolve in parallel?
-            resolve_collision(&mut items, s1 as usize, s2 as usize, sphere_damping);
+            resolve_collision(items, s1 as usize, s2 as usize, sphere_damping);
         }
     }
 }

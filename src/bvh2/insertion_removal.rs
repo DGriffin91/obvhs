@@ -60,8 +60,8 @@ impl Bvh2 {
         if sibling.is_leaf() {
             // Tell primitives where their node went.
             update_primitives_to_nodes_for_node(
-                &sibling,
-                parent_id as usize,
+                sibling,
+                parent_id,
                 &self.primitive_indices,
                 &mut self.primitives_to_nodes,
             )

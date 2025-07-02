@@ -298,7 +298,7 @@ impl From<u32> for PlocSearchDistance {
             14 => PlocSearchDistance::Medium,
             24 => PlocSearchDistance::High,
             32 => PlocSearchDistance::VeryHigh,
-            _ => panic!("Invalid value for PlocSearchDistance: {}", value),
+            _ => panic!("Invalid value for PlocSearchDistance: {value}"),
         }
     }
 }
@@ -463,7 +463,7 @@ fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec
                 .collect();
         } else {
             *current_nodes = indexed_mortons
-                .into_iter()
+                .iter_mut()
                 .map(|m| current_nodes[m.index])
                 .collect();
         };
@@ -533,7 +533,7 @@ fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3
                 .collect();
         } else {
             *current_nodes = indexed_mortons
-                .into_iter()
+                .iter_mut()
                 .map(|m| current_nodes[m.index])
                 .collect();
         };

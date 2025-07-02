@@ -185,14 +185,14 @@ pub mod text {
         pub fn draw_timers(&mut self, buffer: &mut [u32], cursor: (usize, usize), padding: usize) {
             self.start_debug_list(cursor, padding);
             for_each_sorted_timer(|text, duration| {
-                self.dbg_dt(buffer, duration, &text);
+                self.dbg_dt(buffer, duration, text);
             })
         }
 
         pub fn draw(&self, buffer: &mut [u32], (mut x, y): (usize, usize), text: &str) {
             for c in text.chars() {
                 let mut index = c as usize - ' ' as usize;
-                if index > MICROKNIGHT_LAYOUT.len() as usize {
+                if index > MICROKNIGHT_LAYOUT.len() {
                     index = 0;
                 }
 

@@ -219,7 +219,7 @@ impl ReinsertionOptimizer<'_> {
             });
 
             reinsert_node(
-                &mut self.bvh,
+                self.bvh,
                 reinsertion.from as usize,
                 reinsertion.to as usize,
             );
@@ -382,7 +382,7 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
     if sibling_node.is_leaf() {
         // Tell primitives where their node went.
         update_primitives_to_nodes_for_node(
-            &sibling_node,
+            sibling_node,
             sibling_id,
             &bvh.primitive_indices,
             &mut bvh.primitives_to_nodes,
@@ -396,7 +396,7 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
     if bvh.nodes[parent_id].is_leaf() {
         // Tell primitives where their node went.
         update_primitives_to_nodes_for_node(
-            &parent_node,
+            parent_node,
             parent_id,
             &bvh.primitive_indices,
             &mut bvh.primitives_to_nodes,

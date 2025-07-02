@@ -204,14 +204,14 @@ impl std::fmt::Display for PrettyDuration {
         if duration.as_secs() > 0 {
             let seconds =
                 duration.as_secs() as f64 + f64::from(duration.subsec_nanos()) / 1_000_000_000.0;
-            write!(f, "{:.2}s ", seconds)
+            write!(f, "{seconds:.2}s ")
         } else if duration.subsec_millis() > 0 {
             let milliseconds =
                 duration.as_millis() as f64 + f64::from(duration.subsec_micros() % 1_000) / 1_000.0;
-            write!(f, "{:.2}ms", milliseconds)
+            write!(f, "{milliseconds:.2}ms")
         } else {
             let microseconds = duration.as_micros();
-            write!(f, "{}µs", microseconds)
+            write!(f, "{microseconds}µs")
         }
     }
 }
