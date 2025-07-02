@@ -1,0 +1,88 @@
+use std::{path::Path, time::Duration};
+
+use glam::*;
+use image::{ImageBuffer, Rgba};
+use obvhs::{
+    cwbvh::builder::build_cwbvh_from_tris,
+    ray::{Ray, RayHit},
+    triangle::Triangle,
+    BvhBuildParams,
+};
+
+#[path = "./helpers/debug.rs"]
+mod debug;
+use debug::simple_debug_window;
+#[path = "./helpers/load_obj.rs"]
+mod load_obj;
+use load_obj::load_obj_mesh_data;
+
+fn main() {
+    let tris = load_obj_mesh_data(Path::new("assets/kitchen.obj.zst"))
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+    // Build cwbvh (Change this to build_bvh2_from_tris to try with Bvh2)
+    let bvh = build_cwbvh_from_tris(
+        &tris,
+        BvhBuildParams::medium_build(),
+        &mut Duration::default(),
+    );
+
+    // The reason for this mapping below is that if multiple primitives are contained in a cwbvh node, they need to have their indices layed out contiguously.
+    // If we want to avoid this indirection during traversal there are two options:
+    // 1. Layout the primitives in the order of the cwbvh's indices mapping so that this can index directly into the primitive list.
+    // 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
+    let bvh_tris = bvh
+        .primitive_indices
+        .iter()
+        .map(|i| tris[*i as usize])
+        .collect::<Vec<Triangle>>();
+
+    // Setup render target and camera
+    let width = 1280;
+    let height = 720;
+    let target_size = Vec2::new(width as f32, height as f32);
+    let fov = 90.0f32;
+    let eye = vec3a(3.0, 1.5, 1.4);
+    let look_at = vec3(-3.9438584, 1.5, -1.7303504);
+
+    // Compute camera projection & view matrices
+    let aspect_ratio = target_size.x / target_size.y;
+    let proj_inv =
+        Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
+    let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+
+    // Init image buffer
+    let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width as u32, height as u32);
+    let pixels = img.as_mut();
+
+    let (window_buffer, window_thread) = simple_debug_window(width, height);
+
+    // For each pixel trace ray into scene and write normal as color to image buffer
+    pixels.chunks_mut(4).enumerate().for_each(|(i, chunk)| {
+        let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
+        let mut screen_uv = frag_coord.as_vec2() / target_size;
+        screen_uv.y = 1.0 - screen_uv.y;
+        let ndc = screen_uv * 2.0 - Vec2::ONE;
+        let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
+
+        let mut vs_pos = proj_inv * clip_pos;
+        vs_pos /= vs_pos.w;
+        let direction = (Vec3A::from((view_inv * vs_pos).xyz()) - eye).normalize();
+        let ray = Ray::new(eye, direction, 0.0, f32::MAX);
+
+        let mut hit = RayHit::none();
+        if bvh.ray_traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
+            let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
+            normal *= normal.dot(-ray.direction).signum(); // Double sided
+            let c = (normal * 255.0).as_uvec3();
+            chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
+            window_buffer.set(i, normal.extend(0.0));
+        }
+    });
+
+    img.save("kitchen_rend.png").expect("Failed to save image");
+
+    window_thread.join().unwrap(); // Wait for window to close.
+}
