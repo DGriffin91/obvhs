@@ -165,11 +165,11 @@ impl Bvh2 {
     /// # Arguments
     /// * `new_node` - This node must be a leaf and already have a valid first_index into primitive_indices
     /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
-    ///     deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
-    ///     required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
-    ///     nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///     generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
-    ///     don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
+    ///   deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
+    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
+    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
+    ///   don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
     pub fn insert_leaf(
         &mut self,
         new_node: Bvh2Node,
@@ -349,11 +349,11 @@ impl Bvh2 {
     /// * `bvh` - The Bvh2 the new node is being added to
     /// * `primitive_id` - The index of the primitive being inserted.
     /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
-    ///     deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
-    ///     required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
-    ///     nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///     generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
-    ///     don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
+    ///   deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
+    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
+    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
+    ///   don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
     pub fn insert_primitive(
         &mut self,
         aabb: Aabb,

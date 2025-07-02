@@ -93,6 +93,7 @@ mod tests {
         assert_eq!(hit_count, 256 * 256)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn eval_render<F>(
         mut eval: F,
         tris: &[Triangle],

@@ -13,7 +13,7 @@ use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
 /// * `triangles` - A list of Triangles.
 /// * `config` - Parameters for configuring the BVH building.
 /// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
-/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
+///   generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 pub fn build_bvh2_from_tris(
     triangles: &[Triangle],
     config: BvhBuildParams,
@@ -86,7 +86,7 @@ pub fn build_bvh2_from_tris(
 /// * `primitives` - A list of Primitives that implement Boundable.
 /// * `config` - Parameters for configuring the BVH building.
 /// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
-/// generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
+///   generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 // TODO: we could optionally do imprecise basic Aabb splits.
 pub fn build_bvh2<T: Boundable>(
     primitives: &[T],

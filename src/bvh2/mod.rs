@@ -36,7 +36,7 @@ pub struct Bvh2 {
     /// The reason for this mapping is that if multiple primitives are contained in a node, they need to have their
     /// indices laid out contiguously. To avoid this indirection we have two options:
     /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the
-    ///     primitive list.
+    ///    primitive list.
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub primitive_indices: Vec<u32>,
 
@@ -97,6 +97,7 @@ impl Bvh2 {
     /// * `ray` - The ray to be tested for intersection.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
     /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
+    ///
     /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
@@ -124,6 +125,7 @@ impl Bvh2 {
     /// * `state` - Holds the current traversal state. Allows traverse_dynamic to yield.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
     /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
+    ///
     /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
@@ -685,7 +687,7 @@ fn update_primitives_to_nodes_for_node(
     node: &Bvh2Node,
     node_id: usize,
     primitive_indices: &[u32],
-    primitives_to_nodes: &mut Vec<u32>,
+    primitives_to_nodes: &mut [u32],
 ) {
     if !primitives_to_nodes.is_empty() {
         let start = node.first_index;

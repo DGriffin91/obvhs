@@ -7,11 +7,11 @@
 /// - `$node`: `&CwBvhNode` The current node in the BVH that is being traversed.
 /// - `$state`: `Traversal` Mutable traversal state.
 /// - `$node_intersection`: An expression that is executed for each node intersection during traversal.
-///     It should test for intersection against the current `node`, making use of `state.oct_inv4` u32.
-///     It should return a u32 `hitmask` of the node children hitmask corresponding to which nodes were intersected.
+///   It should test for intersection against the current `node`, making use of `state.oct_inv4` u32.
+///   It should return a u32 `hitmask` of the node children hitmask corresponding to which nodes were intersected.
 /// - `$primitive_intersection`: A code block that is executed for each primitive intersection.
-///     It should read the current `state.primitive_id` u32. This is the index into the primitive indices for the
-///     current primitive to be tested. Optionally use `break` to halt traversal.
+///   It should read the current `state.primitive_id` u32. This is the index into the primitive indices for the
+///   current primitive to be tested. Optionally use `break` to halt traversal.
 ///
 /// # Example: Closest hit ray traversal
 /// ```

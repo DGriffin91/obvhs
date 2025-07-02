@@ -76,7 +76,7 @@ impl ReinsertionOptimizer<'_> {
     /// # Arguments
     /// * `candidates` - A list of ids for nodes that need to be re-inserted.
     /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
-    /// that potentially limit the proportion of reinsertions in a single pass.
+    ///   that potentially limit the proportion of reinsertions in a single pass.
     pub fn run_with_candidates(bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
         crate::scope!("reinsertion_optimize_candidates");
 
@@ -218,11 +218,7 @@ impl ReinsertionOptimizer<'_> {
                 self.touched[conflict] = true;
             });
 
-            reinsert_node(
-                self.bvh,
-                reinsertion.from as usize,
-                reinsertion.to as usize,
-            );
+            reinsert_node(self.bvh, reinsertion.from as usize, reinsertion.to as usize);
         });
     }
 

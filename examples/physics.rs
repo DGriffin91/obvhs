@@ -96,8 +96,8 @@ fn main() {
         println!("End bvh depth: {}", physics.bvh.depth(0));
         println!(
             "{:>8} bench | {} per iter",
-            format!("{}", PrettyDuration(elapsed)),
-            format!(
+            format_args!("{}", PrettyDuration(elapsed)),
+            format_args!(
                 "{}",
                 PrettyDuration(Duration::from_secs_f32(
                     elapsed.as_secs_f32() / physics.config.bench_steps as f32
