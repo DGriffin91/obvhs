@@ -52,3 +52,7 @@ opt-level = 3
 # Enable high optimizations for dependencies
 [profile.dev.package."*"]
 opt-level = 3
+
+[[example]]
+name = "obj_cwbvh"
+test = true

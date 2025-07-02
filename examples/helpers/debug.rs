@@ -29,12 +29,15 @@ where
     })
 }
 
+#[allow(dead_code)]
+pub struct DebugWindow {
+    pub buffer: AtomicColorBuffer,
+    pub thread: std::thread::JoinHandle<()>,
+}
+
 /// Spawn a simple debug window in a separate thread. Shared buffer is drawn directly to window.
 #[allow(dead_code)]
-pub fn simple_debug_window(
-    width: usize,
-    height: usize,
-) -> (AtomicColorBuffer, std::thread::JoinHandle<()>) {
+pub fn simple_debug_window(width: usize, height: usize) -> DebugWindow {
     let shared_buffer = AtomicColorBuffer::new(width, height);
     let window_buffer = shared_buffer.clone();
     let window_thread = debug_window(width, height, Default::default(), move |_window, buffer| {
@@ -42,7 +45,10 @@ pub fn simple_debug_window(
             *pixel = color_to_minifb_pixel(shared_buffer.get(i));
         }
     });
-    (window_buffer, window_thread)
+    DebugWindow {
+        buffer: window_buffer,
+        thread: window_thread,
+    }
 }
 
 /// A very basic buffer for async debug rendering

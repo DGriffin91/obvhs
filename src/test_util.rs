@@ -6,15 +6,32 @@ pub mod sampling {
     use glam::*;
 
     #[inline(always)]
-    pub fn uhash(a: u32, b: u32) -> u32 {
-        let mut x = (a.overflowing_mul(1597334673).0) ^ (b.overflowing_mul(3812015801).0);
+    pub fn uhash(x: u32) -> u32 {
         // from https://nullprogram.com/blog/2018/07/31/
-        x = x ^ (x >> 16);
+        let mut x = x ^ (x >> 16);
         x = x.overflowing_mul(0x7feb352d).0;
         x = x ^ (x >> 15);
         x = x.overflowing_mul(0x846ca68b).0;
         x = x ^ (x >> 16);
         x
+    }
+
+    pub fn hash_f32_vec(v: &[f32]) -> u32 {
+        v.iter()
+            .map(|&f| uhash(f.to_bits()))
+            .fold(0, |acc, h| acc ^ h)
+    }
+
+    pub fn hash_vec3a_vec(v: &[Vec3A]) -> u32 {
+        v.iter()
+            .flat_map(|v| [v.x, v.y, v.z])
+            .map(|f| uhash(f.to_bits()))
+            .fold(0, |acc, h| acc ^ h)
+    }
+
+    #[inline(always)]
+    pub fn uhash2(a: u32, b: u32) -> u32 {
+        uhash((a.overflowing_mul(1597334673).0) ^ (b.overflowing_mul(3812015801).0))
     }
 
     #[inline(always)]
@@ -24,7 +41,7 @@ pub mod sampling {
 
     #[inline(always)]
     pub fn hash_noise(coord: UVec2, frame: u32) -> f32 {
-        let urnd = uhash(coord.x, (coord.y << 11) + frame);
+        let urnd = uhash2(coord.x, (coord.y << 11) + frame);
         unormf(urnd)
     }
 

@@ -53,6 +53,8 @@ pub const SUN_ANGULAR_DIAMETER: f32 = 0.00933;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sky::Sky;
 
+use crate::debug::DebugWindow;
+
 fn main() {
     let args: Args = argh::from_env();
 
@@ -83,17 +85,11 @@ fn main() {
     let exposure = -3.6;
 
     // Optionally create a window to show render progress
-
-    let mut window_thread = None;
-    let mut window_buffer = None;
-    if !args.no_window {
+    let window = (!args.no_window).then(|| {
         let shared_buffer = AtomicColorBuffer::new(width, height);
-        window_buffer = Some(shared_buffer.clone());
-        window_thread = Some(debug_window(
-            width,
-            height,
-            Default::default(),
-            move |window, buffer| {
+        DebugWindow {
+            buffer: shared_buffer.clone(),
+            thread: debug_window(width, height, Default::default(), move |window, buffer| {
                 let mut sample = 0;
                 for (i, pixel) in buffer.iter_mut().enumerate() {
                     let mut color = shared_buffer.get(i);
@@ -106,9 +102,9 @@ fn main() {
                     "{tris_count} tris, {sample}/{} AA samples",
                     args.samples
                 ));
-            },
-        ));
-    };
+            }),
+        }
+    });
 
     let (width, height) = (width as u32, height as u32);
     let target_size = Vec2::new(width as f32, height as f32);
@@ -137,7 +133,7 @@ fn main() {
         for aa_sample in 0..args.samples as u32 {
             print!("."); // Print progress
             std::io::stdout().flush().unwrap();
-            
+
             #[cfg(feature = "parallel")]
             let iter = (0..width * height).into_par_iter();
             #[cfg(not(feature = "parallel"))]
@@ -269,9 +265,9 @@ fn main() {
                         color += 0.2 * fogc;
                     }
 
-                    if let Some(buffer) = &window_buffer {
-                        let accum_color = buffer.get(i as usize) + color.extend(1.0);
-                        buffer.set(i as usize, accum_color);
+                    if let Some(window) = &window {
+                        let accum_color = window.buffer.get(i as usize) + color.extend(1.0);
+                        window.buffer.set(i as usize, accum_color);
                     }
 
                     color
@@ -298,8 +294,8 @@ fn main() {
         img.save(output).expect("Failed to save image");
     }
 
-    if let Some(window_thread) = window_thread {
-        window_thread.join().unwrap(); // Wait for window to close.
+    if let Some(window) = window {
+        window.thread.join().unwrap(); // Wait for window to close.
     }
 }
 

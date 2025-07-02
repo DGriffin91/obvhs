@@ -94,7 +94,7 @@ fn main() {
     let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width as u32, height as u32);
     let pixels = img.as_mut();
 
-    let (window_buffer, window_thread) = simple_debug_window(width, height);
+    let window = simple_debug_window(width, height);
 
     // For each pixel trace ray into scene and write normal as color to image buffer
     pixels.chunks_mut(4).enumerate().for_each(|(i, chunk)| {
@@ -115,12 +115,12 @@ fn main() {
             normal *= normal.dot(-ray.direction).signum(); // Double sided
             let c = (normal * 255.0).as_uvec3();
             chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
-            window_buffer.set(i, normal.extend(0.0));
+            window.buffer.set(i, normal.extend(0.0));
         }
     });
 
     img.save("basic_cornell_box_rend.png")
         .expect("Failed to save image");
 
-    window_thread.join().unwrap(); // Wait for window to close.
+    window.thread.join().unwrap(); // Wait for window to close.
 }
