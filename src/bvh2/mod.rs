@@ -519,11 +519,35 @@ impl Bvh2 {
         }
         assert_eq!(result.discovered_nodes.len(), self.nodes.len());
         assert_eq!(result.node_count, self.nodes.len());
+
+        // Ignore primitive_indices if this is a direct layout
         if !direct_layout {
-            // Ignore primitive_indices if this is a direct layout
-            let active_indices_count = self.active_primitive_indices_count();
-            assert_eq!(result.discovered_primitives.len(), active_indices_count);
-            assert_eq!(result.prim_count, active_indices_count);
+            if result.discovered_primitives.len() == 0 {
+                assert!(self.active_primitive_indices_count() == 0)
+            } else {
+                if !splits {
+                    // If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1
+                    // correlation between the number of discovered primitives and the quantity in bvh.primitive_indices.
+                    let active_indices_count = self.active_primitive_indices_count();
+                    assert_eq!(result.discovered_primitives.len(), active_indices_count);
+                    assert_eq!(result.prim_count, active_indices_count);
+                }
+                // Check that the set of discovered_primitives is the same as the set in primitive_indices while
+                // ignoring empty slots in primitive_indices.
+                let primitive_indices_freeset: HashSet<&u32> =
+                    HashSet::from_iter(&self.primitive_indices_freelist);
+                for (slot, index) in self.primitive_indices.iter().enumerate() {
+                    let slot = slot as u32;
+                    if !primitive_indices_freeset.contains(&slot) {
+                        assert!(result.discovered_primitives.contains(&index));
+                    }
+                }
+                let primitive_indices_set: HashSet<&u32> =
+                    HashSet::from_iter(self.primitive_indices.iter().filter(|i| **i != INVALID));
+                for discovered_prim_id in &result.discovered_primitives {
+                    assert!(primitive_indices_set.contains(discovered_prim_id))
+                }
+            }
         }
         assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
 
@@ -586,7 +610,13 @@ impl Bvh2 {
             for i in 0..node.prim_count {
                 result.prim_count += 1;
                 let mut prim_index = (node.first_index + i) as usize;
-                result.discovered_primitives.insert(prim_index as u32);
+                if result.direct_layout {
+                    result.discovered_primitives.insert(prim_index as u32);
+                } else {
+                    result
+                        .discovered_primitives
+                        .insert(self.primitive_indices[prim_index]);
+                }
                 // If using splits, primitives will extend outside the leaf in some cases.
                 if !result.splits {
                     if !result.direct_layout {

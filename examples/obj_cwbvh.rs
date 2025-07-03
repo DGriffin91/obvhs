@@ -166,12 +166,10 @@ mod tests {
     }
     #[test]
     fn test_slow() {
-        // TODO Currently fails in .validate() because of incorrect handling of bvh2.primitive_indices_freelist when using splits
         test_with_build_params(BvhBuildParams::slow_build())
     }
     #[test]
     fn test_very_slow() {
-        // TODO Currently fails in .validate() because of incorrect handling of bvh2.primitive_indices_freelist when using splits
         test_with_build_params(BvhBuildParams::very_slow_build())
     }
 }

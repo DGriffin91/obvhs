@@ -286,9 +286,6 @@ impl Bvh2 {
     /// leaf but faster for nodes with only one primitive per leaf, and will leave node aabb oversized.
     /// Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
     ///
-    /// # Returns
-    /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
-    ///
     /// # Arguments
     /// * `primitive_id` - The index of the primitive being removed.
     pub fn remove_primitive(&mut self, primitive_id: u32) {
