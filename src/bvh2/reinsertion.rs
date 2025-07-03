@@ -46,6 +46,7 @@ impl ReinsertionOptimizer<'_> {
     /// (1..32).step_by(2).map(|n| 1.0 / n as f32) or
     /// 1/1, 1/3, 1/5, 1/7, 1/9, 1/11, 1/13, 1/15, 1/17, 1/19, 1/21, 1/23, 1/25, 1/27, 1/29, 1/31
     pub fn run(bvh: &mut Bvh2, batch_size_ratio: f32, ratio_sequence: Option<Vec<f32>>) {
+        // TODO perf: allow allocations to be reused
         crate::scope!("reinsertion_optimize");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() || batch_size_ratio <= 0.0 {
@@ -78,6 +79,7 @@ impl ReinsertionOptimizer<'_> {
     /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
     ///   that potentially limit the proportion of reinsertions in a single pass.
     pub fn run_with_candidates(bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
+        // TODO perf: allow allocations to be reused
         crate::scope!("reinsertion_optimize_candidates");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {

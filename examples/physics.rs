@@ -9,7 +9,7 @@ use glam::*;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
     aabb::Aabb,
-    bvh2::{insertion_removal::SiblingInsertionCandidate, Bvh2},
+    bvh2::{insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer, Bvh2},
     cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
     heapstack::HeapStack,
     ploc::{PlocSearchDistance, SortPrecision},
@@ -30,6 +30,8 @@ use thread_local::ThreadLocal;
 mod debug;
 use debug::{color_to_minifb_pixel, text::Text, timer::reset_timers};
 
+use crate::debug::timer::for_each_sorted_timer;
+
 #[derive(FromArgs, Default)]
 /// `physics` example.
 /// Runs an extremely simple physics simulation, optionally using a bvh for the broad phase and real time CPU ray
@@ -41,7 +43,7 @@ struct Args {
     /// disables using the bvh for physics broad phase (still uses it for rendering)
     #[argh(switch)]
     no_physics_bvh: bool,
-    /// bvh update method. Modes: 'rebuild', 'reinsert', 'remove_and_insert'
+    /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert', 'remove_and_insert'
     #[argh(option, default = "BvhUpdate::Reinsert")]
     bvh_update: BvhUpdate,
     /// check that we got the same list of pairs from the bvh broad phase as brute force method
@@ -96,14 +98,22 @@ fn main() {
         println!("End bvh depth: {}", physics.bvh.depth(0));
         println!(
             "{:>8} bench | {} per iter",
-            format_args!("{}", PrettyDuration(elapsed)),
-            format_args!(
+            format!("{}", PrettyDuration(elapsed)),
+            format!(
                 "{}",
                 PrettyDuration(Duration::from_secs_f32(
                     elapsed.as_secs_f32() / physics.config.bench_steps as f32
                 ))
             ),
         );
+        println!("-------------------------------");
+        for_each_sorted_timer(|text, timer| {
+            println!(
+                "{:>7}x {:>7} {text}",
+                format!("{}", timer.count),
+                format!("{}", PrettyDuration(timer.total_duration / timer.count))
+            )
+        })
     } else {
         let mut text = Text::new(width, height, 1);
         let mut window = Window::new("", width, height, WindowOptions::default()).unwrap();
@@ -255,6 +265,7 @@ enum BvhUpdate {
     #[default]
     Rebuild,
     Reinsert,
+    ParallelReinsert,
     RemoveAndInsert,
 }
 
@@ -265,6 +276,7 @@ impl FromStr for BvhUpdate {
         match s {
             "rebuild" => Ok(Self::Rebuild),
             "reinsert" => Ok(Self::Reinsert),
+            "parallel_reinsert" => Ok(Self::ParallelReinsert),
             "remove_and_insert" => Ok(Self::RemoveAndInsert),
             _ => Err(format!(
                 "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'remove_and_insert'"
@@ -332,7 +344,7 @@ impl PhysicsWorld {
         let id = self.add_sphere(position, velocity, radius, mass);
         let aabb = match self.config.bvh_update {
             BvhUpdate::Rebuild => self.items[id as usize].min_aabb,
-            BvhUpdate::Reinsert | BvhUpdate::RemoveAndInsert => {
+            BvhUpdate::Reinsert | BvhUpdate::ParallelReinsert | BvhUpdate::RemoveAndInsert => {
                 self.items[id as usize].oversized_aabb
             }
         };
@@ -376,6 +388,22 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn bvh_partial_rebuild_parallel_reinsert(&mut self) {
+        dbg_scope!("bvh_partial_rebuild_parallel_reinsert");
+        let oversize_factor = self.oversize_factor();
+        self.bvh.init_primitives_to_nodes();
+        let mut candidates = vec![]; // TODO reuse allocation
+        for (primitive_id, item) in self.items.iter_mut().enumerate() {
+            if item.update_oversized_aabb(oversize_factor) {
+                let node_id = self.bvh.primitives_to_nodes[primitive_id];
+                self.bvh.resize_node(node_id as usize, item.oversized_aabb);
+                candidates.push(node_id);
+                self.updated_leaves_this_frame += 1;
+            }
+        }
+        ReinsertionOptimizer::run_with_candidates(&mut self.bvh, &candidates, 1);
+    }
+
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
         dbg_scope!("bvh_partial_rebuild_remove_insert");
         let oversize_factor = self.oversize_factor();
@@ -396,7 +424,9 @@ impl PhysicsWorld {
     pub fn oversize_factor(&self) -> f32 {
         match self.config.bvh_update {
             BvhUpdate::Rebuild => 0.0,
-            BvhUpdate::Reinsert | BvhUpdate::RemoveAndInsert => self.config.aabb_oversize,
+            BvhUpdate::Reinsert | BvhUpdate::ParallelReinsert | BvhUpdate::RemoveAndInsert => {
+                self.config.aabb_oversize
+            }
         }
     }
 }
@@ -469,6 +499,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
     match physics.config.bvh_update {
         BvhUpdate::Rebuild => physics.bvh_full_rebuild(),
         BvhUpdate::Reinsert => physics.bvh_partial_rebuild_reinsert(),
+        BvhUpdate::ParallelReinsert => physics.bvh_partial_rebuild_parallel_reinsert(),
         BvhUpdate::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
     }
 

@@ -190,8 +190,8 @@ pub mod text {
 
         pub fn draw_timers(&mut self, buffer: &mut [u32], cursor: (usize, usize), padding: usize) {
             self.start_debug_list(cursor, padding);
-            for_each_sorted_timer(|text, duration| {
-                self.dbg_dt(buffer, duration, text);
+            for_each_sorted_timer(|text, timer| {
+                self.dbg_dt(buffer, timer.latest_duration, text);
             })
         }
 
@@ -390,8 +390,37 @@ pub mod timer {
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
+    #[derive(Clone, Copy)]
+    pub struct TimerData {
+        pub start: Instant,
+        pub latest_duration: Duration,
+        pub total_duration: Duration,
+        pub count: u32,
+    }
+
+    impl TimerData {
+        pub fn new() -> Self {
+            Self {
+                start: Instant::now(),
+                latest_duration: Duration::ZERO,
+                total_duration: Duration::ZERO,
+                count: 0,
+            }
+        }
+        pub fn increment(&mut self) {
+            self.count += 1;
+            self.latest_duration = self.start.elapsed();
+            self.total_duration += self.latest_duration;
+            self.start = Instant::now();
+        }
+        pub fn reset(&mut self) {
+            self.start = Instant::now();
+            self.latest_duration = Duration::ZERO;
+        }
+    }
+
     thread_local! {
-        static TIMERS: RefCell<HashMap<String, (Instant, Duration)>> = RefCell::new(HashMap::new());
+        static TIMERS: RefCell<HashMap<String, TimerData>> = RefCell::new(HashMap::new());
     }
 
     /// Automatically start and stop the timer within a scope. Also includes obvhs::scope! for optional tracing.
@@ -411,9 +440,11 @@ pub mod timer {
         pub fn new(label: &str) -> Self {
             let label_string = label.to_string();
             TIMERS.with(|timers| {
+                let mut timers = timers.borrow_mut();
                 timers
-                    .borrow_mut()
-                    .insert(label_string.clone(), (Instant::now(), Duration::ZERO));
+                    .entry(label_string.clone())
+                    .and_modify(|timer| timer.reset())
+                    .or_insert_with(|| TimerData::new());
             });
             ScopedTimer {
                 label: label_string,
@@ -425,8 +456,8 @@ pub mod timer {
         fn drop(&mut self) {
             TIMERS.with(|timers| {
                 let mut timers = timers.borrow_mut();
-                if let Some((start_time, _)) = timers.remove(&self.label) {
-                    timers.insert(self.label.clone(), (start_time, start_time.elapsed()));
+                if let Some(timer) = timers.get_mut(&self.label) {
+                    timer.increment();
                 }
             });
         }
@@ -435,17 +466,17 @@ pub mod timer {
     /// Function to apply a closure to each timer, sorted by start time.
     pub fn for_each_sorted_timer<F>(mut callback: F)
     where
-        F: FnMut(&str, Duration),
+        F: FnMut(&str, TimerData),
     {
         TIMERS.with(|timers| {
             let timers = timers.borrow();
-            let mut sorted_timers: Vec<(&String, &(Instant, Duration))> = timers.iter().collect();
+            let mut sorted_timers: Vec<(&String, &TimerData)> = timers.iter().collect();
 
             // Sort by start time (Instant)
-            sorted_timers.sort_by_key(|&(_, (start_time, _))| *start_time);
+            sorted_timers.sort_by_key(|&(_, timer)| timer.start);
 
-            for (label, (_, elapsed)) in sorted_timers {
-                callback(label, *elapsed);
+            for (label, timer) in sorted_timers {
+                callback(label, *timer);
             }
         });
     }
