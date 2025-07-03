@@ -289,6 +289,7 @@ struct PhysicsWorld {
     items: Vec<SphereCollider>,
     bvh: Bvh2,
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
+    reinsertion_optimizer: ReinsertionOptimizer,
     temp_aabbs: Vec<Aabb>,
     collision_pairs: Vec<Pair>,
     #[cfg(feature = "parallel")]
@@ -306,6 +307,7 @@ impl Default for PhysicsWorld {
         Self {
             items: Default::default(),
             bvh: Default::default(),
+            reinsertion_optimizer: Default::default(),
             bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(1000),
             temp_aabbs: Default::default(),
             collision_pairs: Vec::new(),
@@ -401,7 +403,8 @@ impl PhysicsWorld {
                 self.updated_leaves_this_frame += 1;
             }
         }
-        ReinsertionOptimizer::default().run_with_candidates(&mut self.bvh, &candidates, 1);
+        self.reinsertion_optimizer
+            .run_with_candidates(&mut self.bvh, &candidates, 1);
     }
 
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
