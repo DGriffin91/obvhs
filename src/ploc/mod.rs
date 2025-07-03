@@ -16,6 +16,11 @@ use rayon::iter::{
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
+#[cfg(feature = "parallel")]
+use std::cell::RefCell;
+#[cfg(feature = "parallel")]
+use thread_local::ThreadLocal;
+
 use crate::bvh2::node::Bvh2Node;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{aabb::Aabb, bvh2::Bvh2};
@@ -85,30 +90,67 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         return Bvh2::default();
     }
 
-    let mut total_aabb = Aabb::empty();
+    #[inline]
+    fn init_node(prim_index: &u32, aabb: Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
+        local_aabb.extend(aabb.min);
+        local_aabb.extend(aabb.max);
+        debug_assert!(!aabb.min.is_nan());
+        debug_assert!(!aabb.max.is_nan());
+        Bvh2Node {
+            aabb,
+            prim_count: 1,
+            first_index: *prim_index,
+        }
+    }
 
-    // TODO perf, could make parallel if each thread tracks its own min/max and then combines afterward.
-    // (Or use atomics but idk if contention would be an issue)
-    let init_leafs = indices
-        .iter()
-        .enumerate()
-        .map(|(i, prim_index)| {
-            let aabb = aabbs[i];
-            debug_assert!(!aabb.min.is_nan());
-            debug_assert!(!aabb.max.is_nan());
-            total_aabb.extend(aabb.min);
-            total_aabb.extend(aabb.max);
-            Bvh2Node {
-                aabb,
-                prim_count: 1,
-                first_index: *prim_index,
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut total_aabb = None;
+    let mut init_leafs = None;
+
+    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
+    // 500k chosen from testing various tri counts with the demoscene example
+    #[cfg(feature = "parallel")]
+    let min_parallel = 500_000;
+
+    #[cfg(feature = "parallel")]
+    if prim_count >= min_parallel {
+        // tried par_chunks -> map -> reduce, it seemed much slower
+        let mut local_aabbs: ThreadLocal<RefCell<Aabb>> = ThreadLocal::default();
+        init_leafs = Some(
+            indices
+                .par_iter()
+                .enumerate()
+                .map(|(i, prim_index)| {
+                    init_node(
+                        prim_index,
+                        aabbs[i],
+                        &mut local_aabbs.get_or_default().borrow_mut(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut total = Aabb::empty();
+        for local_aabb in local_aabbs.iter_mut() {
+            total.extend(local_aabb.get_mut().min);
+            total.extend(local_aabb.get_mut().max);
+        }
+        total_aabb = Some(total);
+    }
+
+    if init_leafs.is_none() {
+        let mut total = Aabb::empty();
+        init_leafs = Some(
+            indices
+                .iter()
+                .enumerate()
+                .map(|(i, prim_index)| init_node(prim_index, aabbs[i], &mut total))
+                .collect::<Vec<_>>(),
+        );
+        total_aabb = Some(total);
+    }
 
     let nodes = build_ploc_from_leafs::<SEARCH_DISTANCE>(
-        init_leafs,
-        total_aabb,
+        init_leafs.unwrap(),
+        total_aabb.unwrap(),
         sort_precision,
         search_depth_threshold,
     );
@@ -422,13 +464,13 @@ fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec
     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
     // 100k chosen from testing various tri counts with the demoscene example
     #[cfg(feature = "parallel")]
-    let max_parallel = 100_000;
+    let min_parallel = 100_000;
 
     let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
 
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > max_parallel {
+        if current_nodes.len() > min_parallel {
             *indexed_mortons = current_nodes
                 .par_iter()
                 .enumerate()
@@ -456,7 +498,7 @@ fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec
 
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > max_parallel {
+        if current_nodes.len() > min_parallel {
             *current_nodes = indexed_mortons
                 .into_par_iter()
                 .map(|m| current_nodes[m.index])
@@ -492,13 +534,13 @@ fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3
     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
     // 100k chosen from testing various tri counts with the demoscene example
     #[cfg(feature = "parallel")]
-    let max_parallel = 100_000;
+    let min_parallel = 100_000;
 
     let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
 
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > max_parallel {
+        if current_nodes.len() > min_parallel {
             *indexed_mortons = current_nodes
                 .par_iter()
                 .enumerate()
@@ -526,7 +568,7 @@ fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3
 
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > max_parallel {
+        if current_nodes.len() > min_parallel {
             *current_nodes = indexed_mortons
                 .into_par_iter()
                 .map(|m| current_nodes[m.index])

@@ -197,7 +197,7 @@ impl ReinsertionOptimizer {
             assert!(count <= self.candidates.len());
             (0..count).for_each(|i| {
                 let r = find_reinsertion(
-                    self.bvh,
+                    bvh,
                     self.candidates[i].node_id as usize,
                     &mut self.reinsertion_stack,
                 );
