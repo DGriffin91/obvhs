@@ -522,7 +522,7 @@ impl Bvh2 {
 
         // Ignore primitive_indices if this is a direct layout
         if !direct_layout {
-            if result.discovered_primitives.len() == 0 {
+            if result.discovered_primitives.is_empty() {
                 assert!(self.active_primitive_indices_count() == 0)
             } else {
                 if !splits {
@@ -539,7 +539,7 @@ impl Bvh2 {
                 for (slot, index) in self.primitive_indices.iter().enumerate() {
                     let slot = slot as u32;
                     if !primitive_indices_freeset.contains(&slot) {
-                        assert!(result.discovered_primitives.contains(&index));
+                        assert!(result.discovered_primitives.contains(index));
                     }
                 }
                 let primitive_indices_set: HashSet<&u32> =
