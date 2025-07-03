@@ -28,6 +28,12 @@ impl Bvh2 {
     /// # Arguments
     /// * `node_id` - The index into self.nodes of the node that is to be removed
     pub fn remove_leaf(&mut self, node_id: usize) -> Bvh2Node {
+        assert!(
+            !self.uses_spatial_splits,
+            "Removing leafs while using spatial splits is currently unsupported as it would require a mapping \
+from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
+        );
+
         let node_to_remove = self.nodes[node_id];
         assert!(node_to_remove.is_leaf());
 
@@ -289,6 +295,11 @@ impl Bvh2 {
     /// # Arguments
     /// * `primitive_id` - The index of the primitive being removed.
     pub fn remove_primitive(&mut self, primitive_id: u32) {
+        assert!(
+            !self.uses_spatial_splits,
+            "Removing primitives while using spatial splits is currently unsupported as it would require a mapping \
+from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
+        );
         let remove_primitive_id = primitive_id;
         self.init_parents_if_uninit();
         self.init_primitives_to_nodes();
@@ -412,7 +423,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     #[cfg(debug_assertions)]
     {
-        bvh.validate(primitives, false, false, true);
+        bvh.validate(primitives, false, false);
     }
 
     bvh
@@ -454,7 +465,7 @@ mod tests {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
             let bvh = build_bvh2_by_insertion(&tris);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
         }
     }
 
@@ -471,9 +482,9 @@ mod tests {
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();
             slow_leaf_reinsertion(&mut bvh);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
             bvh.reorder_in_stack_traversal_order();
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
         }
     }
 
@@ -508,17 +519,17 @@ mod tests {
         for bvh in &mut [bvh1, bvh2] {
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
 
             for primitive_id in 0..tris.len() as u32 {
                 bvh.remove_primitive(primitive_id);
-                bvh.validate(&tris, false, false, false);
+                bvh.validate(&tris, false, false);
             }
 
             assert_eq!(bvh.nodes.len(), 0);
             assert_eq!(bvh.parents.len(), 0);
             assert_eq!(bvh.primitives_to_nodes.len(), 0);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
         }
     }
 }

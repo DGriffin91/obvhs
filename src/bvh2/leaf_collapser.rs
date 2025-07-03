@@ -329,19 +329,19 @@ mod tests {
             // Test without init_primitives_to_nodes & init_parents
             let mut bvh =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
             collapse(&mut bvh, 8, 1.0);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
         }
         {
             // Test with init_primitives_to_nodes & init_parents
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
             collapse(&mut bvh, 8, 1.0);
-            bvh.validate(&tris, false, false, true);
+            bvh.validate(&tris, false, false);
         }
     }
 }

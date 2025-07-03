@@ -70,6 +70,14 @@ pub struct Bvh2 {
     /// Stack defaults to 96 if max_depth isn't set, which much deeper than most bvh's even
     /// for large scenes without a tlas.
     pub max_depth: Option<usize>,
+
+    /// Indicates that this BVH is using spatial splits. Large triangles are split into multiple smaller Aabbs, so
+    /// primitives will extend outside the leaf in some cases.
+    /// If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1 correlation
+    /// between the total number of primitives in leaf nodes and in Bvh2::primitive_indices, vs the input triangles.
+    /// If spatial splits are used, some validation steps have to be skipped and some features are unavailable.
+    /// (TODO: list unavailable features)
+    pub uses_spatial_splits: bool,
 }
 pub const DEFAULT_MAX_STACK_DEPTH: usize = 96;
 
@@ -496,7 +504,6 @@ impl Bvh2 {
         &self,
         primitives: &[T],
         direct_layout: bool,
-        splits: bool,
         tight_fit: bool,
     ) -> Bvh2ValidationResult {
         if !self.primitives_to_nodes.is_empty() {
@@ -508,7 +515,6 @@ impl Bvh2 {
         }
 
         let mut result = Bvh2ValidationResult {
-            splits,
             direct_layout,
             require_tight_fit: tight_fit,
             ..Default::default()
@@ -525,7 +531,7 @@ impl Bvh2 {
             if result.discovered_primitives.is_empty() {
                 assert!(self.active_primitive_indices_count() == 0)
             } else {
-                if !splits {
+                if !self.uses_spatial_splits {
                     // If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1
                     // correlation between the number of discovered primitives and the quantity in bvh.primitive_indices.
                     let active_indices_count = self.active_primitive_indices_count();
@@ -618,7 +624,7 @@ impl Bvh2 {
                         .insert(self.primitive_indices[prim_index]);
                 }
                 // If using splits, primitives will extend outside the leaf in some cases.
-                if !result.splits {
+                if !self.uses_spatial_splits {
                     if !result.direct_layout {
                         prim_index = self.primitive_indices[prim_index] as usize
                     }
@@ -635,7 +641,7 @@ impl Bvh2 {
                     );
                 }
             }
-            if result.require_tight_fit && !result.splits {
+            if result.require_tight_fit && !self.uses_spatial_splits {
                 assert_eq!(
                     temp_aabb, node.aabb,
                     "Primitive do not fit in tightly in parent {node_index}",
@@ -752,8 +758,6 @@ impl RayTraversal {
 /// Result of Bvh2 validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct Bvh2ValidationResult {
-    /// Whether the BVH primitives have splits or not.
-    pub splits: bool,
     /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
     /// Require validation to ensure aabbs tightly fit children and primitives.
@@ -848,7 +852,7 @@ mod tests {
 
         bvh.refit_all();
 
-        bvh.validate(&tris, false, false, true);
+        bvh.validate(&tris, false, false);
     }
 
     #[test]
@@ -869,6 +873,6 @@ mod tests {
             bvh.reinsert_node(node_id, &mut stack);
         }
 
-        bvh.validate(&tris, false, false, true);
+        bvh.validate(&tris, false, false);
     }
 }

@@ -56,6 +56,7 @@ pub fn build_bvh2_from_tris(
         config.sort_precision,
         config.search_depth_threshold,
     );
+    bvh2.uses_spatial_splits = config.pre_split;
     ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
@@ -72,7 +73,7 @@ pub fn build_bvh2_from_tris(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(triangles, false, config.pre_split, true);
+        bvh2.validate(triangles, false, config.pre_split);
     }
 
     bvh2
@@ -125,7 +126,7 @@ pub fn build_bvh2<T: Boundable>(
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(primitives, false, config.pre_split, true);
+        bvh2.validate(primitives, false, config.pre_split);
     }
 
     bvh2

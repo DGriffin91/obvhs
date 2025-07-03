@@ -504,5 +504,6 @@ pub fn bvh2_to_cwbvh(
         primitive_indices: converter.primitive_indices,
         total_aabb: bvh2.nodes[0].aabb,
         exact_node_aabbs: converter.exact_node_aabbs,
+        uses_spatial_splits: bvh2.uses_spatial_splits,
     }
 }

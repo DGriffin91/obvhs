@@ -44,6 +44,13 @@ pub struct CwBvh {
     pub primitive_indices: Vec<u32>,
     pub total_aabb: Aabb,
     pub exact_node_aabbs: Option<Vec<Aabb>>,
+
+    /// Indicates that this BVH is using spatial splits. Large triangles are split into multiple smaller Aabbs, so
+    /// primitives will extend outside the leaf in some cases.
+    /// If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1 correlation
+    /// between the total number of primitives in leaf nodes and in Bvh2::primitive_indices, vs the input triangles.
+    /// If spatial splits are used, some validation steps have to be skipped.
+    pub uses_spatial_splits: bool,
 }
 
 const TRAVERSAL_STACK_SIZE: usize = 32;
@@ -735,15 +742,13 @@ impl CwBvh {
     pub fn validate<T: Boundable>(
         &self,
         primitives: &[T],
-        splits: bool,
         direct_layout: bool,
     ) -> CwBvhValidationResult {
-        if !splits {
+        if !self.uses_spatial_splits {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());
         }
         let mut result = CwBvhValidationResult {
-            splits,
             direct_layout,
             ..Default::default()
         };
@@ -880,7 +885,7 @@ impl CwBvh {
                         }
                         let prim_aabb = primitives[prim_index].aabb();
 
-                        if !result.splits {
+                        if !self.uses_spatial_splits {
                             // TODO: option that correctly takes into account error of compressed triangle.
                             // Maybe Boundable can return an epsilon, and for compressed triangles it
                             // can take into account the edge length
@@ -1002,8 +1007,6 @@ fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
 /// Result of CwBvh validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct CwBvhValidationResult {
-    /// Whether the BVH primitives have splits or not.
-    pub splits: bool,
     /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
     /// Set of primitives discovered though validation traversal.
