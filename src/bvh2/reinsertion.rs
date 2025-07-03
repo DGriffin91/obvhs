@@ -26,11 +26,11 @@ use super::update_primitives_to_nodes_for_node;
 const REINSERTION_STACK_CAP: usize = 256;
 
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
-pub struct ReinsertionOptimizer<'a> {
+#[derive(Default)]
+pub struct ReinsertionOptimizer {
     candidates: Vec<Candidate>,
     reinsertions: Vec<Reinsertion>,
     touched: Vec<bool>,
-    bvh: &'a mut Bvh2,
     batch_size_ratio: f32,
     #[cfg(not(feature = "parallel"))]
     reinsertion_stack: HeapStack<(f32, u32)>,
@@ -38,15 +38,14 @@ pub struct ReinsertionOptimizer<'a> {
     reinsertion_stack: ThreadLocal<RefCell<HeapStack<(f32, u32)>>>,
 }
 
-impl ReinsertionOptimizer<'_> {
+impl ReinsertionOptimizer {
     /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
     /// batch_size_ratio: Fraction of the number of nodes to optimize per iteration.
     /// ratio_sequence: A sequence of ratios to preform reinsertion at. These are as a
     /// proportion of the batch_size_ratio. If None, the following sequence is used:
     /// (1..32).step_by(2).map(|n| 1.0 / n as f32) or
     /// 1/1, 1/3, 1/5, 1/7, 1/9, 1/11, 1/13, 1/15, 1/17, 1/19, 1/21, 1/23, 1/25, 1/27, 1/29, 1/31
-    pub fn run(bvh: &mut Bvh2, batch_size_ratio: f32, ratio_sequence: Option<Vec<f32>>) {
-        // TODO perf: allow allocations to be reused
+    pub fn run(&mut self, bvh: &mut Bvh2, batch_size_ratio: f32, ratio_sequence: Option<Vec<f32>>) {
         crate::scope!("reinsertion_optimize");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() || batch_size_ratio <= 0.0 {
@@ -57,19 +56,22 @@ impl ReinsertionOptimizer<'_> {
 
         let cap = (bvh.nodes.len() as f32 * batch_size_ratio.min(1.0)).ceil() as usize;
 
-        ReinsertionOptimizer {
-            candidates: Vec::with_capacity(cap),
-            reinsertions: Vec::with_capacity(cap),
-            touched: vec![false; bvh.nodes.len()],
-            bvh,
-            batch_size_ratio,
-            #[cfg(not(feature = "parallel"))]
-            reinsertion_stack: HeapStack::<(f32, u32)>::new_with_capacity(REINSERTION_STACK_CAP),
-            #[cfg(feature = "parallel")]
-            reinsertion_stack: ThreadLocal::new(),
+        self.candidates.reserve(cap);
+        self.reinsertions.reserve(cap);
+        self.touched.clear();
+        self.touched.resize(bvh.nodes.len(), false);
+        self.batch_size_ratio = batch_size_ratio;
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.reinsertion_stack.clear();
+            self.reinsertion_stack.reserve(REINSERTION_STACK_CAP);
         }
-        .optimize_impl(ratio_sequence);
-        bvh.children_are_ordered_after_parents = false;
+        #[cfg(feature = "parallel")]
+        for stack in self.reinsertion_stack.iter_mut() {
+            stack.get_mut().clear();
+            stack.get_mut().reserve(REINSERTION_STACK_CAP);
+        }
+        self.optimize_impl(bvh, ratio_sequence);
     }
 
     /// Restructures the BVH, optimizing given node locations within the BVH hierarchy per SAH cost.
@@ -78,8 +80,7 @@ impl ReinsertionOptimizer<'_> {
     /// * `candidates` - A list of ids for nodes that need to be re-inserted.
     /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
     ///   that potentially limit the proportion of reinsertions in a single pass.
-    pub fn run_with_candidates(bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
-        // TODO perf: allow allocations to be reused
+    pub fn run_with_candidates(&mut self, bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
         crate::scope!("reinsertion_optimize_candidates");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
@@ -90,7 +91,7 @@ impl ReinsertionOptimizer<'_> {
 
         let cap = candidates.len();
 
-        let candidates = candidates
+        self.candidates = candidates
             .iter()
             .map(|node_id| {
                 let cost = bvh.nodes[*node_id as usize].aabb.half_area();
@@ -100,23 +101,25 @@ impl ReinsertionOptimizer<'_> {
                 }
             })
             .collect::<Vec<_>>();
-
-        ReinsertionOptimizer {
-            candidates,
-            reinsertions: Vec::with_capacity(cap),
-            touched: vec![false; bvh.nodes.len()],
-            bvh,
-            batch_size_ratio: 0.0,
-            #[cfg(not(feature = "parallel"))]
-            reinsertion_stack: HeapStack::<(f32, u32)>::new_with_capacity(REINSERTION_STACK_CAP),
-            #[cfg(feature = "parallel")]
-            reinsertion_stack: ThreadLocal::new(),
+        self.reinsertions.reserve(cap);
+        self.touched.clear();
+        self.touched.resize(bvh.nodes.len(), false);
+        #[cfg(not(feature = "parallel"))]
+        {
+            self.reinsertion_stack.clear();
+            self.reinsertion_stack.reserve(REINSERTION_STACK_CAP);
         }
-        .optimize_specific_candidates(iterations);
-        bvh.children_are_ordered_after_parents = false;
+        #[cfg(feature = "parallel")]
+        for stack in self.reinsertion_stack.iter_mut() {
+            stack.get_mut().clear();
+            stack.get_mut().reserve(REINSERTION_STACK_CAP);
+        }
+
+        self.optimize_specific_candidates(bvh, iterations);
     }
 
-    pub fn optimize_impl(&mut self, ratio_sequence: Option<Vec<f32>>) {
+    pub fn optimize_impl(&mut self, bvh: &mut Bvh2, ratio_sequence: Option<Vec<f32>>) {
+        bvh.children_are_ordered_after_parents = false;
         // This initially preforms reinsertion at the specified ratio, then at progressively smaller ratios,
         // focusing more reinsertion time at the top of the bvh. The original method would perform reinsertion
         // for a fixed ratio a fixed number of times.
@@ -129,28 +132,28 @@ impl ReinsertionOptimizer<'_> {
 
         ratio_sequence.iter().for_each(|ratio| {
             let batch_size =
-                (((self.bvh.nodes.len() as f32 * self.batch_size_ratio) * ratio) as usize).max(1);
-            let node_count = self.bvh.nodes.len().min(batch_size + 1);
-            self.find_candidates(node_count);
-            self.optimize_candidates(node_count - 1);
+                (((bvh.nodes.len() as f32 * self.batch_size_ratio) * ratio) as usize).max(1);
+            let node_count = bvh.nodes.len().min(batch_size + 1);
+            self.find_candidates(bvh, node_count);
+            self.optimize_candidates(bvh, node_count - 1);
         });
     }
 
-    pub fn optimize_specific_candidates(&mut self, iterations: u32) {
+    pub fn optimize_specific_candidates(&mut self, bvh: &mut Bvh2, iterations: u32) {
+        bvh.children_are_ordered_after_parents = false;
         for _ in 0..iterations {
-            self.optimize_candidates(self.candidates.len());
+            self.optimize_candidates(bvh, self.candidates.len());
         }
     }
 
     /// Find potential candidates for reinsertion
-    fn find_candidates(&mut self, node_count: usize) {
+    fn find_candidates(&mut self, bvh: &mut Bvh2, node_count: usize) {
         // This method just takes the first node_count*2 nodes in the bvh and sorts them by their half area
         // This seemed to find candidates much faster while resulting in similar bvh traversal performance vs the original method
         // https://github.com/madmann91/bvh/blob/3490634ae822e5081e41f09498fcce03bc1419e3/src/bvh/v2/reinsertion_optimizer.h#L88
         // Taking the first node_count * 2 seemed to work nearly as well as sorting all the nodes, but builds much faster.
         self.candidates.clear();
-        self.bvh
-            .nodes
+        bvh.nodes
             .iter()
             .take(node_count * 2)
             .enumerate()
@@ -165,7 +168,7 @@ impl ReinsertionOptimizer<'_> {
     }
 
     #[allow(unused_variables)]
-    fn optimize_candidates(&mut self, count: usize) {
+    fn optimize_candidates(&mut self, bvh: &mut Bvh2, count: usize) {
         self.reinsertions.clear();
         self.touched.fill(false);
 
@@ -180,7 +183,7 @@ impl ReinsertionOptimizer<'_> {
                         stack
                     };
 
-                    find_reinsertion(self.bvh, self.candidates[i].node_id as usize, stack)
+                    find_reinsertion(bvh, self.candidates[i].node_id as usize, stack)
                 })
                 .collect::<Vec<_>>();
             reinsertions_map.drain(..).for_each(|r| {
@@ -210,7 +213,7 @@ impl ReinsertionOptimizer<'_> {
         assert!(self.reinsertions.len() <= self.touched.len());
         (0..self.reinsertions.len()).for_each(|i| {
             let reinsertion = &self.reinsertions[i];
-            let conflicts = self.get_conflicts(reinsertion.from, reinsertion.to);
+            let conflicts = self.get_conflicts(bvh, reinsertion.from, reinsertion.to);
 
             if conflicts.iter().any(|&i| self.touched[i]) {
                 return;
@@ -220,19 +223,19 @@ impl ReinsertionOptimizer<'_> {
                 self.touched[conflict] = true;
             });
 
-            reinsert_node(self.bvh, reinsertion.from as usize, reinsertion.to as usize);
+            reinsert_node(bvh, reinsertion.from as usize, reinsertion.to as usize);
         });
     }
 
     #[inline(always)]
-    fn get_conflicts(&self, from: u32, to: u32) -> [usize; 5] {
+    fn get_conflicts(&self, bvh: &mut Bvh2, from: u32, to: u32) -> [usize; 5] {
         [
             to as usize,
             from as usize,
             Bvh2Node::get_sibling_id(from as usize),
             // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
-            self.bvh.parents[to as usize] as usize,
-            self.bvh.parents[from as usize] as usize,
+            bvh.parents[to as usize] as usize,
+            bvh.parents[from as usize] as usize,
         ]
     }
 }
@@ -434,10 +437,10 @@ mod tests {
             let mut bvh =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
-            ReinsertionOptimizer::run(&mut bvh, 0.25, None);
+            ReinsertionOptimizer::default().run(&mut bvh, 0.25, None);
             bvh.validate(&tris, false, false);
             bvh.reorder_in_stack_traversal_order();
-            ReinsertionOptimizer::run(&mut bvh, 0.5, None);
+            ReinsertionOptimizer::default().run(&mut bvh, 0.5, None);
             bvh.validate(&tris, false, false);
         }
         {
@@ -447,10 +450,10 @@ mod tests {
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false);
-            ReinsertionOptimizer::run(&mut bvh, 0.25, None);
+            ReinsertionOptimizer::default().run(&mut bvh, 0.25, None);
             bvh.validate(&tris, false, false);
             bvh.reorder_in_stack_traversal_order();
-            ReinsertionOptimizer::run(&mut bvh, 0.5, None);
+            ReinsertionOptimizer::default().run(&mut bvh, 0.5, None);
             bvh.validate(&tris, false, false);
         }
     }

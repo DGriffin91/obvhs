@@ -57,13 +57,13 @@ pub fn build_bvh2_from_tris(
         config.search_depth_threshold,
     );
     bvh2.uses_spatial_splits = config.pre_split;
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    ReinsertionOptimizer::default().run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
         config.max_prims_per_leaf,
         config.collapse_traversal_cost,
     );
-    ReinsertionOptimizer::run(
+    ReinsertionOptimizer::default().run(
         &mut bvh2,
         config.reinsertion_batch_ratio * config.post_collapse_reinsertion_batch_ratio_multiplier,
         None,
@@ -110,13 +110,13 @@ pub fn build_bvh2<T: Boundable>(
         config.sort_precision,
         config.search_depth_threshold,
     );
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    ReinsertionOptimizer::default().run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
         config.max_prims_per_leaf,
         config.collapse_traversal_cost,
     );
-    ReinsertionOptimizer::run(
+    ReinsertionOptimizer::default().run(
         &mut bvh2,
         config.reinsertion_batch_ratio * config.post_collapse_reinsertion_batch_ratio_multiplier,
         None,

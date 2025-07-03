@@ -401,7 +401,7 @@ impl PhysicsWorld {
                 self.updated_leaves_this_frame += 1;
             }
         }
-        ReinsertionOptimizer::run_with_candidates(&mut self.bvh, &candidates, 1);
+        ReinsertionOptimizer::default().run_with_candidates(&mut self.bvh, &candidates, 1);
     }
 
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
