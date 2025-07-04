@@ -200,6 +200,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
             let mut last_cost = f32::MAX;
             let count = current_nodes.len() - 1;
             assert!(count < merge.len()); // Try to elide bounds check
+
+            // TODO perf/forte: tried making parallel but there appears to be too much overhead: https://pastebin.com/Msas1RXU
             (0..count).for_each(|i| {
                 let cost = current_nodes[i]
                     .aabb
