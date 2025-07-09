@@ -1,8 +1,6 @@
 // Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/leaf_collapser.hpp
 use bytemuck::zeroed_vec;
 #[cfg(feature = "parallel")]
-use hibitset::{BitSet, BitSetLike};
-#[cfg(feature = "parallel")]
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
@@ -114,7 +112,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
         let indices_copy = as_slice_of_sometimes_atomic_u32(&mut indices_copy);
 
         #[cfg(feature = "parallel")]
-        let mut needs_traversal = BitSet::with_capacity((bvh.nodes.len() / 2) as u32);
+        let mut needs_traversal = Vec::with_capacity(bvh.nodes.len().div_ceil(4));
 
         #[allow(unused_mut)]
         let mut top_down_traverse = |i| {
@@ -159,14 +157,14 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
                 nodes_copy[node_id].prim_count = prim_counts[i] - first_prim;
                 nodes_copy[node_id].first_index = first_prim;
                 #[cfg(feature = "parallel")]
-                needs_traversal.add(i as u32);
+                needs_traversal.push(i as u32);
                 #[cfg(not(feature = "parallel"))]
                 top_down_traverse(i);
             }
         });
 
         #[cfg(feature = "parallel")]
-        needs_traversal.par_iter().for_each(top_down_traverse);
+        needs_traversal.into_par_iter().for_each(top_down_traverse);
     }
 
     std::mem::swap(&mut bvh.nodes, &mut nodes_copy);

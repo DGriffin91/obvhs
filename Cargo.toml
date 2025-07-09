@@ -17,7 +17,6 @@ half = "2.3.1"
 bytemuck = { version = "1.23", features = ["derive", "extern_crate_alloc"] }
 rdst = { version = "0.20.14", default-features = false }
 rayon = { version = "1.9.0", optional = true }
-hibitset = { version = "0.6.4", optional = true }
 
 # Noop unless one of the profile-with features below is also used
 profiling = { version = "1.0", optional = true }
@@ -26,14 +25,8 @@ profiling = { version = "1.0", optional = true }
 image = "0.24"
 
 [features]
-#default = []
-parallel = [
-    "dep:rayon",
-    "dep:hibitset",
-    "hibitset/rayon",
-    "hibitset/parallel",
-    "rdst/multi-threaded",
-]
+default = []
+parallel = ["dep:rayon", "rdst/multi-threaded"]
 timeit = []
 
 profile = ["dep:profiling"]
