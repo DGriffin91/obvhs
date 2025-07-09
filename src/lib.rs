@@ -62,6 +62,9 @@
 //! }
 //! ```
 
+// TODO re-enable needless_range_loop lint and evaluate performance / clarity
+#![allow(clippy::needless_range_loop)]
+
 use std::time::Duration;
 
 use aabb::Aabb;
