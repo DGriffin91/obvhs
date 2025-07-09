@@ -1,6 +1,6 @@
 [package]
 name = "obvhs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "BVH Construction and Traversal Library"
 homepage = "https://github.com/DGriffin91/obvhs"
