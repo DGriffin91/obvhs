@@ -1,7 +1,4 @@
-use std::{
-    fmt::{self, Formatter},
-    mem::transmute,
-};
+use std::fmt::{self, Formatter};
 
 use crate::{aabb::Aabb, ray::Ray};
 use bytemuck::{Pod, Zeroable};
@@ -213,7 +210,7 @@ impl CwBvhNode {
     pub fn get_child_and_index_bits(&self, oct_inv4: u32) -> (u64, u64) {
         let mut oct_inv8 = oct_inv4 as u64;
         oct_inv8 |= oct_inv8 << 32;
-        let meta8 = unsafe { transmute::<[u8; 8], u64>(self.child_meta) };
+        let meta8 = u64::from_le_bytes(self.child_meta);
 
         // (meta8 & (meta8 << 1)) takes advantage of the offset indexing for inner nodes [24..32)
         // [0b00011000..=0b00011111). For leaf nodes [0..24) these two bits (0b00011000) are never both set.
