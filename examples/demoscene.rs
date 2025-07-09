@@ -73,14 +73,14 @@ fn main() {
         for aa_sample in 0..total_aa_samples {
             print!("."); // Print progress
             std::io::stdout().flush().unwrap();
-            let new_fragments: Vec<Vec3A>;
+            
             #[cfg(feature = "parallel")]
             let iter = (0..width * height).into_par_iter();
             #[cfg(not(feature = "parallel"))]
-            let iter = (0..width * height).into_iter();
-            new_fragments = iter
+            let iter = 0..width * height;
+            let new_fragments: Vec<Vec3A> = iter
                 .map(|i| {
-                    let frag_coord = uvec2(i as u32 % width, i as u32 / width);
+                    let frag_coord = uvec2(i % width, i / width);
                     let misc_grain_noise = hash_noise(frag_coord, aa_sample + 12345);
                     let aa = vec2(
                         hash_noise(frag_coord, aa_sample),
@@ -212,7 +212,7 @@ fn main() {
                 .zip(fragments.iter_mut())
                 .for_each(|(new, col)| *col += *new);
         }
-        println!("");
+        println!();
     ];
 
     let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width, height);
@@ -228,7 +228,7 @@ fn main() {
         chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
     });
 
-    img.save(format!("demoscene_{}_rend.png", seed))
+    img.save(format!("demoscene_{seed}_rend.png"))
         .expect("Failed to save image");
 }
 

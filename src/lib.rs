@@ -20,46 +20,46 @@
 //! };
 //! use std::time::Duration;
 //!
-//! fn main() {
-//!     // Build a scene with an icosphere and a plane
-//!     // BVH primitives do not need to be triangles, the BVH builder is only concerned with AABBs.
-//!     // (With the exception of optional precise triangle aabb splitting)
-//!     let mut tris: Vec<Triangle> = Vec::new();
-//!     tris.extend(icosphere(1));
-//!     tris.extend(PLANE);
 //!
-//!     // Build the BVH.
-//!     // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the
-//!     // respective presets. Feel free to copy the contents of build_cwbvh_from_tris or
-//!     // build_cwbvh. They are very straightforward. If you don't want to use Triangles as the
-//!     // primitive, use  build_cwbvh instead. build_cwbvh_from_tris just adds support for
-//!     // splitting tris.
-//!     let bvh = build_cwbvh_from_tris(
-//!         &tris,
-//!         BvhBuildParams::medium_build(),
-//!         &mut Duration::default(),
+//! // Build a scene with an icosphere and a plane
+//! // BVH primitives do not need to be triangles, the BVH builder is only concerned with AABBs.
+//! // (With the exception of optional precise triangle aabb splitting)
+//! let mut tris: Vec<Triangle> = Vec::new();
+//! tris.extend(icosphere(1));
+//! tris.extend(PLANE);
+//!
+//! // Build the BVH.
+//! // build_cwbvh_from_tris is just a helper that can build from BvhBuildParams and the
+//! // respective presets. Feel free to copy the contents of build_cwbvh_from_tris or
+//! // build_cwbvh. They are very straightforward. If you don't want to use Triangles as the
+//! // primitive, use  build_cwbvh instead. build_cwbvh_from_tris just adds support for
+//! // splitting tris.
+//! let bvh = build_cwbvh_from_tris(
+//!     &tris,
+//!     BvhBuildParams::medium_build(),
+//!     &mut Duration::default(),
+//! );
+//!
+//! // Create a new ray
+//! let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));
+//!
+//! // Traverse the BVH, finding the closest hit.
+//! let mut ray_hit = RayHit::none();
+//! if bvh.ray_traverse(ray, &mut ray_hit, |ray, id| {
+//!     // Use primitive_indices to look up the original primitive id.
+//!     // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see
+//!     // cornell_box_cwbvh example)
+//!     tris[bvh.primitive_indices[id] as usize].intersect(ray)
+//! }) {
+//!     println!(
+//!         "Hit Triangle {}",
+//!         bvh.primitive_indices[ray_hit.primitive_id as usize]
 //!     );
-//!
-//!     // Create a new ray
-//!     let ray = Ray::new_inf(vec3a(0.1, 0.1, 4.0), vec3a(0.0, 0.0, -1.0));
-//!
-//!     // Traverse the BVH, finding the closest hit.
-//!     let mut ray_hit = RayHit::none();
-//!     if bvh.ray_traverse(ray, &mut ray_hit, |ray, id| {
-//!         // Use primitive_indices to look up the original primitive id.
-//!         // (Could reorder tris per bvh.primitive_indices to avoid this lookup, see
-//!         // cornell_box_cwbvh example)
-//!         tris[bvh.primitive_indices[id] as usize].intersect(ray)
-//!     }) {
-//!         println!(
-//!             "Hit Triangle {}",
-//!             bvh.primitive_indices[ray_hit.primitive_id as usize]
-//!         );
-//!         println!("Distance to hit: {}", ray_hit.t);
-//!     } else {
-//!         println!("Miss");
-//!     }
+//!     println!("Distance to hit: {}", ray_hit.t);
+//! } else {
+//!     println!("Miss");
 //! }
+//!
 //! ```
 
 // TODO re-enable needless_range_loop lint and evaluate performance / clarity
@@ -180,23 +180,23 @@ pub struct PrettyDuration(pub Duration);
 
 impl std::fmt::Display for PrettyDuration {
     /// Durations are formatted as follows:
-    /// - If the duration is greater than or equal to 1 second, it is formatted in seconds (s).
-    /// - If the duration is greater than or equal to 1 millisecond but less than 1 second, it is formatted in milliseconds (ms).
-    /// - If the duration is less than 1 millisecond, it is formatted in microseconds (µs).
-    /// In the case of seconds & milliseconds, the duration is always printed with a precision of two decimal places.
+    ///   - If the duration is greater than or equal to 1 second, it is formatted in seconds (s).
+    ///   - If the duration is greater than or equal to 1 millisecond but less than 1 second, it is formatted in milliseconds (ms).
+    ///   - If the duration is less than 1 millisecond, it is formatted in microseconds (µs).
+    ///     In the case of seconds & milliseconds, the duration is always printed with a precision of two decimal places.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let duration = self.0;
         if duration.as_secs() > 0 {
             let seconds =
                 duration.as_secs() as f64 + f64::from(duration.subsec_nanos()) / 1_000_000_000.0;
-            write!(f, "{:.2}s ", seconds)
+            write!(f, "{seconds:.2}s ")
         } else if duration.subsec_millis() > 0 {
             let milliseconds =
                 duration.as_millis() as f64 + f64::from(duration.subsec_micros() % 1_000) / 1_000.0;
-            write!(f, "{:.2}ms", milliseconds)
+            write!(f, "{milliseconds:.2}ms")
         } else {
             let microseconds = duration.as_micros();
-            write!(f, "{}µs", microseconds)
+            write!(f, "{microseconds}µs")
         }
     }
 }

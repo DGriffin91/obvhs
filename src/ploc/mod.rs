@@ -26,15 +26,15 @@ impl PlocSearchDistance {
     /// # Arguments
     /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
     /// * `indices` - The list indices used to index into the list of primitives. This allows for
-    /// flexibility in which primitives are included in the bvh and in what order they are referenced.
-    /// Often this would just be equivalent to: (0..aabbs.len() as u32).collect::<Vec<_>>()
+    ///   flexibility in which primitives are included in the bvh and in what order they are referenced.
+    ///   Often this would just be equivalent to: (0..aabbs.len() as u32).collect::<Vec<_>>()
     /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
     /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
-    /// just use PlocSearchDistance. When trying to optimize build time it can be beneficial to limit the search
-    /// distance for the first few passes as that is when the largest number of primitives are being considered.
-    /// This pairs are initially found more quickly since it doesn't need to search as far, and they are also
-    /// found more often, since the nodes need to both agree to become paired. This also seems to occasionally
-    /// result in an overall better bvh structure.
+    ///   just use PlocSearchDistance. When trying to optimize build time it can be beneficial to limit the search
+    ///   distance for the first few passes as that is when the largest number of primitives are being considered.
+    ///   This pairs are initially found more quickly since it doesn't need to search as far, and they are also
+    ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
+    ///   result in an overall better bvh structure.
     pub fn build(
         &self,
         aabbs: &[Aabb],
@@ -70,7 +70,7 @@ impl PlocSearchDistance {
 /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used
 /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
 /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
-/// just use SEARCH_DISTANCE.
+///   just use SEARCH_DISTANCE.
 ///
 /// SEARCH_DISTANCE should be <= 32
 pub fn build_ploc<const SEARCH_DISTANCE: usize>(
@@ -294,7 +294,7 @@ impl From<u32> for PlocSearchDistance {
             14 => PlocSearchDistance::Medium,
             24 => PlocSearchDistance::High,
             32 => PlocSearchDistance::VeryHigh,
-            _ => panic!("Invalid value for PlocSearchDistance: {}", value),
+            _ => panic!("Invalid value for PlocSearchDistance: {value}"),
         }
     }
 }

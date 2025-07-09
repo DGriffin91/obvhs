@@ -10,9 +10,9 @@ use crate::{aabb::Aabb, triangle::Triangle};
 /// # Arguments
 /// * `avg_half_area` - The average half area of the Triangles
 /// * `largest_half_area` - The largest half area of the Triangles
-/// This is tuned to try to create splits conservatively enough that it generally
-/// wont result in lower traversal performance across a variety of scenes.
-/// (Naive splitting can result in lower traversal performance in some scenes)
+///   This is tuned to try to create splits conservatively enough that it generally
+///   wont result in lower traversal performance across a variety of scenes.
+///   (Naive splitting can result in lower traversal performance in some scenes)
 pub fn split_aabbs_preset(
     aabbs: &mut Vec<Aabb>,
     indices: &mut Vec<u32>,
@@ -39,10 +39,10 @@ pub fn split_aabbs_preset(
 /// # Arguments
 /// * `area_thresh_low` - Triangles with aabb half areas below this will not be considered for splitting.
 /// * `area_thresh_high` - If the low split factor condition is not met then area_thresh_high > old_cost
-/// must be met in addition to best_cost * split_factor_high < old_cost in order for the split to occur
+///   must be met in addition to best_cost * split_factor_high < old_cost in order for the split to occur
 /// * `split_factor_low` - If the resulting smallest aabb half area (best_cost) multiplied by this factor is
-/// lower than the original cost the best split will be used (best_cost * split_factor_low < old_cost)
-/// (area_thresh_high > old_cost && best_cost * split_factor_high < old_cost)
+///   lower than the original cost the best split will be used (best_cost * split_factor_low < old_cost)
+///   (area_thresh_high > old_cost && best_cost * split_factor_high < old_cost)
 /// * `max_iterations` - Number of times to evaluate the entire set of aabbs/triangles (including the newly added splits)
 /// * `split_tests` - Number of places try splitting the triangle at.
 #[allow(clippy::too_many_arguments)]

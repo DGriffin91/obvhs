@@ -106,7 +106,7 @@ impl<T: Clone + Default> HeapStack<T> {
     ///
     /// # Arguments
     /// * `cap` - The desired capacity.
-    /// If the new capacity is smaller than the current capacity, this function does nothing.
+    ///   If the new capacity is smaller than the current capacity, this function does nothing.
     #[inline(always)]
     pub fn reserve(&mut self, cap: usize) {
         if cap < self.data.len() {

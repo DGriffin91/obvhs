@@ -187,9 +187,9 @@ impl Bvh2 {
     /// * `ray` - The ray to be tested for intersection.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
     /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
-    /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
-    /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
-    /// original primitives per primitive_indices.
+    ///   Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
+    ///   Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
+    ///   original primitives per primitive_indices.
     #[inline(always)]
     pub fn ray_traverse<F: FnMut(&Ray, usize) -> f32>(
         &self,
@@ -214,9 +214,9 @@ impl Bvh2 {
     /// * `state` - Holds the current traversal state. Allows traverse_dynamic to yield.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
     /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
-    /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
-    /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
-    /// original primitives per primitive_indices.
+    ///   Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
+    ///   Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
+    ///   original primitives per primitive_indices.
     #[inline(always)]
     pub fn ray_traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
         &self,
