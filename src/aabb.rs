@@ -8,7 +8,7 @@ use glam::Vec3A;
 use crate::{ray::Ray, Boundable};
 
 /// An Axis-Aligned Bounding Box (AABB) represented by its minimum and maximum points.
-#[derive(Default, Clone, Copy, Debug, PartialEq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Zeroable)]
 #[repr(C)]
 pub struct Aabb {
     pub min: Vec3A,
@@ -16,7 +16,6 @@ pub struct Aabb {
 }
 
 unsafe impl Pod for Aabb {}
-unsafe impl Zeroable for Aabb {}
 
 impl Aabb {
     /// An invalid (empty) AABB with min set to the maximum possible value

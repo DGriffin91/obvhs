@@ -5,7 +5,7 @@ use glam::{vec2, Mat4, Vec2, Vec3A};
 
 use crate::{aabb::Aabb, ray::Ray, Boundable, Transformable};
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, Zeroable)]
 pub struct Triangle {
     pub v0: Vec3A,
     pub v1: Vec3A,
@@ -13,7 +13,6 @@ pub struct Triangle {
 }
 
 unsafe impl Pod for Triangle {}
-unsafe impl Zeroable for Triangle {}
 
 impl Triangle {
     /// Compute the normal of the triangle geometry.

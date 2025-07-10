@@ -3,7 +3,7 @@ use bytemuck::{Pod, Zeroable};
 use crate::aabb::Aabb;
 
 /// A node in the Bvh2, can be an inner node or leaf.
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
 pub struct Bvh2Node {
     /// The bounding box for the primitive(s) contained in this node
@@ -27,9 +27,6 @@ pub struct Bvh2Node {
     /// allow the user to access this otherwise unused space.
     pub meta2: u32,
 }
-
-unsafe impl Pod for Bvh2Node {}
-unsafe impl Zeroable for Bvh2Node {}
 
 impl Bvh2Node {
     #[inline(always)]

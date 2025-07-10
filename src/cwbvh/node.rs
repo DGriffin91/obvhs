@@ -9,7 +9,7 @@ use super::NQ_SCALE;
 
 /// A Compressed Wide BVH8 Node. repr(C), Pod, 80 bytes.
 // https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Pod, Zeroable)]
 #[repr(C)]
 pub struct CwBvhNode {
     /// Min point of node AABB
@@ -78,9 +78,6 @@ impl Debug for CwBvhNode {
             .finish()
     }
 }
-
-unsafe impl Pod for CwBvhNode {}
-unsafe impl Zeroable for CwBvhNode {}
 
 pub(crate) const EPSILON: f32 = 0.0001;
 
