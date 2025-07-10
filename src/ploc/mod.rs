@@ -21,7 +21,7 @@ use std::cell::RefCell;
 #[cfg(feature = "parallel")]
 use thread_local::ThreadLocal;
 
-use crate::bvh2::node::Bvh2Node;
+use crate::bvh2::node::{Bvh2Node, Meta};
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{aabb::Aabb, bvh2::Bvh2};
 
@@ -38,31 +38,31 @@ impl PlocSearchDistance {
     ///   This pairs are initially found more quickly since it doesn't need to search as far, and they are also
     ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
     ///   result in an overall better bvh structure.
-    pub fn build(
+    pub fn build<T: Meta>(
         &self,
         aabbs: &[Aabb],
         indices: Vec<u32>,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
-    ) -> Bvh2 {
+    ) -> Bvh2<T> {
         match self {
             PlocSearchDistance::Minimum => {
-                build_ploc::<1>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<1, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::VeryLow => {
-                build_ploc::<2>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<2, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::Low => {
-                build_ploc::<6>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<6, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::Medium => {
-                build_ploc::<14>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<14, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::High => {
-                build_ploc::<24>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<24, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::VeryHigh => {
-                build_ploc::<32>(aabbs, indices, sort_precision, search_depth_threshold)
+                build_ploc::<32, T>(aabbs, indices, sort_precision, search_depth_threshold)
             }
         }
     }
@@ -76,12 +76,12 @@ impl PlocSearchDistance {
 ///   just use SEARCH_DISTANCE.
 ///
 /// SEARCH_DISTANCE should be <= 32
-pub fn build_ploc<const SEARCH_DISTANCE: usize>(
+pub fn build_ploc<const SEARCH_DISTANCE: usize, T: Meta>(
     aabbs: &[Aabb],
     indices: Vec<u32>,
     sort_precision: SortPrecision,
     search_depth_threshold: usize,
-) -> Bvh2 {
+) -> Bvh2<T> {
     crate::scope!("build_ploc");
 
     let prim_count = aabbs.len();
@@ -91,7 +91,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     }
 
     #[inline]
-    fn init_node(prim_index: &u32, aabb: Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
+    fn init_node<T: Meta>(prim_index: &u32, aabb: Aabb, local_aabb: &mut Aabb) -> Bvh2Node<T> {
         local_aabb.extend(aabb.min);
         local_aabb.extend(aabb.max);
         debug_assert!(!aabb.min.is_nan());
@@ -100,6 +100,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
             aabb,
             prim_count: 1,
             first_index: *prim_index,
+            meta: Default::default(),
         }
     }
 
@@ -148,7 +149,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         total_aabb = Some(total);
     }
 
-    let nodes = build_ploc_from_leafs::<SEARCH_DISTANCE>(
+    let nodes = build_ploc_from_leafs::<SEARCH_DISTANCE, T>(
         init_leafs.unwrap(),
         total_aabb.unwrap(),
         sort_precision,
@@ -163,12 +164,12 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     }
 }
 
-pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
-    mut current_nodes: Vec<Bvh2Node>,
+pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize, T: Meta>(
+    mut current_nodes: Vec<Bvh2Node<T>>,
     total_aabb: Aabb,
     sort_precision: SortPrecision,
     search_depth_threshold: usize,
-) -> Vec<Bvh2Node> {
+) -> Vec<Bvh2Node<T>> {
     crate::scope!("build_ploc_from_leafs");
 
     let prim_count = current_nodes.len();
@@ -262,6 +263,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
                 aabb: left.aabb.union(&right.aabb),
                 prim_count: 0,
                 first_index: insert_index as u32,
+                meta: Default::default(),
             });
 
             // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
@@ -372,7 +374,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
     }
 
     #[cfg(not(feature = "parallel"))]
-    fn find_best_node(&mut self, index: usize, nodes: &[Bvh2Node]) -> i8 {
+    fn find_best_node<T: Meta>(&mut self, index: usize, nodes: &[Bvh2Node<T>]) -> i8 {
         let mut best_node = index;
         let mut best_cost = f32::INFINITY;
 
@@ -414,7 +416,12 @@ pub enum SortPrecision {
 }
 
 impl SortPrecision {
-    fn sort_nodes(&self, current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+    fn sort_nodes<T: Meta>(
+        &self,
+        current_nodes: &mut Vec<Bvh2Node<T>>,
+        scale: DVec3,
+        offset: DVec3,
+    ) {
         match self {
             SortPrecision::U128 => sort_nodes_m128(current_nodes, scale, offset),
             SortPrecision::U64 => sort_nodes_m64(current_nodes, scale, offset),
@@ -452,10 +459,10 @@ impl RadixKey for Morton64 {
     }
 }
 
-fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+fn sort_nodes_m128<T: Meta>(current_nodes: &mut Vec<Bvh2Node<T>>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m128");
 
-    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node<T>)| {
         let center = leaf.aabb.center().as_dvec3() * scale + offset;
         Morton128 {
             index,
@@ -522,10 +529,10 @@ fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec
     }
 }
 
-fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+fn sort_nodes_m64<T: Meta>(current_nodes: &mut Vec<Bvh2Node<T>>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m64");
 
-    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node<T>)| {
         let center = leaf.aabb.center().as_dvec3() * scale + offset;
         Morton64 {
             index,

@@ -8,7 +8,8 @@ mod tests {
         aabb::Aabb,
         bvh2::{
             builder::{build_bvh2, build_bvh2_from_tris},
-            DEFAULT_MAX_STACK_DEPTH,
+            node::Pad,
+            Bvh2, DEFAULT_MAX_STACK_DEPTH,
         },
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
@@ -37,7 +38,8 @@ mod tests {
     #[test]
     pub fn build_bvh2_with_empty_aabb() {
         for build_param in BUILD_PARAM_SET {
-            let bvh = build_bvh2(&[Aabb::empty()], build_param, &mut Duration::default());
+            let bvh: Bvh2<Pad> =
+                build_bvh2(&[Aabb::empty()], build_param, &mut Duration::default());
             let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
             assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
         }
@@ -56,7 +58,7 @@ mod tests {
     pub fn build_bvh2_with_nothing() {
         for build_param in BUILD_PARAM_SET {
             let aabbs: Vec<Aabb> = Vec::new();
-            let bvh = build_bvh2(&aabbs, build_param, &mut Duration::default());
+            let bvh: Bvh2<Pad> = build_bvh2(&aabbs, build_param, &mut Duration::default());
             let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
             assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
         }
@@ -162,7 +164,7 @@ mod tests {
         }
 
         // Bvh2
-        let bvh2 = build_bvh2_from_tris(
+        let bvh2: Bvh2<Pad> = build_bvh2_from_tris(
             &tris,
             BvhBuildParams::fast_build(),
             &mut Duration::default(),
@@ -314,7 +316,7 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2: Bvh2<Pad> = config.ploc_search_distance.build(
             &aabbs,
             indices,
             config.sort_precision,
@@ -349,7 +351,7 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2: Bvh2<Pad> = config.ploc_search_distance.build(
             &aabbs,
             indices,
             config.sort_precision,

@@ -4,7 +4,7 @@ use glam::{vec3a, UVec3, Vec3A};
 
 use crate::{
     aabb::Aabb,
-    bvh2::Bvh2,
+    bvh2::{node::Meta, Bvh2},
     cwbvh::{CwBvh, CwBvhNode, BRANCHING, DENOM},
     PerComponent, VecExt,
 };
@@ -12,8 +12,8 @@ use crate::{
 use super::DIRECTIONS;
 
 /// Convert a bvh2 to CwBvh
-pub struct Bvh2Converter<'a> {
-    pub bvh2: &'a Bvh2,
+pub struct Bvh2Converter<'a, T: Meta> {
+    pub bvh2: &'a Bvh2<T>,
     pub nodes: Vec<CwBvhNode>,
     pub primitive_indices: Vec<u32>,
     pub decisions: Vec<Decision>,
@@ -29,9 +29,9 @@ const INVALID_USIZE: usize = INVALID32 as usize;
 
 const PRIM_COST: f32 = 0.3;
 
-impl<'a> Bvh2Converter<'a> {
+impl<'a, T: Meta> Bvh2Converter<'a, T> {
     /// Initialize the Bvh2 to CwBvh converter.
-    pub fn new(bvh2: &'a Bvh2, order_children: bool, include_exact_node_aabbs: bool) -> Self {
+    pub fn new(bvh2: &'a Bvh2<T>, order_children: bool, include_exact_node_aabbs: bool) -> Self {
         let capacity = bvh2.primitive_indices.len();
 
         let mut nodes = Vec::with_capacity(capacity);
@@ -194,7 +194,7 @@ impl<'a> Bvh2Converter<'a> {
 
     // Recursively count primitives in subtree of the given Node
     // Simultaneously fills the indices buffer of the BVH8
-    fn count_primitives(&mut self, node_index: usize, bvh2: &Bvh2) -> u32 {
+    fn count_primitives(&mut self, node_index: usize, bvh2: &Bvh2<T>) -> u32 {
         let node = bvh2.nodes[node_index];
 
         if node.is_leaf() {
@@ -486,8 +486,8 @@ pub struct Decision {
 /// # Arguments
 /// * `bvh2` - Source BVH
 /// * `max_prims_per_leaf` - 0..=3 The maximum number of primitives per leaf.
-pub fn bvh2_to_cwbvh(
-    bvh2: &Bvh2,
+pub fn bvh2_to_cwbvh<T: Meta>(
+    bvh2: &Bvh2<T>,
     max_prims_per_leaf: u32,
     order_children: bool,
     include_exact_node_aabbs: bool,

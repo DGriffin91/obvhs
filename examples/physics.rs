@@ -9,7 +9,10 @@ use glam::*;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
     aabb::Aabb,
-    bvh2::{insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer, Bvh2},
+    bvh2::{
+        insertion_removal::SiblingInsertionCandidate, node::Pad, reinsertion::ReinsertionOptimizer,
+        Bvh2,
+    },
     cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
     heapstack::HeapStack,
     ploc::{PlocSearchDistance, SortPrecision},
@@ -287,7 +290,7 @@ impl FromStr for BvhUpdate {
 
 struct PhysicsWorld {
     items: Vec<SphereCollider>,
-    bvh: Bvh2,
+    bvh: Bvh2<Pad>,
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
     reinsertion_optimizer: ReinsertionOptimizer,
     temp_aabbs: Vec<Aabb>,

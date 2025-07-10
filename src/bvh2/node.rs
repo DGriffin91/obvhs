@@ -1,11 +1,21 @@
-use bytemuck::{Pod, Zeroable};
+use bytemuck::Zeroable;
 
 use crate::aabb::Aabb;
 
+pub trait Meta: Copy + Clone + Default + Zeroable {}
+
+#[derive(Default, Clone, Copy, Debug, Zeroable)]
+pub struct Pad(pub u64);
+
+impl Meta for Pad {}
+
 /// A node in the Bvh2, can be an inner node or leaf.
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, Zeroable)]
 #[repr(C)]
-pub struct Bvh2Node {
+pub struct Bvh2Node<T>
+where
+    T: Meta,
+{
     /// The bounding box for the primitive(s) contained in this node
     pub aabb: Aabb,
     /// Number of primitives contained in this node.
@@ -20,18 +30,20 @@ pub struct Bvh2Node {
     /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the primitive list.
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub first_index: u32,
+    pub meta: T,
 }
 
-unsafe impl Pod for Bvh2Node {}
-unsafe impl Zeroable for Bvh2Node {}
-
-impl Bvh2Node {
+impl<T> Bvh2Node<T>
+where
+    T: Meta,
+{
     #[inline(always)]
     pub fn new(aabb: Aabb, prim_count: u32, first_index: u32) -> Self {
         Self {
             aabb,
             prim_count,
             first_index,
+            meta: Default::default(),
         }
     }
 

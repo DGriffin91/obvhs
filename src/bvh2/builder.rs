@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    aabb::Aabb, splits::split_aabbs_preset, triangle::Triangle, Boundable, BvhBuildParams,
+    aabb::Aabb, bvh2::node::Meta, splits::split_aabbs_preset, triangle::Triangle, Boundable,
+    BvhBuildParams,
 };
 
 use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
@@ -14,11 +15,11 @@ use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
 /// * `config` - Parameters for configuring the BVH building.
 /// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
 ///   generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
-pub fn build_bvh2_from_tris(
+pub fn build_bvh2_from_tris<T: Meta>(
     triangles: &[Triangle],
     config: BvhBuildParams,
     core_build_time: &mut Duration,
-) -> Bvh2 {
+) -> Bvh2<T> {
     let mut aabbs = Vec::with_capacity(triangles.len());
     let mut indices = Vec::with_capacity(triangles.len());
     let mut largest_half_area = 0.0;
@@ -90,11 +91,11 @@ pub fn build_bvh2_from_tris(
 /// * `core_build_time` - The core BVH build time. Does not include things like initial AABB
 ///   generation or debug validation. This is mostly just here to simplify profiling in [tray_racing](https://github.com/DGriffin91/tray_racing)
 // TODO: we could optionally do imprecise basic Aabb splits.
-pub fn build_bvh2<T: Boundable>(
-    primitives: &[T],
+pub fn build_bvh2<T: Meta, B: Boundable>(
+    primitives: &[B],
     config: BvhBuildParams,
     core_build_time: &mut Duration,
-) -> Bvh2 {
+) -> Bvh2<T> {
     let mut aabbs = Vec::with_capacity(primitives.len());
     let mut indices = Vec::with_capacity(primitives.len());
 

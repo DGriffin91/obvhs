@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use glam::*;
 use obvhs::{
-    bvh2::builder::build_bvh2_from_tris,
+    bvh2::{builder::build_bvh2_from_tris, node::Pad, Bvh2},
     ray::{Ray, RayHit},
     test_util::geometry::{icosphere, PLANE},
     triangle::Triangle,
@@ -22,7 +22,7 @@ fn main() {
     // respective presets. Feel free to copy the contents of build_bvh_from_tris or build_bvh.
     // They are very straightforward. If you don't want to use Triangles as the primitive, use
     // build_bvh instead. build_cwbvh_from_tris just adds support for splitting tris.
-    let bvh = build_bvh2_from_tris(
+    let bvh: Bvh2<Pad> = build_bvh2_from_tris(
         &tris,
         BvhBuildParams::medium_build(),
         &mut Duration::default(),

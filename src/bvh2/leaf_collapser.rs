@@ -12,13 +12,15 @@ use rayon::{
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(not(feature = "parallel"))]
+use crate::bvh2::node::Meta;
 use crate::bvh2::{Bvh2, Bvh2Node};
 
 /// Collapses leaves of the BVH according to the SAH. This optimization
 /// is only helpful for bottom-up builders, as top-down builders already
 /// have a termination criterion that prevents leaf creation when the SAH
 /// cost does not improve.
-pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
+pub fn collapse<T: Meta>(bvh: &mut Bvh2<T>, max_prims: u32, traversal_cost: f32) {
     crate::scope!("collapse");
 
     if max_prims <= 1 {
@@ -133,13 +135,13 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
                     }
 
                     first_prim += node.prim_count;
-                    while !Bvh2Node::is_left_sibling(j) && j != i {
+                    while !Bvh2Node::<T>::is_left_sibling(j) && j != i {
                         j = bvh.parents[j] as usize;
                     }
                     if j == i {
                         break;
                     }
-                    j = Bvh2Node::get_sibling_id(j);
+                    j = Bvh2Node::<T>::get_sibling_id(j);
                 } else {
                     j = node.first_index as usize;
                 }
@@ -190,8 +192,8 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
 // Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
 #[cfg(not(feature = "parallel"))]
-fn bottom_up_traverse<F>(
-    bvh: &Bvh2,
+fn bottom_up_traverse<F, T: Meta>(
+    bvh: &Bvh2<T>,
     mut process_node: F, // True is for leaf
 ) where
     F: FnMut(bool, usize),
@@ -378,6 +380,7 @@ fn as_slice_of_sometimes_atomic_u32(slice: &mut [u32]) -> &mut [SometimesAtomicU
 mod tests {
 
     use crate::{
+        bvh2::node::Pad,
         ploc::{PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
     };
@@ -395,7 +398,7 @@ mod tests {
         }
         {
             // Test without init_primitives_to_nodes & init_parents
-            let mut bvh =
+            let mut bvh: Bvh2<Pad> =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
             collapse(&mut bvh, 8, 1.0);
@@ -403,7 +406,8 @@ mod tests {
         }
         {
             // Test with init_primitives_to_nodes & init_parents
-            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            let mut bvh: Bvh2<Pad> =
+                PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::{
     aabb::Aabb,
-    bvh2::reinsertion::ReinsertionOptimizer,
+    bvh2::{node::Pad, reinsertion::ReinsertionOptimizer, Bvh2},
     cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
     splits::split_aabbs_preset,
     triangle::Triangle,
@@ -53,7 +53,7 @@ pub fn build_cwbvh_from_tris(
         );
     }
 
-    let mut bvh2 = config.ploc_search_distance.build(
+    let mut bvh2: Bvh2<Pad> = config.ploc_search_distance.build(
         &aabbs,
         indices,
         config.sort_precision,
@@ -99,7 +99,7 @@ pub fn build_cwbvh<T: Boundable>(
 
     let start_time = Instant::now();
 
-    let mut bvh2 = config.ploc_search_distance.build(
+    let mut bvh2: Bvh2<Pad> = config.ploc_search_distance.build(
         &aabbs,
         indices,
         config.sort_precision,

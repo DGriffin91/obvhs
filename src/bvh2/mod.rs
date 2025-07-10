@@ -18,6 +18,7 @@ use reinsertion::find_reinsertion;
 
 use crate::{
     aabb::Aabb,
+    bvh2::node::Meta,
     heapstack::HeapStack,
     ray::{Ray, RayHit},
     Boundable, INVALID,
@@ -25,12 +26,12 @@ use crate::{
 
 /// A binary BVH
 #[derive(Clone, Default)]
-pub struct Bvh2 {
+pub struct Bvh2<T: Meta> {
     /// List of nodes contained in this bvh. first_index in Bvh2Node for inner nodes indexes into this list. This list
     /// fully represents the BVH tree. The other fields in this struct provide additional information that allow the BVH
     /// to be manipulated more efficently, but are not actually part of the BVH itself. The only other critical field is
     /// `primitive_indices`, assuming the BVH is not using a direct mapping.
-    pub nodes: Vec<Bvh2Node>,
+    pub nodes: Vec<Bvh2Node<T>>,
 
     /// Mapping from bvh primitive indices to original input indices
     /// The reason for this mapping is that if multiple primitives are contained in a node, they need to have their
@@ -81,7 +82,7 @@ pub struct Bvh2 {
 }
 pub const DEFAULT_MAX_STACK_DEPTH: usize = 96;
 
-impl Bvh2 {
+impl<T: Meta> Bvh2<T> {
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         let mut stack =
@@ -231,7 +232,7 @@ impl Bvh2 {
     /// Doesn't seem to speed up traversal much for a new BVH created from PLOC, but if it has had many
     /// removals/insertions it can help.
     pub fn reorder_in_stack_traversal_order(&mut self) {
-        let mut new_nodes: Vec<Bvh2Node> = Vec::with_capacity(self.nodes.len());
+        let mut new_nodes: Vec<Bvh2Node<T>> = Vec::with_capacity(self.nodes.len());
         let mut mapping = vec![0; self.nodes.len()]; // Map from where n node used to be to where it is now
         let mut stack = Vec::new();
         stack.push(1);
@@ -324,7 +325,7 @@ impl Bvh2 {
 
     /// Compute the mapping from a given node index to that node's parent for each node in the bvh, takes a Vec to allow
     /// reusing the allocation.
-    pub fn compute_parents(nodes: &[Bvh2Node], parents: &mut Vec<u32>) {
+    pub fn compute_parents(nodes: &[Bvh2Node<T>], parents: &mut Vec<u32>) {
         parents.resize(nodes.len(), 0);
         parents[0] = 0;
 
@@ -372,7 +373,7 @@ impl Bvh2 {
 
     /// Compute the mapping from primitive index to node index. Takes a Vec to allow reusing the allocation.
     pub fn compute_primitives_to_nodes(
-        nodes: &[Bvh2Node],
+        nodes: &[Bvh2Node<T>],
         primitive_indices: &[u32],
         primitives_to_nodes: &mut Vec<u32>,
     ) {
@@ -500,9 +501,9 @@ impl Bvh2 {
     }
 
     /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
-    pub fn validate<T: Boundable>(
+    pub fn validate<B: Boundable>(
         &self,
-        primitives: &[T],
+        primitives: &[B],
         direct_layout: bool,
         tight_fit: bool,
     ) -> Bvh2ValidationResult {
@@ -521,7 +522,7 @@ impl Bvh2 {
         };
 
         if !self.nodes.is_empty() {
-            self.validate_impl::<T>(primitives, &mut result, 0, 0, 0);
+            self.validate_impl::<B>(primitives, &mut result, 0, 0, 0);
         }
         assert_eq!(result.discovered_nodes.len(), self.nodes.len());
         assert_eq!(result.node_count, self.nodes.len());
@@ -575,9 +576,9 @@ impl Bvh2 {
         result
     }
 
-    pub fn validate_impl<T: Boundable>(
+    pub fn validate_impl<B: Boundable>(
         &self,
-        primitives: &[T],
+        primitives: &[B],
         result: &mut Bvh2ValidationResult,
         node_index: u32,
         parent_index: u32,
@@ -661,14 +662,14 @@ impl Bvh2 {
                 );
             }
 
-            self.validate_impl::<T>(
+            self.validate_impl::<B>(
                 primitives,
                 result,
                 node.first_index,
                 parent_index,
                 current_depth + 1,
             );
-            self.validate_impl::<T>(
+            self.validate_impl::<B>(
                 primitives,
                 result,
                 node.first_index + 1,
@@ -719,8 +720,8 @@ impl Bvh2 {
 // Not a member of Bvh2 because of borrow issues when a reference to other things like parents is also taken.
 // Maybe could be cleaner as a macro?
 #[inline]
-fn update_primitives_to_nodes_for_node(
-    node: &Bvh2Node,
+fn update_primitives_to_nodes_for_node<T: Meta>(
+    node: &Bvh2Node<T>,
     node_id: usize,
     primitive_indices: &[u32],
     primitives_to_nodes: &mut [u32],
@@ -818,6 +819,7 @@ mod tests {
     use glam::*;
 
     use crate::{
+        bvh2::{node::Pad, Bvh2},
         heapstack::HeapStack,
         ploc::{PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
@@ -837,7 +839,7 @@ mod tests {
         }
 
         // Test without init_primitives_to_nodes & init_parents
-        let mut bvh =
+        let mut bvh: Bvh2<Pad> =
             PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
 
         bvh.init_primitives_to_nodes();
@@ -859,7 +861,7 @@ mod tests {
     fn test_reinsert_node() {
         let tris = demoscene(32, 0);
 
-        let mut bvh = build_bvh2_from_tris(
+        let mut bvh: Bvh2<Pad> = build_bvh2_from_tris(
             &tris,
             BvhBuildParams::fastest_build(),
             &mut Default::default(),

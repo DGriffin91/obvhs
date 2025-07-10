@@ -15,7 +15,7 @@ use thread_local::ThreadLocal;
 use rdst::{RadixKey, RadixSort};
 
 use crate::{
-    bvh2::{Bvh2, Bvh2Node},
+    bvh2::{node::Meta, Bvh2, Bvh2Node},
     heapstack::HeapStack,
 };
 
@@ -45,7 +45,12 @@ impl ReinsertionOptimizer {
     /// proportion of the batch_size_ratio. If None, the following sequence is used:
     /// (1..32).step_by(2).map(|n| 1.0 / n as f32) or
     /// 1/1, 1/3, 1/5, 1/7, 1/9, 1/11, 1/13, 1/15, 1/17, 1/19, 1/21, 1/23, 1/25, 1/27, 1/29, 1/31
-    pub fn run(&mut self, bvh: &mut Bvh2, batch_size_ratio: f32, ratio_sequence: Option<Vec<f32>>) {
+    pub fn run<T: Meta>(
+        &mut self,
+        bvh: &mut Bvh2<T>,
+        batch_size_ratio: f32,
+        ratio_sequence: Option<Vec<f32>>,
+    ) {
         crate::scope!("reinsertion_optimize");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() || batch_size_ratio <= 0.0 {
@@ -80,7 +85,12 @@ impl ReinsertionOptimizer {
     /// * `candidates` - A list of ids for nodes that need to be re-inserted.
     /// * `iterations` - The number of times reinsertion is run. Parallel reinsertion passes can result in conflicts
     ///   that potentially limit the proportion of reinsertions in a single pass.
-    pub fn run_with_candidates(&mut self, bvh: &mut Bvh2, candidates: &[u32], iterations: u32) {
+    pub fn run_with_candidates<T: Meta>(
+        &mut self,
+        bvh: &mut Bvh2<T>,
+        candidates: &[u32],
+        iterations: u32,
+    ) {
         crate::scope!("reinsertion_optimize_candidates");
 
         if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
@@ -118,7 +128,7 @@ impl ReinsertionOptimizer {
         self.optimize_specific_candidates(bvh, iterations);
     }
 
-    pub fn optimize_impl(&mut self, bvh: &mut Bvh2, ratio_sequence: Option<Vec<f32>>) {
+    pub fn optimize_impl<T: Meta>(&mut self, bvh: &mut Bvh2<T>, ratio_sequence: Option<Vec<f32>>) {
         bvh.children_are_ordered_after_parents = false;
         // This initially preforms reinsertion at the specified ratio, then at progressively smaller ratios,
         // focusing more reinsertion time at the top of the bvh. The original method would perform reinsertion
@@ -139,15 +149,15 @@ impl ReinsertionOptimizer {
         });
     }
 
-    pub fn optimize_specific_candidates(&mut self, bvh: &mut Bvh2, iterations: u32) {
+    pub fn optimize_specific_candidates<T: Meta>(&mut self, bvh: &mut Bvh2<T>, iterations: u32) {
         bvh.children_are_ordered_after_parents = false;
         for _ in 0..iterations {
-            self.optimize_candidates(bvh, self.candidates.len());
+            self.optimize_candidates::<T>(bvh, self.candidates.len());
         }
     }
 
     /// Find potential candidates for reinsertion
-    fn find_candidates(&mut self, bvh: &mut Bvh2, node_count: usize) {
+    fn find_candidates<T: Meta>(&mut self, bvh: &mut Bvh2<T>, node_count: usize) {
         // This method just takes the first node_count*2 nodes in the bvh and sorts them by their half area
         // This seemed to find candidates much faster while resulting in similar bvh traversal performance vs the original method
         // https://github.com/madmann91/bvh/blob/3490634ae822e5081e41f09498fcce03bc1419e3/src/bvh/v2/reinsertion_optimizer.h#L88
@@ -168,7 +178,7 @@ impl ReinsertionOptimizer {
     }
 
     #[allow(unused_variables)]
-    fn optimize_candidates(&mut self, bvh: &mut Bvh2, count: usize) {
+    fn optimize_candidates<T: Meta>(&mut self, bvh: &mut Bvh2<T>, count: usize) {
         self.reinsertions.clear();
         self.touched.fill(false);
 
@@ -213,7 +223,7 @@ impl ReinsertionOptimizer {
         assert!(self.reinsertions.len() <= self.touched.len());
         (0..self.reinsertions.len()).for_each(|i| {
             let reinsertion = &self.reinsertions[i];
-            let conflicts = self.get_conflicts(bvh, reinsertion.from, reinsertion.to);
+            let conflicts = self.get_conflicts::<T>(bvh, reinsertion.from, reinsertion.to);
 
             if conflicts.iter().any(|&i| self.touched[i]) {
                 return;
@@ -228,11 +238,11 @@ impl ReinsertionOptimizer {
     }
 
     #[inline(always)]
-    fn get_conflicts(&self, bvh: &mut Bvh2, from: u32, to: u32) -> [usize; 5] {
+    fn get_conflicts<T: Meta>(&self, bvh: &mut Bvh2<T>, from: u32, to: u32) -> [usize; 5] {
         [
             to as usize,
             from as usize,
-            Bvh2Node::get_sibling_id(from as usize),
+            Bvh2Node::<T>::get_sibling_id(from as usize),
             // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
             bvh.parents[to as usize] as usize,
             bvh.parents[from as usize] as usize,
@@ -262,8 +272,8 @@ impl RadixKey for Candidate {
     }
 }
 
-pub fn find_reinsertion(
-    bvh: &Bvh2,
+pub fn find_reinsertion<T: Meta>(
+    bvh: &Bvh2<T>,
     node_id: usize,
     stack: &mut HeapStack<(f32, u32)>,
 ) -> Reinsertion {
@@ -313,7 +323,7 @@ pub fn find_reinsertion(
 
     let parent_area = bvh.nodes[bvh.parents[node_id] as usize].aabb.half_area();
     let mut area_diff = parent_area;
-    let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
+    let mut sibling_id = Bvh2Node::<T>::get_sibling_id(node_id);
     let mut pivot_bbox = bvh.nodes[sibling_id].aabb;
     let parent_id = bvh.parents[node_id] as usize;
     let mut pivot_id = parent_id;
@@ -353,10 +363,10 @@ pub fn find_reinsertion(
             break;
         }
 
-        sibling_id = Bvh2Node::get_sibling_id(pivot_id);
+        sibling_id = Bvh2Node::<T>::get_sibling_id(pivot_id);
         pivot_id = bvh.parents[pivot_id] as usize;
     }
-    if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
+    if best_reinsertion.to == Bvh2Node::<T>::get_sibling_id32(best_reinsertion.from)
         || best_reinsertion.to == bvh.parents[best_reinsertion.from as usize]
     {
         best_reinsertion = Reinsertion::default();
@@ -365,17 +375,17 @@ pub fn find_reinsertion(
     best_reinsertion
 }
 
-pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
+pub fn reinsert_node<T: Meta>(bvh: &mut Bvh2<T>, from: usize, to: usize) {
     if bvh.parents.is_empty() {
         panic!("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()")
     }
 
-    let sibling_id = Bvh2Node::get_sibling_id(from);
+    let sibling_id = Bvh2Node::<T>::get_sibling_id(from);
     let parent_id = bvh.parents[from] as usize;
     let sibling_node = bvh.nodes[sibling_id];
     let dst_node = bvh.nodes[to];
 
-    bvh.nodes[to].make_inner(Bvh2Node::get_left_sibling_id(from) as u32);
+    bvh.nodes[to].make_inner(Bvh2Node::<T>::get_left_sibling_id(from) as u32);
     bvh.nodes[sibling_id] = dst_node;
     bvh.nodes[parent_id] = sibling_node;
 
@@ -417,6 +427,7 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
 mod tests {
 
     use crate::{
+        bvh2::node::Pad,
         ploc::{PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
     };
@@ -434,7 +445,7 @@ mod tests {
         }
         {
             // Test without init_primitives_to_nodes & init_parents
-            let mut bvh =
+            let mut bvh: Bvh2<Pad> =
                 PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
             ReinsertionOptimizer::default().run(&mut bvh, 0.25, None);
@@ -445,7 +456,8 @@ mod tests {
         }
         {
             // Test with init_primitives_to_nodes & init_parents
-            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            let mut bvh: Bvh2<Pad> =
+                PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes();
             bvh.init_parents_if_uninit();

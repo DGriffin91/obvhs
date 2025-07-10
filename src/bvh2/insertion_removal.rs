@@ -2,7 +2,7 @@ use core::f32;
 
 use crate::{
     aabb::Aabb,
-    bvh2::{update_primitives_to_nodes_for_node, Bvh2, Bvh2Node},
+    bvh2::{node::Meta, update_primitives_to_nodes_for_node, Bvh2, Bvh2Node},
     heapstack::HeapStack,
     Boundable, INVALID,
 };
@@ -16,7 +16,7 @@ pub struct SiblingInsertionCandidate {
     index: u32,
 }
 
-impl Bvh2 {
+impl<T: Meta> Bvh2<T> {
     /// Removes and returns the leaf specified by `node_id`.
     /// Puts `node_id` sibling in its parents place then moves the last two nodes into the now empty slots at `node_id`
     /// and its sibling.
@@ -27,7 +27,7 @@ impl Bvh2 {
     ///
     /// # Arguments
     /// * `node_id` - The index into self.nodes of the node that is to be removed
-    pub fn remove_leaf(&mut self, node_id: usize) -> Bvh2Node {
+    pub fn remove_leaf(&mut self, node_id: usize) -> Bvh2Node<T> {
         assert!(
             !self.uses_spatial_splits,
             "Removing leafs while using spatial splits is currently unsupported as it would require a mapping \
@@ -56,7 +56,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             }
         }
 
-        let sibling_id = Bvh2Node::get_sibling_id(node_id);
+        let sibling_id = Bvh2Node::<T>::get_sibling_id(node_id);
         debug_assert_eq!(self.parents[node_id], self.parents[sibling_id]); // Both children should already have the same parent.
         let mut parent_id = self.parents[node_id] as usize;
 
@@ -90,11 +90,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.parents.pop().unwrap();
             self.parents.pop().unwrap();
         } else {
-            let dst_left_id = Bvh2Node::get_left_sibling_id(node_id);
-            let dst_right_id = Bvh2Node::get_right_sibling_id(node_id);
+            let dst_left_id = Bvh2Node::<T>::get_left_sibling_id(node_id);
+            let dst_right_id = Bvh2Node::<T>::get_right_sibling_id(node_id);
 
             let src_left_id = self.nodes.len() as u32 - 2;
-            let src_right_id = Bvh2Node::get_sibling_id32(src_left_id);
+            let src_right_id = Bvh2Node::<T>::get_sibling_id32(src_left_id);
             let src_right_parent = self.parents.pop().unwrap();
             let src_left_parent = self.parents.pop().unwrap();
 
@@ -178,7 +178,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     ///   don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
     pub fn insert_leaf(
         &mut self,
-        new_node: Bvh2Node,
+        new_node: Bvh2Node<T>,
         stack: &mut HeapStack<SiblingInsertionCandidate>,
     ) -> usize {
         assert!(new_node.is_leaf());
@@ -236,10 +236,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         // The new parent goes in the sibling's position.
         // The sibling and new node go on the end.
         let new_sibling_id = self.nodes.len() as u32;
-        let new_parent = Bvh2Node {
+        let new_parent = Bvh2Node::<T> {
             aabb: new_node.aabb.union(&best_sibling_candidate.aabb),
             prim_count: 0,
             first_index: new_sibling_id,
+            meta: Default::default(),
         };
 
         // New parent goes in the sibling's position.
@@ -386,6 +387,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
                 aabb,
                 prim_count: 1,
                 first_index,
+                meta: Default::default(),
             },
             stack,
         );
@@ -400,12 +402,13 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 /// Dramatically slower than ploc at both building and traversal. Easily 10x or 100x slower at building.
 /// (goes up by something like n^3 after a certain threshold).
 /// (BVH quality still improved afterward lot by reinsertion/collapse).
-pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
+pub fn build_bvh2_by_insertion<B: Boundable, T: Meta>(primitives: &[B]) -> Bvh2<T> {
     let mut bvh = Bvh2 {
         nodes: vec![Bvh2Node {
             aabb: primitives[0].aabb(),
             prim_count: 1,
             first_index: 0,
+            meta: Default::default(),
         }],
         primitive_indices: vec![0],
         ..Default::default()
@@ -432,7 +435,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 /// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
 /// optimize a BVH2. This currently actually tends to make a good bvh slower since doing a lot of insert_leaf_node tends
 /// to result in very deep BVHs.
-pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
+pub fn slow_leaf_reinsertion<T: Meta>(bvh: &mut Bvh2<T>) {
     let mut stack = HeapStack::new_with_capacity(1000);
     for node_id in 1..bvh.nodes.len() {
         if bvh.nodes.len() <= node_id {
@@ -458,13 +461,17 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{bvh2::builder::build_bvh2, test_util::geometry::demoscene, BvhBuildParams};
+    use crate::{
+        bvh2::{builder::build_bvh2, node::Pad},
+        test_util::geometry::demoscene,
+        BvhBuildParams,
+    };
 
     #[test]
     fn build_by_insertion() {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
-            let bvh = build_bvh2_by_insertion(&tris);
+            let bvh: Bvh2<Pad> = build_bvh2_by_insertion(&tris);
             bvh.validate(&tris, false, false);
         }
     }
@@ -474,7 +481,7 @@ mod tests {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
 
-            let mut bvh = build_bvh2(
+            let mut bvh: Bvh2<Pad> = build_bvh2(
                 &tris,
                 BvhBuildParams::medium_build(),
                 &mut Duration::default(),
@@ -494,12 +501,12 @@ mod tests {
 
         // Test with both a bvh that only has one primitive per leaf
         // and also with one that has multiple primitives per leaf.
-        let bvh1 = build_bvh2(
+        let bvh1: Bvh2<Pad> = build_bvh2(
             &tris,
             BvhBuildParams::fastest_build(),
             &mut Duration::default(),
         );
-        let bvh2 = build_bvh2(
+        let bvh2: Bvh2<Pad> = build_bvh2(
             &tris,
             BvhBuildParams::medium_build(),
             &mut Duration::default(),
