@@ -96,11 +96,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         local_aabb.extend(aabb.max);
         debug_assert!(!aabb.min.is_nan());
         debug_assert!(!aabb.max.is_nan());
-        Bvh2Node {
-            aabb,
-            prim_count: 1,
-            first_index: *prim_index,
-        }
+        Bvh2Node::new(aabb, 1, *prim_index)
     }
 
     let mut total_aabb = None;
@@ -258,11 +254,11 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
             insert_index -= 2;
 
             // Create the parent node and place it in the array for the next iteration
-            next_nodes.push(Bvh2Node {
-                aabb: left.aabb.union(&right.aabb),
-                prim_count: 0,
-                first_index: insert_index as u32,
-            });
+            next_nodes.push(Bvh2Node::new(
+                left.aabb.union(&right.aabb),
+                0,
+                insert_index as u32,
+            ));
 
             // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
             nodes[insert_index] = left;

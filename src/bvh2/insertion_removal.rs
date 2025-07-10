@@ -236,11 +236,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         // The new parent goes in the sibling's position.
         // The sibling and new node go on the end.
         let new_sibling_id = self.nodes.len() as u32;
-        let new_parent = Bvh2Node {
-            aabb: new_node.aabb.union(&best_sibling_candidate.aabb),
-            prim_count: 0,
-            first_index: new_sibling_id,
-        };
+        let new_parent = Bvh2Node::new(
+            new_node.aabb.union(&best_sibling_candidate.aabb),
+            0,
+            new_sibling_id,
+        );
 
         // New parent goes in the sibling's position.
         let new_parent_id = best_sibling_candidate_id;
@@ -381,14 +381,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.primitive_indices.push(primitive_id);
             self.primitive_indices.len() as u32 - 1
         };
-        let new_node_id = self.insert_leaf(
-            Bvh2Node {
-                aabb,
-                prim_count: 1,
-                first_index,
-            },
-            stack,
-        );
+        let new_node_id = self.insert_leaf(Bvh2Node::new(aabb, 1, first_index), stack);
         self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
         new_node_id
     }
@@ -402,11 +395,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 /// (BVH quality still improved afterward lot by reinsertion/collapse).
 pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     let mut bvh = Bvh2 {
-        nodes: vec![Bvh2Node {
-            aabb: primitives[0].aabb(),
-            prim_count: 1,
-            first_index: 0,
-        }],
+        nodes: vec![Bvh2Node::new(primitives[0].aabb(), 1, 0)],
         primitive_indices: vec![0],
         ..Default::default()
     };

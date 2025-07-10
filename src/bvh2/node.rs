@@ -20,6 +20,12 @@ pub struct Bvh2Node {
     /// 1. Layout the primitives in the order of the primitive_indices mapping so that this can index directly into the primitive list.
     /// 2. Only allow one primitive per node and write back the original mapping to the bvh node list.
     pub first_index: u32,
+    /// With the aabb, prim_count, and first_index, this struct was already padded out to 48 bytes. These meta fields
+    /// allow the user to access this otherwise unused space.
+    pub meta1: u32,
+    /// With the aabb, prim_count, and first_index, this struct was already padded out to 48 bytes. These meta fields
+    /// allow the user to access this otherwise unused space.
+    pub meta2: u32,
 }
 
 unsafe impl Pod for Bvh2Node {}
@@ -32,6 +38,8 @@ impl Bvh2Node {
             aabb,
             prim_count,
             first_index,
+            meta1: Default::default(),
+            meta2: Default::default(),
         }
     }
 
