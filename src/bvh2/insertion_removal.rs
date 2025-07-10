@@ -302,7 +302,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         );
         let remove_primitive_id = primitive_id;
         self.init_parents_if_uninit();
-        self.init_primitives_to_nodes();
+        self.init_primitives_to_nodes_if_uninit();
 
         let node_id = self.primitives_to_nodes[remove_primitive_id as usize];
 
@@ -368,7 +368,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         primitive_id: u32,
         stack: &mut HeapStack<SiblingInsertionCandidate>,
     ) -> usize {
-        self.init_primitives_to_nodes();
+        self.init_primitives_to_nodes_if_uninit();
         self.init_parents_if_uninit();
         if self.primitives_to_nodes.len() <= primitive_id as usize {
             self.primitives_to_nodes
@@ -468,7 +468,7 @@ mod tests {
                 BvhBuildParams::medium_build(),
                 &mut Duration::default(),
             );
-            bvh.init_primitives_to_nodes();
+            bvh.init_primitives_to_nodes_if_uninit();
             bvh.init_parents_if_uninit();
             slow_leaf_reinsertion(&mut bvh);
             bvh.validate(&tris, false, false);
@@ -506,7 +506,7 @@ mod tests {
         }
 
         for bvh in &mut [bvh1, bvh2] {
-            bvh.init_primitives_to_nodes();
+            bvh.init_primitives_to_nodes_if_uninit();
             bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false);
 

@@ -447,7 +447,7 @@ mod tests {
             // Test with init_primitives_to_nodes & init_parents
             let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
             bvh.validate(&tris, false, false);
-            bvh.init_primitives_to_nodes();
+            bvh.init_primitives_to_nodes_if_uninit();
             bvh.init_parents_if_uninit();
             bvh.validate(&tris, false, false);
             ReinsertionOptimizer::default().run(&mut bvh, 0.25, None);

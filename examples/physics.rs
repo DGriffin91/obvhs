@@ -377,7 +377,7 @@ impl PhysicsWorld {
     pub fn bvh_partial_rebuild_reinsert(&mut self) {
         dbg_scope!("bvh_partial_rebuild_reinsert");
         let oversize_factor = self.oversize_factor();
-        self.bvh.init_primitives_to_nodes();
+        self.bvh.init_primitives_to_nodes_if_uninit();
         let mut stack = HeapStack::new_with_capacity(2000);
         self.updated_leaves_this_frame = 0;
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
@@ -393,7 +393,7 @@ impl PhysicsWorld {
     pub fn bvh_partial_rebuild_parallel_reinsert(&mut self) {
         dbg_scope!("bvh_partial_rebuild_parallel_reinsert");
         let oversize_factor = self.oversize_factor();
-        self.bvh.init_primitives_to_nodes();
+        self.bvh.init_primitives_to_nodes_if_uninit();
         let mut candidates = vec![]; // TODO reuse allocation
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {

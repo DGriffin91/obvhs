@@ -355,7 +355,7 @@ impl Bvh2 {
     }
 
     /// Compute compute_primitives_to_nodes and update cache only if they have not already been computed
-    pub fn init_primitives_to_nodes(&mut self) {
+    pub fn init_primitives_to_nodes_if_uninit(&mut self) {
         if self.primitives_to_nodes.is_empty() {
             self.update_primitives_to_nodes();
         }
@@ -840,7 +840,7 @@ mod tests {
         let mut bvh =
             PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
 
-        bvh.init_primitives_to_nodes();
+        bvh.init_primitives_to_nodes_if_uninit();
         tris.transform(&Mat4::from_scale_rotation_translation(
             Vec3::splat(1.3),
             Quat::from_rotation_y(0.1),
@@ -865,7 +865,7 @@ mod tests {
             &mut Default::default(),
         );
 
-        bvh.init_primitives_to_nodes();
+        bvh.init_primitives_to_nodes_if_uninit();
         bvh.init_parents_if_uninit();
 
         let mut stack = HeapStack::new_with_capacity(256);
