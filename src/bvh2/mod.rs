@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// A binary BVH
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Bvh2 {
     /// List of nodes contained in this bvh. first_index in Bvh2Node for inner nodes indexes into this list. This list
     /// fully represents the BVH tree. The other fields in this struct provide additional information that allow the BVH
@@ -66,10 +66,10 @@ pub struct Bvh2 {
     /// that might disturb that order. Some operations require this ordering and will reorder if this is not true.
     pub children_are_ordered_after_parents: bool,
 
-    /// Maximum bvh hierarchy depth. Used to determine stack depth for cpu bvh2 traversal.
-    /// Stack defaults to 96 if max_depth isn't set, which much deeper than most bvh's even
-    /// for large scenes without a tlas.
-    pub max_depth: Option<usize>,
+    /// Stack defaults to 96 or the max depth during initial ploc building, whichever is larger. This may be larger than
+    /// needed depending on what post processing steps (like collapse, reinsertion, etc...), but the cost of
+    /// recalculating it may not be worth it so it is not done automatically.
+    pub max_depth: usize,
 
     /// Indicates that this BVH is using spatial splits. Large triangles are split into multiple smaller Aabbs, so
     /// primitives will extend outside the leaf in some cases.
@@ -79,13 +79,28 @@ pub struct Bvh2 {
     /// (TODO: list unavailable features)
     pub uses_spatial_splits: bool,
 }
+
 pub const DEFAULT_MAX_STACK_DEPTH: usize = 96;
+
+impl Default for Bvh2 {
+    fn default() -> Self {
+        Self {
+            nodes: Default::default(),
+            primitive_indices: Default::default(),
+            primitive_indices_freelist: Default::default(),
+            primitives_to_nodes: Default::default(),
+            parents: Default::default(),
+            children_are_ordered_after_parents: Default::default(),
+            max_depth: DEFAULT_MAX_STACK_DEPTH,
+            uses_spatial_splits: Default::default(),
+        }
+    }
+}
 
 impl Bvh2 {
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
-        let mut stack =
-            HeapStack::new_with_capacity(self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH));
+        let mut stack = HeapStack::new_with_capacity(self.max_depth);
         if !self.nodes.is_empty() {
             stack.push(0);
         }
@@ -285,7 +300,7 @@ impl Bvh2 {
         } else {
             // If not, we need to create a safe order in which we can make updates.
             // This is much faster than reordering the whole bvh with Bvh2::reorder_in_stack_traversal_order()
-            let mut stack = HeapStack::new_with_capacity(self.max_depth.unwrap_or(1000));
+            let mut stack = HeapStack::new_with_capacity(self.max_depth);
             let mut reverse_stack = Vec::with_capacity(self.nodes.len());
             stack.push(0);
             reverse_stack.push(0);
@@ -555,7 +570,15 @@ impl Bvh2 {
                 }
             }
         }
-        assert!(result.max_depth < self.max_depth.unwrap_or(DEFAULT_MAX_STACK_DEPTH) as u32);
+        assert!(
+            result.max_depth < self.max_depth as u32,
+            "result.max_depth ({}) must be less than self.max_depth ({})",
+            result.max_depth,
+            self.max_depth as u32
+        );
+        if result.max_depth > DEFAULT_MAX_STACK_DEPTH as u32 {
+            log::warn!("bvh depth is: {}, a depth beyond {} may be indicative of something pathological in the scene (like thousands of instances perfectly overlapping geometry) that will result in a BVH that is very slow to traverse.", result.max_depth, DEFAULT_MAX_STACK_DEPTH);
+        }
 
         if self.children_are_ordered_after_parents {
             // Assert that children are always ordered after parents in self.nodes

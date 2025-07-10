@@ -406,9 +406,8 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
         bvh.insert_primitive(primitives[prim_id].aabb(), prim_id as u32, &mut stack);
     }
 
-    // Setting this here for bvh.validate since often the bvh is too deep for DEFAULT_MAX_STACK_DEPTH
-    // Typically this is not needed with a ploc builder, even in huge scenes.
-    bvh.max_depth = Some(bvh.depth(0).max(DEFAULT_MAX_STACK_DEPTH));
+    // Update max depth for validate
+    bvh.max_depth = (bvh.depth(0) + 1).max(DEFAULT_MAX_STACK_DEPTH);
 
     #[cfg(debug_assertions)]
     {

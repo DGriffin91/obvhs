@@ -22,6 +22,7 @@ use std::cell::RefCell;
 use thread_local::ThreadLocal;
 
 use crate::bvh2::node::Bvh2Node;
+use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{aabb::Aabb, bvh2::Bvh2};
 
@@ -144,27 +145,29 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         total_aabb = Some(total);
     }
 
-    let nodes = build_ploc_from_leafs::<SEARCH_DISTANCE>(
+    let mut bvh = Bvh2 {
+        primitive_indices: indices,
+        ..Default::default()
+    };
+
+    build_ploc_from_leafs::<SEARCH_DISTANCE>(
+        &mut bvh,
         init_leafs.unwrap(),
         total_aabb.unwrap(),
         sort_precision,
         search_depth_threshold,
     );
 
-    Bvh2 {
-        nodes,
-        primitive_indices: indices,
-        children_are_ordered_after_parents: true,
-        ..Default::default()
-    }
+    bvh
 }
 
 pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
+    bvh: &mut Bvh2,
     mut current_nodes: Vec<Bvh2Node>,
     total_aabb: Aabb,
     sort_precision: SortPrecision,
     search_depth_threshold: usize,
-) -> Vec<Bvh2Node> {
+) {
     crate::scope!("build_ploc_from_leafs");
 
     let prim_count = current_nodes.len();
@@ -178,7 +181,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
     // Sort primitives according to their morton code
     sort_precision.sort_nodes(&mut current_nodes, scale, offset);
 
-    let mut nodes = vec![Bvh2Node::default(); nodes_count];
+    bvh.nodes.clear();
+    bvh.nodes.resize(nodes_count, Bvh2Node::default());
 
     let mut insert_index = nodes_count;
     let mut next_nodes = Vec::with_capacity(prim_count);
@@ -261,8 +265,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
             ));
 
             // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
-            nodes[insert_index] = left;
-            nodes[insert_index + 1] = right;
+            bvh.nodes[insert_index] = left;
+            bvh.nodes[insert_index + 1] = right;
 
             if SEARCH_DISTANCE == 1 && index_offset == 1 {
                 // If the search distance is only 1, and the next index was merged with this one,
@@ -282,8 +286,10 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
     }
 
     insert_index = insert_index.saturating_sub(1);
-    nodes[insert_index] = current_nodes[0];
-    nodes
+    bvh.nodes[insert_index] = current_nodes[0];
+
+    bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth + 1);
+    bvh.children_are_ordered_after_parents = true;
 }
 
 #[cfg(feature = "parallel")]
