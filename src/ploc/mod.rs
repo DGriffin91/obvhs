@@ -13,8 +13,8 @@ use rdst::{RadixKey, RadixSort};
 #[cfg(feature = "parallel")]
 use rayon::{
     iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-        IntoParallelRefMutIterator, ParallelIterator,
+        IndexedParallelIterator, IntoParallelRefIterator, IntoParallelRefMutIterator,
+        ParallelIterator,
     },
     slice::ParallelSliceMut,
 };
@@ -201,7 +201,6 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
             // TODO try making build_ploc_from_leafs_one that embeds this logic into
             // the main `while index < merge.len() {` loop  (may not be faster, tbd)
             let count = current_nodes.len() - 1;
-            dbg!(count);
 
             let mut last_cost = f32::MAX;
             let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
@@ -281,6 +280,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
         merge.resize(current_nodes.len(), 0);
 
         let mut index = 0;
+        // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
+        // https://github.com/DGriffin91/pool_racing/commit/a35b92496a1c28043b11565ee48dff0137ada68f
         while index < current_nodes.len() {
             let index_offset = merge[index] as i64;
             let best_index = (index as i64 + index_offset) as usize;
@@ -504,10 +505,13 @@ impl RadixKey for Morton64 {
     }
 }
 
-fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+fn sort_nodes_m128(nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m128");
 
-    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+    let nodes_count = nodes.len();
+    let indexed_mortons = &mut Vec::with_capacity(nodes_count);
+
+    let gen_mort = |(index, leaf): (usize, &Bvh2Node)| {
         let center = leaf.aabb.center().as_dvec3() * scale + offset;
         Morton128 {
             index,
@@ -520,64 +524,44 @@ fn sort_nodes_m128(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec
     #[cfg(feature = "parallel")]
     let min_parallel = 100_000;
 
-    let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
-
+    let compute_mortons_serial = || nodes.iter().enumerate().map(gen_mort).collect();
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > min_parallel {
-            *indexed_mortons = current_nodes
-                .par_iter()
-                .enumerate()
-                .map(morton_code_proc)
-                .collect();
+        *indexed_mortons = if nodes_count > min_parallel {
+            nodes.par_iter().enumerate().map(gen_mort).collect()
         } else {
-            *indexed_mortons = current_nodes
-                .iter()
-                .enumerate()
-                .map(morton_code_proc)
-                .collect();
-        }
+            compute_mortons_serial()
+        };
     }
-
     #[cfg(not(feature = "parallel"))]
     {
-        *indexed_mortons = current_nodes
-            .iter()
-            .enumerate()
-            .map(morton_code_proc)
-            .collect();
+        *indexed_mortons = compute_mortons_serial()
     }
 
     indexed_mortons.radix_sort_unstable();
 
+    let remap_current_nodes_serial = || indexed_mortons.iter().map(|m| nodes[m.index]).collect();
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > min_parallel {
-            *current_nodes = indexed_mortons
-                .into_par_iter()
-                .map(|m| current_nodes[m.index])
-                .collect();
+        *nodes = if nodes_count > min_parallel {
+            indexed_mortons.par_iter().map(|m| nodes[m.index]).collect()
         } else {
-            *current_nodes = indexed_mortons
-                .iter_mut()
-                .map(|m| current_nodes[m.index])
-                .collect();
-        };
+            remap_current_nodes_serial()
+        }
     }
-
     #[cfg(not(feature = "parallel"))]
     {
-        *current_nodes = indexed_mortons
-            .into_iter()
-            .map(|m| current_nodes[m.index])
-            .collect();
+        *nodes = remap_current_nodes_serial()
     }
 }
 
-fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+fn sort_nodes_m64(nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
     crate::scope!("sort_nodes_m64");
 
-    let morton_code_proc = |(index, leaf): (usize, &Bvh2Node)| {
+    let nodes_count = nodes.len();
+    let indexed_mortons = &mut Vec::with_capacity(nodes_count);
+
+    let gen_mort = |(index, leaf): (usize, &Bvh2Node)| {
         let center = leaf.aabb.center().as_dvec3() * scale + offset;
         Morton64 {
             index,
@@ -590,56 +574,33 @@ fn sort_nodes_m64(current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3
     #[cfg(feature = "parallel")]
     let min_parallel = 100_000;
 
-    let indexed_mortons = &mut Vec::with_capacity(current_nodes.len());
-
+    let compute_mortons_serial = || nodes.iter().enumerate().map(gen_mort).collect();
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > min_parallel {
-            *indexed_mortons = current_nodes
-                .par_iter()
-                .enumerate()
-                .map(morton_code_proc)
-                .collect();
+        *indexed_mortons = if nodes_count > min_parallel {
+            nodes.par_iter().enumerate().map(gen_mort).collect()
         } else {
-            *indexed_mortons = current_nodes
-                .iter()
-                .enumerate()
-                .map(morton_code_proc)
-                .collect();
-        }
+            compute_mortons_serial()
+        };
     }
-
     #[cfg(not(feature = "parallel"))]
     {
-        *indexed_mortons = current_nodes
-            .iter()
-            .enumerate()
-            .map(morton_code_proc)
-            .collect();
+        *indexed_mortons = compute_mortons_serial()
     }
 
     indexed_mortons.radix_sort_unstable();
 
+    let remap_current_nodes_serial = || indexed_mortons.iter().map(|m| nodes[m.index]).collect();
     #[cfg(feature = "parallel")]
     {
-        if current_nodes.len() > min_parallel {
-            *current_nodes = indexed_mortons
-                .into_par_iter()
-                .map(|m| current_nodes[m.index])
-                .collect();
+        *nodes = if nodes_count > min_parallel {
+            indexed_mortons.par_iter().map(|m| nodes[m.index]).collect()
         } else {
-            *current_nodes = indexed_mortons
-                .iter_mut()
-                .map(|m| current_nodes[m.index])
-                .collect();
+            remap_current_nodes_serial()
         };
     }
-
     #[cfg(not(feature = "parallel"))]
     {
-        *current_nodes = indexed_mortons
-            .into_iter()
-            .map(|m| current_nodes[m.index])
-            .collect();
+        *nodes = remap_current_nodes_serial()
     }
 }
