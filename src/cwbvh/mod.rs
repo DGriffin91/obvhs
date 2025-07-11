@@ -1017,7 +1017,7 @@ pub struct CwBvhValidationResult {
     pub node_count: usize,
     /// Total number of node children discovered though validation traversal.
     pub child_count: usize,
-    /// Total number of leafs discovered though validation traversal.
+    /// Total number of leaves discovered though validation traversal.
     pub leaf_count: usize,
     /// Total number of primitives discovered though validation traversal.
     pub prim_count: usize,

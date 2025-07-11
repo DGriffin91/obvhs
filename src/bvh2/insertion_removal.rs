@@ -30,7 +30,7 @@ impl Bvh2 {
     pub fn remove_leaf(&mut self, node_id: usize) -> Bvh2Node {
         assert!(
             !self.uses_spatial_splits,
-            "Removing leafs while using spatial splits is currently unsupported as it would require a mapping \
+            "Removing leaves while using spatial splits is currently unsupported as it would require a mapping \
 from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         );
 
@@ -174,7 +174,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     ///   deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
     ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
     ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
     ///   don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
     pub fn insert_leaf(
         &mut self,
@@ -360,7 +360,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     ///   deepest leaf of the BVH. insert_leaf() will resize this stack after traversal to be at least 2x the
     ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
     ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leafs
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
     ///   don't call bvh.depth(0) with each leaf just let insert_leaf() resize the stack as needed.
     pub fn insert_primitive(
         &mut self,

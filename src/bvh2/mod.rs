@@ -791,7 +791,7 @@ pub struct Bvh2ValidationResult {
     pub discovered_nodes: HashSet<u32>,
     /// Total number of nodes discovered though validation traversal.
     pub node_count: usize,
-    /// Total number of leafs discovered though validation traversal.
+    /// Total number of leaves discovered though validation traversal.
     pub leaf_count: usize,
     /// Total number of primitives discovered though validation traversal.
     pub prim_count: usize,

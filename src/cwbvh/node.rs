@@ -31,7 +31,7 @@ pub struct CwBvhNode {
     /// Meta data for each child
     /// Empty child slot: The field is set to 00000000
     ///
-    /// For leafs nodes: the low 5 bits store the primitive offset [0..24) from primitive_base_idx. And the high
+    /// For leaves nodes: the low 5 bits store the primitive offset [0..24) from primitive_base_idx. And the high
     /// 3 bits store the number of primitives in that leaf in a unary encoding.
     /// A child leaf with 2 primitives with the first primitive starting at primitive_base_idx would be 0b01100000
     /// A child leaf with 3 primitives with the first primitive starting at primitive_base_idx + 2 would be 0b11100010

@@ -105,7 +105,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     }
 
     let mut total_aabb = None;
-    let mut init_leafs: Vec<Bvh2Node> = zeroed_vec(aabbs.len());
+    let mut init_leaves: Vec<Bvh2Node> = zeroed_vec(aabbs.len());
 
     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
     // 500k chosen from testing various tri counts with the demoscene example
@@ -118,7 +118,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
         let chunk_size = aabbs.len().div_ceil(rayon::current_num_threads());
 
-        init_leafs
+        init_leaves
             .par_iter_mut()
             .zip(&indices)
             .zip(aabbs)
@@ -140,7 +140,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
     if total_aabb.is_none() {
         let mut total = Aabb::empty();
-        init_leafs
+        init_leaves
             .iter_mut()
             .zip(&indices)
             .zip(aabbs)
@@ -155,9 +155,9 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         ..Default::default()
     };
 
-    build_ploc_from_leafs::<SEARCH_DISTANCE>(
+    build_ploc_from_leaves::<SEARCH_DISTANCE>(
         &mut bvh,
-        init_leafs,
+        init_leaves,
         total_aabb.unwrap(),
         sort_precision,
         search_depth_threshold,
@@ -166,14 +166,14 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     bvh
 }
 
-pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
+pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize>(
     bvh: &mut Bvh2,
     mut current_nodes: Vec<Bvh2Node>,
     total_aabb: Aabb,
     sort_precision: SortPrecision,
     search_depth_threshold: usize,
 ) {
-    crate::scope!("build_ploc_from_leafs");
+    crate::scope!("build_ploc_from_leaves");
 
     let prim_count = current_nodes.len();
 
@@ -200,7 +200,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
     let mut depth: usize = 0;
     while current_nodes.len() > 1 {
         if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
-            // TODO try making build_ploc_from_leafs_one that embeds this logic into
+            // TODO try making build_ploc_from_leaves_one that embeds this logic into
             // the main `while index < merge.len() {` loop  (may not be faster, tbd)
             let count = current_nodes.len() - 1;
 
