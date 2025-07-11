@@ -506,7 +506,9 @@ impl CwBvh {
         parents
     }
 
-    /// Reorder the children of every BVH node. This results in a slightly different order since the normal reordering during
+    /// Reorder the children of every BVH node. Arranges child nodes in Morton order according to their centroids
+    /// so that the order in which the intersected children are traversed can be determined by the ray octant.
+    /// This results in a slightly different order since the normal reordering during
     /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
@@ -520,7 +522,9 @@ impl CwBvh {
         }
     }
 
-    /// Reorder the children of the given node_idx. This results in a slightly different order since the normal reordering during
+    /// Reorder the children of the given node_idx. Arranges child nodes in Morton order according to their centroids
+    /// so that the order in which the intersected children are traversed can be determined by the ray octant.
+    /// This results in a slightly different order since the normal reordering during
     /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
@@ -536,6 +540,7 @@ impl CwBvh {
         direct_layout: bool,
     ) {
         // TODO could this use ints and work in local node grid space?
+        // TODO support using exact_node_aabbs
 
         let old_node = self.nodes[node_index];
 
@@ -584,7 +589,6 @@ impl CwBvh {
         assert!(child_count <= BRANCHING);
         assert!(cost.len() >= child_count);
         // Fill cost table
-        // TODO parallel: check to see if this is faster w/ par_iter
         for s in 0..DIRECTIONS {
             let d = Vec3A::new(
                 if (s & 0b100) != 0 { -1.0 } else { 1.0 },

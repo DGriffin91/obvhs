@@ -126,7 +126,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
             .for_each(|data| {
                 let mut local_aabb = local_aabbs.get_or_default().borrow_mut();
                 for ((node, prim_index), aabb) in data {
-                    *node = init_node(&prim_index, aabb, &mut local_aabb);
+                    *node = init_node(prim_index, aabb, &mut local_aabb);
                 }
             });
 
@@ -144,9 +144,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
             .iter_mut()
             .zip(&indices)
             .zip(aabbs)
-            .for_each(|((node, prim_index), aabb)| {
-                *node = init_node(&prim_index, aabb, &mut total)
-            });
+            .for_each(|((node, prim_index), aabb)| *node = init_node(prim_index, aabb, &mut total));
         total_aabb = Some(total);
     }
 

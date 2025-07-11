@@ -396,6 +396,8 @@ impl<'a> Bvh2Converter<'a> {
         }
     }
 
+    /// Arrange child nodes in Morton order according to their centroids so that the order in which the intersected
+    /// children are traversed can be determined by the ray octant.
     // Based on https://github.com/jan-van-bergen/GPU-Raytracer/blob/6559ae2241c8fdea0ddaec959fe1a47ec9b3ab0d/Src/BVH/Converters/BVH8Converter.cpp#L148
     pub fn order_children(
         &mut self,
@@ -411,7 +413,6 @@ impl<'a> Bvh2Converter<'a> {
         assert!(child_count <= BRANCHING);
         assert!(cost.len() >= child_count);
         // Fill cost table
-        // TODO parallel: check to see if this is faster w/ par_iter
         for s in 0..DIRECTIONS {
             let d = self.direction_lut[s];
             for c in 0..child_count {
