@@ -11,9 +11,12 @@ use glam::DVec3;
 use rdst::{RadixKey, RadixSort};
 
 #[cfg(feature = "parallel")]
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
-    IntoParallelRefMutIterator, ParallelIterator,
+use rayon::{
+    iter::{
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelIterator,
+    },
+    slice::ParallelSliceMut,
 };
 
 #[cfg(feature = "parallel")]
@@ -197,19 +200,64 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
         if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
             // TODO try making build_ploc_from_leafs_one that embeds this logic into
             // the main `while index < merge.len() {` loop  (may not be faster, tbd)
-            let mut last_cost = f32::MAX;
             let count = current_nodes.len() - 1;
-            assert!(count < merge.len()); // Try to elide bounds check
+            dbg!(count);
 
-            // TODO perf/forte: tried making parallel but there appears to be too much overhead: https://pastebin.com/Msas1RXU
-            (0..count).for_each(|i| {
+            let mut last_cost = f32::MAX;
+            let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
                 let cost = current_nodes[i]
                     .aabb
                     .union(&current_nodes[i + 1].aabb)
                     .half_area();
-                merge[i] = if last_cost < cost { -1 } else { 1 };
+                *merge_n = if last_cost < cost { -1 } else { 1 };
                 last_cost = cost;
-            });
+            };
+
+            #[cfg(feature = "parallel")]
+            {
+                let chunk_size = merge[..count].len().div_ceil(rayon::current_num_threads());
+                let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
+                    let start = chunk_id * chunk_size;
+                    let mut last_cost = if start == 0 {
+                        f32::MAX
+                    } else {
+                        current_nodes[start - 1]
+                            .aabb
+                            .union(&current_nodes[start].aabb)
+                            .half_area()
+                    };
+                    for (local_n, merge_n) in chunk.iter_mut().enumerate() {
+                        let i = local_n + start;
+                        let cost = current_nodes[i]
+                            .aabb
+                            .union(&current_nodes[i + 1].aabb)
+                            .half_area();
+                        *merge_n = if last_cost < cost { -1 } else { 1 };
+                        last_cost = cost;
+                    }
+                };
+
+                // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
+                // 300k chosen from testing various scenes in tray racing
+                if count < 300_000 {
+                    merge[..count]
+                        .iter_mut()
+                        .enumerate()
+                        .for_each(calculate_costs);
+                } else {
+                    merge[..count]
+                        .par_chunks_mut(chunk_size.max(1))
+                        .enumerate()
+                        .for_each(calculate_costs_parallel)
+                }
+            }
+            #[cfg(not(feature = "parallel"))]
+            {
+                merge[..count]
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(calculate_costs);
+            }
             merge[current_nodes.len() - 1] = -1;
         } else {
             #[cfg(feature = "parallel")]
@@ -229,6 +277,8 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
                     }
                 });
         };
+
+        merge.resize(current_nodes.len(), 0);
 
         let mut index = 0;
         while index < current_nodes.len() {
