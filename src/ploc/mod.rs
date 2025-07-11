@@ -20,11 +20,6 @@ use rayon::{
     slice::ParallelSliceMut,
 };
 
-#[cfg(feature = "parallel")]
-use std::cell::RefCell;
-#[cfg(feature = "parallel")]
-use thread_local::ThreadLocal;
-
 use crate::bvh2::node::Bvh2Node;
 use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
@@ -114,26 +109,28 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
     #[cfg(feature = "parallel")]
     if prim_count >= min_parallel {
-        let mut local_aabbs: ThreadLocal<RefCell<Aabb>> = ThreadLocal::default();
-
         let chunk_size = aabbs.len().div_ceil(rayon::current_num_threads());
 
-        init_leaves
+        let chunks = init_leaves
             .par_iter_mut()
             .zip(&indices)
             .zip(aabbs)
-            .chunks(chunk_size)
-            .for_each(|data| {
-                let mut local_aabb = local_aabbs.get_or_default().borrow_mut();
+            .chunks(chunk_size);
+
+        let mut local_aabbs = vec![Aabb::empty(); chunks.len()]; // TODO perf, put on stack?
+
+        chunks
+            .zip(local_aabbs.par_iter_mut())
+            .for_each(|(data, local_aabb)| {
                 for ((node, prim_index), aabb) in data {
-                    *node = init_node(prim_index, aabb, &mut local_aabb);
+                    *node = init_node(prim_index, aabb, local_aabb);
                 }
             });
 
         let mut total = Aabb::empty();
         for local_aabb in local_aabbs.iter_mut() {
-            total.extend(local_aabb.get_mut().min);
-            total.extend(local_aabb.get_mut().max);
+            total.extend(local_aabb.min);
+            total.extend(local_aabb.max);
         }
         total_aabb = Some(total);
     }

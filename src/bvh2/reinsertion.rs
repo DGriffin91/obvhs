@@ -34,6 +34,7 @@ pub struct ReinsertionOptimizer {
     batch_size_ratio: f32,
     #[cfg(not(feature = "parallel"))]
     reinsertion_stack: HeapStack<(f32, u32)>,
+    // TODO replace ThreadLocal with per per_chunk stack (See parallel_prefix_sum())
     #[cfg(feature = "parallel")]
     reinsertion_stack: ThreadLocal<RefCell<HeapStack<(f32, u32)>>>,
 }
