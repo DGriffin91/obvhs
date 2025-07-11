@@ -7,6 +7,7 @@ pub mod morton;
 // https://meistdan.github.io/publications/ploc/paper.pdf
 // https://github.com/madmann91/bvh/blob/v1/include/bvh/locally_ordered_clustering_builder.hpp
 
+use bytemuck::zeroed_vec;
 use glam::DVec3;
 use rdst::{RadixKey, RadixSort};
 
@@ -95,16 +96,16 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
     }
 
     #[inline]
-    fn init_node(prim_index: &u32, aabb: Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
+    fn init_node(prim_index: &u32, aabb: &Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
         local_aabb.extend(aabb.min);
         local_aabb.extend(aabb.max);
         debug_assert!(!aabb.min.is_nan());
         debug_assert!(!aabb.max.is_nan());
-        Bvh2Node::new(aabb, 1, *prim_index)
+        Bvh2Node::new(*aabb, 1, *prim_index)
     }
 
     let mut total_aabb = None;
-    let mut init_leafs = None;
+    let mut init_leafs: Vec<Bvh2Node> = zeroed_vec(aabbs.len());
 
     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
     // 500k chosen from testing various tri counts with the demoscene example
@@ -113,21 +114,22 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
     #[cfg(feature = "parallel")]
     if prim_count >= min_parallel {
-        // tried par_chunks -> map -> reduce, it seemed much slower
         let mut local_aabbs: ThreadLocal<RefCell<Aabb>> = ThreadLocal::default();
-        init_leafs = Some(
-            indices
-                .par_iter()
-                .enumerate()
-                .map(|(i, prim_index)| {
-                    init_node(
-                        prim_index,
-                        aabbs[i],
-                        &mut local_aabbs.get_or_default().borrow_mut(),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        );
+
+        let chunk_size = aabbs.len().div_ceil(rayon::current_num_threads());
+
+        init_leafs
+            .par_iter_mut()
+            .zip(&indices)
+            .zip(aabbs)
+            .chunks(chunk_size)
+            .for_each(|data| {
+                let mut local_aabb = local_aabbs.get_or_default().borrow_mut();
+                for ((node, prim_index), aabb) in data {
+                    *node = init_node(&prim_index, aabb, &mut local_aabb);
+                }
+            });
+
         let mut total = Aabb::empty();
         for local_aabb in local_aabbs.iter_mut() {
             total.extend(local_aabb.get_mut().min);
@@ -136,15 +138,15 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
         total_aabb = Some(total);
     }
 
-    if init_leafs.is_none() {
+    if total_aabb.is_none() {
         let mut total = Aabb::empty();
-        init_leafs = Some(
-            indices
-                .iter()
-                .enumerate()
-                .map(|(i, prim_index)| init_node(prim_index, aabbs[i], &mut total))
-                .collect::<Vec<_>>(),
-        );
+        init_leafs
+            .iter_mut()
+            .zip(&indices)
+            .zip(aabbs)
+            .for_each(|((node, prim_index), aabb)| {
+                *node = init_node(&prim_index, aabb, &mut total)
+            });
         total_aabb = Some(total);
     }
 
@@ -155,7 +157,7 @@ pub fn build_ploc<const SEARCH_DISTANCE: usize>(
 
     build_ploc_from_leafs::<SEARCH_DISTANCE>(
         &mut bvh,
-        init_leafs.unwrap(),
+        init_leafs,
         total_aabb.unwrap(),
         sort_precision,
         search_depth_threshold,
