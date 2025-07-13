@@ -281,15 +281,16 @@ impl PlocBuilder {
         let mut insert_index = nodes_count;
         assert!(i8::MAX as usize > SEARCH_DISTANCE);
 
-        let merge: &mut [i8] = &mut cast_slice_mut(&mut self.mortons)[..prim_count];
+        let merge_buffer: &mut [i8] = &mut cast_slice_mut(&mut self.mortons)[..prim_count];
 
         #[cfg(not(feature = "parallel"))]
         let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
 
         let mut depth: usize = 0;
         let mut next_nodes_idx = 0;
-        let mut count = self.current_nodes.len();
+        let mut count = prim_count;
         while count > 1 {
+            let merge = &mut merge_buffer[..count];
             if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
                 let mut last_cost = f32::MAX;
                 let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
@@ -302,12 +303,11 @@ impl PlocBuilder {
                 };
 
                 let count_m1 = count - 1;
+                let merge_m1 = &mut merge[..count_m1];
 
                 #[cfg(feature = "parallel")]
                 {
-                    let chunk_size = merge[..count_m1]
-                        .len()
-                        .div_ceil(rayon::current_num_threads());
+                    let chunk_size = merge_m1.len().div_ceil(rayon::current_num_threads());
                     let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
                         let start = chunk_id * chunk_size;
                         let mut last_cost = if start == 0 {
@@ -332,12 +332,9 @@ impl PlocBuilder {
                     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
                     // 300k chosen from testing various scenes in tray racing
                     if count < 300_000 {
-                        merge[..count_m1]
-                            .iter_mut()
-                            .enumerate()
-                            .for_each(calculate_costs);
+                        merge_m1.iter_mut().enumerate().for_each(calculate_costs);
                     } else {
-                        merge[..count_m1]
+                        merge_m1
                             .par_chunks_mut(chunk_size.max(1))
                             .enumerate()
                             .for_each(calculate_costs_parallel)
@@ -345,10 +342,7 @@ impl PlocBuilder {
                 }
                 #[cfg(not(feature = "parallel"))]
                 {
-                    merge[..count_m1]
-                        .iter_mut()
-                        .enumerate()
-                        .for_each(calculate_costs);
+                    merge_m1.iter_mut().enumerate().for_each(calculate_costs);
                 }
                 merge[count_m1] = -1;
             } else {
@@ -367,7 +361,7 @@ impl PlocBuilder {
                     }
                     #[cfg(not(feature = "parallel"))]
                     {
-                        *best = cache.find_best_node(index, &self.current_nodes[0..count]);
+                        *best = cache.find_best_node(index, &self.current_nodes[..count]);
                     }
                 });
             };
