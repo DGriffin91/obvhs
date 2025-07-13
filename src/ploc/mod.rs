@@ -11,7 +11,7 @@ use std::mem;
 
 use bytemuck::{cast_slice_mut, zeroed_vec, Pod, Zeroable};
 use glam::DVec3;
-use rdst::{RadixKey, RadixSort};
+use rdst::RadixKey;
 
 #[cfg(feature = "parallel")]
 use rayon::{
@@ -21,6 +21,9 @@ use rayon::{
     },
     slice::ParallelSliceMut,
 };
+
+#[cfg(not(feature = "parallel"))]
+use rdst::RadixSort;
 
 use crate::bvh2::node::Bvh2Node;
 use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
@@ -764,13 +767,10 @@ fn sort_nodes_by_morton<M: MortonCode>(
 
     #[cfg(feature = "parallel")]
     {
-        match nodes_count {
-            0..=20_000 => match precision {
-                SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
-                SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
-            },
-            _ => mortons.radix_sort_builder().with_tuner(&MyTuner {}).sort(),
-        };
+        match precision {
+            SortPrecision::U128 => mortons.par_sort_unstable_by_key(|m| m.code128()),
+            SortPrecision::U64 => mortons.par_sort_unstable_by_key(|m| m.code64()),
+        }
     }
     #[cfg(not(feature = "parallel"))]
     {
@@ -800,31 +800,5 @@ fn sort_nodes_by_morton<M: MortonCode>(
     #[cfg(not(feature = "parallel"))]
     {
         sorted_nodes.iter_mut().zip(mortons.iter()).for_each(remap);
-    }
-}
-
-#[cfg(feature = "parallel")]
-use rdst::tuner::{Algorithm, Tuner, TuningParams};
-
-#[cfg(feature = "parallel")]
-struct MyTuner;
-
-#[cfg(feature = "parallel")]
-impl Tuner for MyTuner {
-    fn pick_algorithm(&self, p: &TuningParams, _counts: &[usize]) -> Algorithm {
-        // TODO could be much more involved:
-        // https://github.com/nessex/rdst/blob/11d5f5a5e0485609bf96602d23af2a9af04cab78/src/tuners/standard_tuner.rs
-
-        // This along with the fallback to sort_unstable_by_key beats the default tuner by better than a factor of 2
-        // in most scenes.
-
-        if p.input_len <= 128 {
-            return Algorithm::Comparative;
-        }
-
-        match p.input_len {
-            0..=20_000 => Algorithm::Ska,
-            _ => Algorithm::Regions,
-        }
     }
 }
