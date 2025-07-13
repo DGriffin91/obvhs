@@ -618,7 +618,7 @@ impl SortPrecision {
     fn sort_nodes(
         &self,
         nodes: &mut [Bvh2Node],
-        sorted_nodes: &mut [Bvh2Node],
+        sorted: &mut [Bvh2Node],
         mortons_allocation: &mut [[u128; 2]],
         scale: DVec3,
         offset: DVec3,
@@ -626,12 +626,12 @@ impl SortPrecision {
         match self {
             SortPrecision::U128 => {
                 let mortons = cast_slice_mut(mortons_allocation);
-                sort_nodes_by_morton::<Morton128>(nodes, sorted_nodes, mortons, scale, offset)
+                sort_nodes_by_morton::<Morton128>(*self, nodes, sorted, mortons, scale, offset)
             }
             SortPrecision::U64 => {
                 let smaller: &mut [u128] = cast_slice_mut(mortons_allocation);
                 let mortons = cast_slice_mut(&mut smaller[..nodes.len()]);
-                sort_nodes_by_morton::<Morton64>(nodes, sorted_nodes, mortons, scale, offset)
+                sort_nodes_by_morton::<Morton64>(*self, nodes, sorted, mortons, scale, offset)
             }
         }
     }
@@ -673,6 +673,8 @@ impl RadixKey for Morton64 {
 trait MortonCode: RadixKey + Send + Sync + Copy {
     fn new(index: usize, center: DVec3) -> Self;
     fn index(&self) -> usize;
+    fn code64(&self) -> u64;
+    fn code128(&self) -> u128;
 }
 
 impl MortonCode for Morton128 {
@@ -688,6 +690,14 @@ impl MortonCode for Morton128 {
     fn index(&self) -> usize {
         self.index as usize
     }
+    #[inline(always)]
+    fn code64(&self) -> u64 {
+        panic!("Don't sort Morton128 using code64");
+    }
+    #[inline(always)]
+    fn code128(&self) -> u128 {
+        self.code
+    }
 }
 
 impl MortonCode for Morton64 {
@@ -702,9 +712,18 @@ impl MortonCode for Morton64 {
     fn index(&self) -> usize {
         self.index as usize
     }
+    #[inline(always)]
+    fn code64(&self) -> u64 {
+        self.code
+    }
+    #[inline(always)]
+    fn code128(&self) -> u128 {
+        panic!("Don't sort Morton64 using code128");
+    }
 }
 
 fn sort_nodes_by_morton<M: MortonCode>(
+    precision: SortPrecision,
     nodes: &mut [Bvh2Node],
     sorted_nodes: &mut [Bvh2Node],
     mortons: &mut [M],
@@ -712,7 +731,6 @@ fn sort_nodes_by_morton<M: MortonCode>(
     offset: DVec3,
 ) {
     crate::scope!("sort_nodes");
-    #[cfg(feature = "parallel")]
     let nodes_count = nodes.len();
 
     let gen_mort = |(index, (morton, leaf)): (usize, (&mut M, &Bvh2Node))| {
@@ -744,7 +762,26 @@ fn sort_nodes_by_morton<M: MortonCode>(
         .enumerate()
         .for_each(gen_mort);
 
-    mortons.radix_sort_unstable();
+    #[cfg(feature = "parallel")]
+    {
+        match nodes_count {
+            0..=20_000 => match precision {
+                SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
+                SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
+            },
+            _ => mortons.radix_sort_builder().with_tuner(&MyTuner {}).sort(),
+        };
+    }
+    #[cfg(not(feature = "parallel"))]
+    {
+        match nodes_count {
+            0..=250_000 => match precision {
+                SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
+                SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
+            },
+            _ => mortons.radix_sort_unstable(),
+        };
+    }
 
     let remap = |(n, m): (&mut Bvh2Node, &M)| *n = nodes[m.index()];
 
@@ -763,5 +800,31 @@ fn sort_nodes_by_morton<M: MortonCode>(
     #[cfg(not(feature = "parallel"))]
     {
         sorted_nodes.iter_mut().zip(mortons.iter()).for_each(remap);
+    }
+}
+
+#[cfg(feature = "parallel")]
+use rdst::tuner::{Algorithm, Tuner, TuningParams};
+
+#[cfg(feature = "parallel")]
+struct MyTuner;
+
+#[cfg(feature = "parallel")]
+impl Tuner for MyTuner {
+    fn pick_algorithm(&self, p: &TuningParams, _counts: &[usize]) -> Algorithm {
+        // TODO could be much more involved:
+        // https://github.com/nessex/rdst/blob/11d5f5a5e0485609bf96602d23af2a9af04cab78/src/tuners/standard_tuner.rs
+
+        // This along with the fallback to sort_unstable_by_key beats the default tuner by better than a factor of 2
+        // in most scenes.
+
+        if p.input_len <= 128 {
+            return Algorithm::Comparative;
+        }
+
+        match p.input_len {
+            0..=20_000 => Algorithm::Ska,
+            _ => Algorithm::Regions,
+        }
     }
 }
