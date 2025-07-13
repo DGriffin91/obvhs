@@ -31,7 +31,6 @@ use crate::{aabb::Aabb, bvh2::Bvh2};
 pub struct PlocBuilder {
     pub current_nodes: Vec<Bvh2Node>,
     pub next_nodes: Vec<Bvh2Node>,
-    pub merge: Vec<i8>,
     pub mortons: Vec<[u128; 2]>, // Enough space/align for Morton64 or Morton128
 
     #[cfg(feature = "parallel")]
@@ -51,7 +50,6 @@ impl PlocBuilder {
         PlocBuilder {
             current_nodes: Vec::new(),
             next_nodes: Vec::new(),
-            merge: Vec::new(),
             mortons: Vec::new(),
 
             #[cfg(feature = "parallel")]
@@ -66,7 +64,6 @@ impl PlocBuilder {
         PlocBuilder {
             current_nodes: zeroed_vec(prim_count),
             next_nodes: zeroed_vec(prim_count),
-            merge: zeroed_vec(prim_count),
             mortons: zeroed_vec(prim_count),
 
             #[cfg(feature = "parallel")]
@@ -259,6 +256,7 @@ impl PlocBuilder {
 
         // Merge nodes until there is only one left
         let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
+        bvh.nodes.resize(nodes_count, Bvh2Node::default());
 
         let scale = 1.0 / total_aabb.diagonal().as_dvec3();
         let offset = -total_aabb.min.as_dvec3() * scale;
@@ -279,24 +277,20 @@ impl PlocBuilder {
             offset,
         );
         mem::swap(&mut self.current_nodes, &mut self.next_nodes);
-
-        bvh.nodes.resize(nodes_count, Bvh2Node::default());
+        self.next_nodes.clear();
 
         let mut insert_index = nodes_count;
         assert!(i8::MAX as usize > SEARCH_DISTANCE);
-        self.merge.resize(prim_count, 0);
-        self.next_nodes.clear();
+
+        let merge: &mut [i8] = &mut cast_slice_mut(&mut self.mortons)[..prim_count];
 
         #[cfg(not(feature = "parallel"))]
         let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
 
         let mut depth: usize = 0;
         while self.current_nodes.len() > 1 {
+            let count = self.current_nodes.len() - 1;
             if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
-                // TODO try making build_ploc_from_leaves_one that embeds this logic into
-                // the main `while index < merge.len() {` loop  (may not be faster, tbd)
-                let count = self.current_nodes.len() - 1;
-
                 let mut last_cost = f32::MAX;
                 let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
                     let cost = self.current_nodes[i]
@@ -309,9 +303,7 @@ impl PlocBuilder {
 
                 #[cfg(feature = "parallel")]
                 {
-                    let chunk_size = self.merge[..count]
-                        .len()
-                        .div_ceil(rayon::current_num_threads());
+                    let chunk_size = merge[..count].len().div_ceil(rayon::current_num_threads());
                     let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
                         let start = chunk_id * chunk_size;
                         let mut last_cost = if start == 0 {
@@ -336,12 +328,12 @@ impl PlocBuilder {
                     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
                     // 300k chosen from testing various scenes in tray racing
                     if count < 300_000 {
-                        self.merge[..count]
+                        merge[..count]
                             .iter_mut()
                             .enumerate()
                             .for_each(calculate_costs);
                     } else {
-                        self.merge[..count]
+                        merge[..count]
                             .par_chunks_mut(chunk_size.max(1))
                             .enumerate()
                             .for_each(calculate_costs_parallel)
@@ -349,17 +341,17 @@ impl PlocBuilder {
                 }
                 #[cfg(not(feature = "parallel"))]
                 {
-                    self.merge[..count]
+                    merge[..count]
                         .iter_mut()
                         .enumerate()
                         .for_each(calculate_costs);
                 }
-                self.merge[self.current_nodes.len() - 1] = -1;
+                merge[self.current_nodes.len() - 1] = -1;
             } else {
                 #[cfg(feature = "parallel")]
-                let iter = self.merge.par_iter_mut();
+                let iter = merge.par_iter_mut();
                 #[cfg(not(feature = "parallel"))]
-                let iter = self.merge.iter_mut();
+                let iter = merge.iter_mut();
                 iter.enumerate()
                     .take(self.current_nodes.len())
                     .for_each(|(index, best)| {
@@ -375,16 +367,14 @@ impl PlocBuilder {
                     });
             };
 
-            self.merge.resize(self.current_nodes.len(), 0);
-
             let mut index = 0;
             // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
             // https://github.com/DGriffin91/pool_racing/commit/a35b92496a1c28043b11565ee48dff0137ada68f
             while index < self.current_nodes.len() {
-                let index_offset = self.merge[index] as i64;
+                let index_offset = merge[index] as i64;
                 let best_index = (index as i64 + index_offset) as usize;
                 // The two nodes should be merged if they agree on their respective merge indices.
-                if best_index as i64 + self.merge[best_index] as i64 != index as i64 {
+                if best_index as i64 + merge[best_index] as i64 != index as i64 {
                     // If not, the current node should be kept for the next iteration
                     self.next_nodes.push(self.current_nodes[index]);
                     index += 1;

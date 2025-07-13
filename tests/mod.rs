@@ -407,7 +407,7 @@ mod tests {
             (aabbs, indices)
         }
 
-        let tris = demoscene(201, 0);
+        let tris = demoscene(99, 0);
         let (aabbs, indices) = aabbs_and_indices(&tris);
 
         let mut builder = PlocBuilder::with_capacity(aabbs.len());
@@ -422,7 +422,7 @@ mod tests {
 
         bvh2.validate(&tris, false, true);
 
-        let tris = demoscene(201, 0);
+        let tris = demoscene(98, 0);
         let (aabbs, indices) = aabbs_and_indices(&tris);
 
         builder.build_with_bvh(
