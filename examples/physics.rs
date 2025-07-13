@@ -12,7 +12,7 @@ use obvhs::{
     bvh2::{insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer, Bvh2},
     cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
     heapstack::HeapStack,
-    ploc::{PlocSearchDistance, SortPrecision},
+    ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
     ray::{Ray, RayHit},
     PrettyDuration,
 };
@@ -370,8 +370,13 @@ impl PhysicsWorld {
                 self.temp_aabbs.push(item.oversized_aabb);
             }
         }
-        self.bvh =
-            PlocSearchDistance::Minimum.build(&self.temp_aabbs, indices, SortPrecision::U64, 0);
+        self.bvh = PlocBuilder::new().build(
+            PlocSearchDistance::Minimum,
+            &self.temp_aabbs,
+            indices,
+            SortPrecision::U64,
+            0,
+        );
     }
 
     pub fn bvh_partial_rebuild_reinsert(&mut self) {

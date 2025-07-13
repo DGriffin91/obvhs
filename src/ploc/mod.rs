@@ -7,7 +7,9 @@ pub mod morton;
 // https://meistdan.github.io/publications/ploc/paper.pdf
 // https://github.com/madmann91/bvh/blob/v1/include/bvh/locally_ordered_clustering_builder.hpp
 
-use bytemuck::zeroed_vec;
+use std::mem;
+
+use bytemuck::{cast_slice_mut, zeroed_vec, Pod, Zeroable};
 use glam::DVec3;
 use rdst::{RadixKey, RadixSort};
 
@@ -25,8 +27,90 @@ use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{aabb::Aabb, bvh2::Bvh2};
 
-impl PlocSearchDistance {
+#[derive(Clone)]
+pub struct PlocBuilder {
+    pub current_nodes: Vec<Bvh2Node>,
+    pub next_nodes: Vec<Bvh2Node>,
+    pub merge: Vec<i8>,
+    pub mortons: Vec<[u128; 2]>, // Enough space/align for Morton64 or Morton128
+
+    #[cfg(feature = "parallel")]
+    pub local_aabbs: Vec<Aabb>,
+}
+
+impl Default for PlocBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PlocBuilder {
+    /// Initialize a ploc builder. After initial building, keep around this builder to reuse the associated allocations.
+    pub fn new() -> PlocBuilder {
+        crate::scope!("preallocate_builder");
+        PlocBuilder {
+            current_nodes: Vec::new(),
+            next_nodes: Vec::new(),
+            merge: Vec::new(),
+            mortons: Vec::new(),
+
+            #[cfg(feature = "parallel")]
+            local_aabbs: Vec::new(),
+        }
+    }
+
+    /// Initialize a ploc builder with pre-allocated capacity for building a bvh with prim_count.
+    /// After initial building, keep around this builder to reuse the associated allocations.
+    pub fn with_capacity(prim_count: usize) -> PlocBuilder {
+        crate::scope!("preallocate_builder");
+        PlocBuilder {
+            current_nodes: zeroed_vec(prim_count),
+            next_nodes: zeroed_vec(prim_count),
+            merge: zeroed_vec(prim_count),
+            mortons: zeroed_vec(prim_count),
+
+            #[cfg(feature = "parallel")]
+            local_aabbs: zeroed_vec(rayon::current_num_threads()),
+        }
+    }
+
     /// # Arguments
+    /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
+    /// * `search_distance` - Which search distance should be used when building the ploc.
+    /// * `indices` - The list indices used to index into the list of primitives. This allows for
+    ///   flexibility in which primitives are included in the bvh and in what order they are referenced.
+    ///   Often this would just be equivalent to: (0..aabbs.len() as u32).collect::<Vec<_>>()
+    /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
+    /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
+    ///   just use PlocSearchDistance. When trying to optimize build time it can be beneficial to limit the search
+    ///   distance for the first few passes as that is when the largest number of primitives are being considered.
+    ///   This pairs are initially found more quickly since it doesn't need to search as far, and they are also
+    ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
+    ///   result in an overall better bvh structure.
+    #[inline]
+    pub fn build(
+        &mut self,
+        search_distance: PlocSearchDistance,
+        aabbs: &[Aabb],
+        indices: Vec<u32>,
+        sort_precision: SortPrecision,
+        search_depth_threshold: usize,
+    ) -> Bvh2 {
+        let mut bvh = Bvh2::zeroed(aabbs.len());
+        self.build_with_bvh(
+            &mut bvh,
+            search_distance,
+            aabbs,
+            indices,
+            sort_precision,
+            search_depth_threshold,
+        );
+        bvh
+    }
+
+    /// # Arguments
+    /// * `bvh` - An existing bvh. The builder will clear this bvh and reuse its allocations.
+    /// * `search_distance` - Which search distance should be used when building the ploc.
     /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
     /// * `indices` - The list indices used to index into the list of primitives. This allows for
     ///   flexibility in which primitives are included in the bvh and in what order they are referenced.
@@ -38,306 +122,324 @@ impl PlocSearchDistance {
     ///   This pairs are initially found more quickly since it doesn't need to search as far, and they are also
     ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
     ///   result in an overall better bvh structure.
-    pub fn build(
-        &self,
+    pub fn build_with_bvh(
+        &mut self,
+        bvh: &mut Bvh2,
+        search_distance: PlocSearchDistance,
         aabbs: &[Aabb],
         indices: Vec<u32>,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
-    ) -> Bvh2 {
-        match self {
+    ) {
+        match search_distance {
             PlocSearchDistance::Minimum => {
-                build_ploc::<1>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<1>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::VeryLow => {
-                build_ploc::<2>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<2>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::Low => {
-                build_ploc::<6>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<6>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::Medium => {
-                build_ploc::<14>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<14>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::High => {
-                build_ploc::<24>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<24>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
             PlocSearchDistance::VeryHigh => {
-                build_ploc::<32>(aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<32>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
             }
         }
     }
-}
 
-/// # Arguments
-/// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
-/// * `search_depth_threshold` - Below this depth a search distance of 1 will be used
-/// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
-/// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
-///   just use SEARCH_DISTANCE.
-///
-/// SEARCH_DISTANCE should be <= 32
-pub fn build_ploc<const SEARCH_DISTANCE: usize>(
-    aabbs: &[Aabb],
-    indices: Vec<u32>,
-    sort_precision: SortPrecision,
-    search_depth_threshold: usize,
-) -> Bvh2 {
-    crate::scope!("build_ploc");
+    /// # Arguments
+    /// * `bvh` - An existing bvh. The builder will clear this bvh and reuse its allocations.
+    /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
+    /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used
+    /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
+    /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
+    ///   just use SEARCH_DISTANCE.
+    ///
+    /// SEARCH_DISTANCE should be <= 32
+    pub fn build_ploc<const SEARCH_DISTANCE: usize>(
+        &mut self,
+        bvh: &mut Bvh2,
+        aabbs: &[Aabb],
+        indices: Vec<u32>,
+        sort_precision: SortPrecision,
+        search_depth_threshold: usize,
+    ) {
+        crate::scope!("build_ploc");
 
-    let prim_count = aabbs.len();
+        let prim_count = aabbs.len();
 
-    if prim_count == 0 {
-        return Bvh2::default();
-    }
+        bvh.reset_for_reuse(prim_count, Some(indices));
 
-    #[inline]
-    fn init_node(prim_index: &u32, aabb: &Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
-        local_aabb.extend(aabb.min);
-        local_aabb.extend(aabb.max);
-        debug_assert!(!aabb.min.is_nan());
-        debug_assert!(!aabb.max.is_nan());
-        Bvh2Node::new(*aabb, 1, *prim_index)
-    }
-
-    let mut total_aabb = None;
-    let mut init_leaves: Vec<Bvh2Node> = zeroed_vec(aabbs.len());
-
-    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
-    // 500k chosen from testing various tri counts with the demoscene example
-    #[cfg(feature = "parallel")]
-    let min_parallel = 500_000;
-
-    #[cfg(feature = "parallel")]
-    if prim_count >= min_parallel {
-        let chunk_size = aabbs.len().div_ceil(rayon::current_num_threads());
-
-        let chunks = init_leaves
-            .par_iter_mut()
-            .zip(&indices)
-            .zip(aabbs)
-            .chunks(chunk_size);
-
-        let mut local_aabbs = vec![Aabb::empty(); chunks.len()]; // TODO perf, put on stack?
-
-        chunks
-            .zip(local_aabbs.par_iter_mut())
-            .for_each(|(data, local_aabb)| {
-                for ((node, prim_index), aabb) in data {
-                    *node = init_node(prim_index, aabb, local_aabb);
-                }
-            });
-
-        let mut total = Aabb::empty();
-        for local_aabb in local_aabbs.iter_mut() {
-            total.extend(local_aabb.min);
-            total.extend(local_aabb.max);
+        if prim_count == 0 {
+            return;
         }
-        total_aabb = Some(total);
-    }
 
-    if total_aabb.is_none() {
-        let mut total = Aabb::empty();
-        init_leaves
-            .iter_mut()
-            .zip(&indices)
-            .zip(aabbs)
-            .for_each(|((node, prim_index), aabb)| *node = init_node(prim_index, aabb, &mut total));
-        total_aabb = Some(total);
-    }
+        #[inline]
+        fn init_node(prim_index: &u32, aabb: &Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
+            local_aabb.extend(aabb.min);
+            local_aabb.extend(aabb.max);
+            debug_assert!(!aabb.min.is_nan());
+            debug_assert!(!aabb.max.is_nan());
+            Bvh2Node::new(*aabb, 1, *prim_index)
+        }
 
-    let mut bvh = Bvh2 {
-        primitive_indices: indices,
-        ..Default::default()
-    };
+        let mut total_aabb = None;
+        self.current_nodes.resize(prim_count, Default::default());
 
-    build_ploc_from_leaves::<SEARCH_DISTANCE>(
-        &mut bvh,
-        init_leaves,
-        total_aabb.unwrap(),
-        sort_precision,
-        search_depth_threshold,
-    );
+        // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities of nodes.
+        // 500k chosen from testing various tri counts with the demoscene example
+        #[cfg(feature = "parallel")]
+        let min_parallel = 500_000;
 
-    bvh
-}
+        #[cfg(feature = "parallel")]
+        if prim_count >= min_parallel {
+            let chunk_size = aabbs.len().div_ceil(rayon::current_num_threads());
 
-pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize>(
-    bvh: &mut Bvh2,
-    mut current_nodes: Vec<Bvh2Node>,
-    total_aabb: Aabb,
-    sort_precision: SortPrecision,
-    search_depth_threshold: usize,
-) {
-    crate::scope!("build_ploc_from_leaves");
+            let chunks = self
+                .current_nodes
+                .par_iter_mut()
+                .zip(&bvh.primitive_indices)
+                .zip(aabbs)
+                .chunks(chunk_size);
 
-    let prim_count = current_nodes.len();
+            self.local_aabbs.resize(chunks.len(), Aabb::empty());
 
-    // Merge nodes until there is only one left
-    let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
-
-    let scale = 1.0 / total_aabb.diagonal().as_dvec3();
-    let offset = -total_aabb.min.as_dvec3() * scale;
-
-    // Sort primitives according to their morton code
-    sort_precision.sort_nodes(&mut current_nodes, scale, offset);
-
-    bvh.nodes.clear();
-    bvh.nodes.resize(nodes_count, Bvh2Node::default());
-
-    let mut insert_index = nodes_count;
-    let mut next_nodes = Vec::with_capacity(prim_count);
-    assert!(i8::MAX as usize > SEARCH_DISTANCE);
-    let mut merge: Vec<i8> = vec![0; prim_count];
-
-    #[cfg(not(feature = "parallel"))]
-    let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
-
-    let mut depth: usize = 0;
-    while current_nodes.len() > 1 {
-        if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
-            // TODO try making build_ploc_from_leaves_one that embeds this logic into
-            // the main `while index < merge.len() {` loop  (may not be faster, tbd)
-            let count = current_nodes.len() - 1;
-
-            let mut last_cost = f32::MAX;
-            let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
-                let cost = current_nodes[i]
-                    .aabb
-                    .union(&current_nodes[i + 1].aabb)
-                    .half_area();
-                *merge_n = if last_cost < cost { -1 } else { 1 };
-                last_cost = cost;
-            };
-
-            #[cfg(feature = "parallel")]
-            {
-                let chunk_size = merge[..count].len().div_ceil(rayon::current_num_threads());
-                let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
-                    let start = chunk_id * chunk_size;
-                    let mut last_cost = if start == 0 {
-                        f32::MAX
-                    } else {
-                        current_nodes[start - 1]
-                            .aabb
-                            .union(&current_nodes[start].aabb)
-                            .half_area()
-                    };
-                    for (local_n, merge_n) in chunk.iter_mut().enumerate() {
-                        let i = local_n + start;
-                        let cost = current_nodes[i]
-                            .aabb
-                            .union(&current_nodes[i + 1].aabb)
-                            .half_area();
-                        *merge_n = if last_cost < cost { -1 } else { 1 };
-                        last_cost = cost;
+            chunks
+                .zip(self.local_aabbs.par_iter_mut())
+                .for_each(|(data, local_aabb)| {
+                    for ((node, prim_index), aabb) in data {
+                        *node = init_node(prim_index, aabb, local_aabb);
                     }
+                });
+
+            let mut total = Aabb::empty();
+            for local_aabb in self.local_aabbs.iter_mut() {
+                total.extend(local_aabb.min);
+                total.extend(local_aabb.max);
+            }
+            total_aabb = Some(total);
+        }
+
+        if total_aabb.is_none() {
+            let mut total = Aabb::empty();
+            self.current_nodes
+                .iter_mut()
+                .zip(&bvh.primitive_indices)
+                .zip(aabbs)
+                .for_each(|((node, prim_index), aabb)| {
+                    *node = init_node(prim_index, aabb, &mut total)
+                });
+            total_aabb = Some(total);
+        }
+
+        self.build_ploc_from_leaves::<SEARCH_DISTANCE>(
+            bvh,
+            total_aabb.unwrap(),
+            sort_precision,
+            search_depth_threshold,
+        );
+    }
+
+    pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize>(
+        &mut self,
+        bvh: &mut Bvh2,
+        total_aabb: Aabb,
+        sort_precision: SortPrecision,
+        search_depth_threshold: usize,
+    ) {
+        crate::scope!("build_ploc_from_leaves");
+
+        let prim_count = self.current_nodes.len();
+
+        // Merge nodes until there is only one left
+        let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
+
+        let scale = 1.0 / total_aabb.diagonal().as_dvec3();
+        let offset = -total_aabb.min.as_dvec3() * scale;
+
+        let mortons_size = match sort_precision {
+            SortPrecision::U128 => prim_count,
+            SortPrecision::U64 => prim_count.div_ceil(2),
+        };
+        self.mortons.resize(mortons_size, Default::default());
+        self.next_nodes.resize(prim_count, Default::default());
+
+        // Sort primitives according to their morton code
+        sort_precision.sort_nodes(
+            &mut self.current_nodes,
+            &mut self.next_nodes,
+            &mut self.mortons,
+            scale,
+            offset,
+        );
+        mem::swap(&mut self.current_nodes, &mut self.next_nodes);
+
+        bvh.nodes.resize(nodes_count, Bvh2Node::default());
+
+        let mut insert_index = nodes_count;
+        assert!(i8::MAX as usize > SEARCH_DISTANCE);
+        self.merge.resize(prim_count, 0);
+        self.next_nodes.clear();
+
+        #[cfg(not(feature = "parallel"))]
+        let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
+
+        let mut depth: usize = 0;
+        while self.current_nodes.len() > 1 {
+            if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
+                // TODO try making build_ploc_from_leaves_one that embeds this logic into
+                // the main `while index < merge.len() {` loop  (may not be faster, tbd)
+                let count = self.current_nodes.len() - 1;
+
+                let mut last_cost = f32::MAX;
+                let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
+                    let cost = self.current_nodes[i]
+                        .aabb
+                        .union(&self.current_nodes[i + 1].aabb)
+                        .half_area();
+                    *merge_n = if last_cost < cost { -1 } else { 1 };
+                    last_cost = cost;
                 };
 
-                // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
-                // 300k chosen from testing various scenes in tray racing
-                if count < 300_000 {
-                    merge[..count]
+                #[cfg(feature = "parallel")]
+                {
+                    let chunk_size = self.merge[..count]
+                        .len()
+                        .div_ceil(rayon::current_num_threads());
+                    let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
+                        let start = chunk_id * chunk_size;
+                        let mut last_cost = if start == 0 {
+                            f32::MAX
+                        } else {
+                            self.current_nodes[start - 1]
+                                .aabb
+                                .union(&self.current_nodes[start].aabb)
+                                .half_area()
+                        };
+                        for (local_n, merge_n) in chunk.iter_mut().enumerate() {
+                            let i = local_n + start;
+                            let cost = self.current_nodes[i]
+                                .aabb
+                                .union(&self.current_nodes[i + 1].aabb)
+                                .half_area();
+                            *merge_n = if last_cost < cost { -1 } else { 1 };
+                            last_cost = cost;
+                        }
+                    };
+
+                    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
+                    // 300k chosen from testing various scenes in tray racing
+                    if count < 300_000 {
+                        self.merge[..count]
+                            .iter_mut()
+                            .enumerate()
+                            .for_each(calculate_costs);
+                    } else {
+                        self.merge[..count]
+                            .par_chunks_mut(chunk_size.max(1))
+                            .enumerate()
+                            .for_each(calculate_costs_parallel)
+                    }
+                }
+                #[cfg(not(feature = "parallel"))]
+                {
+                    self.merge[..count]
                         .iter_mut()
                         .enumerate()
                         .for_each(calculate_costs);
+                }
+                self.merge[self.current_nodes.len() - 1] = -1;
+            } else {
+                #[cfg(feature = "parallel")]
+                let iter = self.merge.par_iter_mut();
+                #[cfg(not(feature = "parallel"))]
+                let iter = self.merge.iter_mut();
+                iter.enumerate()
+                    .take(self.current_nodes.len())
+                    .for_each(|(index, best)| {
+                        #[cfg(feature = "parallel")]
+                        {
+                            *best =
+                                find_best_node_basic(index, &self.current_nodes, SEARCH_DISTANCE);
+                        }
+                        #[cfg(not(feature = "parallel"))]
+                        {
+                            *best = cache.find_best_node(index, &self.current_nodes);
+                        }
+                    });
+            };
+
+            self.merge.resize(self.current_nodes.len(), 0);
+
+            let mut index = 0;
+            // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
+            // https://github.com/DGriffin91/pool_racing/commit/a35b92496a1c28043b11565ee48dff0137ada68f
+            while index < self.current_nodes.len() {
+                let index_offset = self.merge[index] as i64;
+                let best_index = (index as i64 + index_offset) as usize;
+                // The two nodes should be merged if they agree on their respective merge indices.
+                if best_index as i64 + self.merge[best_index] as i64 != index as i64 {
+                    // If not, the current node should be kept for the next iteration
+                    self.next_nodes.push(self.current_nodes[index]);
+                    index += 1;
+                    continue;
+                }
+
+                // Since we only need to merge once, we only merge if the first index is less than the second.
+                if best_index > index {
+                    index += 1;
+                    continue;
+                }
+
+                debug_assert_ne!(best_index, index);
+
+                let left = self.current_nodes[index];
+                let right = self.current_nodes[best_index];
+
+                // Reserve space in the target array for the two children
+                debug_assert!(insert_index >= 2);
+                insert_index -= 2;
+
+                // Create the parent node and place it in the array for the next iteration
+                self.next_nodes.push(Bvh2Node::new(
+                    left.aabb.union(&right.aabb),
+                    0,
+                    insert_index as u32,
+                ));
+
+                // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
+                bvh.nodes[insert_index] = left;
+                bvh.nodes[insert_index + 1] = right;
+
+                if SEARCH_DISTANCE == 1 && index_offset == 1 {
+                    // If the search distance is only 1, and the next index was merged with this one,
+                    // we can skip the next index.
+                    // The code for this with the while loop seemed to also be slightly faster than:
+                    //     for (index, best_index) in merge.iter().enumerate() {
+                    // even in the other cases. For some reason...
+                    index += 2;
                 } else {
-                    merge[..count]
-                        .par_chunks_mut(chunk_size.max(1))
-                        .enumerate()
-                        .for_each(calculate_costs_parallel)
+                    index += 1;
                 }
             }
-            #[cfg(not(feature = "parallel"))]
-            {
-                merge[..count]
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(calculate_costs);
-            }
-            merge[current_nodes.len() - 1] = -1;
-        } else {
-            #[cfg(feature = "parallel")]
-            let iter = merge.par_iter_mut();
-            #[cfg(not(feature = "parallel"))]
-            let iter = merge.iter_mut();
-            iter.enumerate()
-                .take(current_nodes.len())
-                .for_each(|(index, best)| {
-                    #[cfg(feature = "parallel")]
-                    {
-                        *best = find_best_node_basic(index, &current_nodes, SEARCH_DISTANCE);
-                    }
-                    #[cfg(not(feature = "parallel"))]
-                    {
-                        *best = cache.find_best_node(index, &current_nodes);
-                    }
-                });
-        };
 
-        merge.resize(current_nodes.len(), 0);
-
-        let mut index = 0;
-        // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
-        // https://github.com/DGriffin91/pool_racing/commit/a35b92496a1c28043b11565ee48dff0137ada68f
-        while index < current_nodes.len() {
-            let index_offset = merge[index] as i64;
-            let best_index = (index as i64 + index_offset) as usize;
-            // The two nodes should be merged if they agree on their respective merge indices.
-            if best_index as i64 + merge[best_index] as i64 != index as i64 {
-                // If not, the current node should be kept for the next iteration
-                next_nodes.push(current_nodes[index]);
-                index += 1;
-                continue;
-            }
-
-            // Since we only need to merge once, we only merge if the first index is less than the second.
-            if best_index > index {
-                index += 1;
-                continue;
-            }
-
-            debug_assert_ne!(best_index, index);
-
-            let left = current_nodes[index];
-            let right = current_nodes[best_index];
-
-            // Reserve space in the target array for the two children
-            debug_assert!(insert_index >= 2);
-            insert_index -= 2;
-
-            // Create the parent node and place it in the array for the next iteration
-            next_nodes.push(Bvh2Node::new(
-                left.aabb.union(&right.aabb),
-                0,
-                insert_index as u32,
-            ));
-
-            // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
-            bvh.nodes[insert_index] = left;
-            bvh.nodes[insert_index + 1] = right;
-
-            if SEARCH_DISTANCE == 1 && index_offset == 1 {
-                // If the search distance is only 1, and the next index was merged with this one,
-                // we can skip the next index.
-                // The code for this with the while loop seemed to also be slightly faster than:
-                //     for (index, best_index) in merge.iter().enumerate() {
-                // even in the other cases. For some reason...
-                index += 2;
-            } else {
-                index += 1;
-            }
+            mem::swap(&mut self.next_nodes, &mut self.current_nodes);
+            self.next_nodes.clear();
+            depth += 1;
         }
 
-        (next_nodes, current_nodes) = (current_nodes, next_nodes);
-        next_nodes.clear();
-        depth += 1;
+        insert_index = insert_index.saturating_sub(1);
+        bvh.nodes[insert_index] = self.current_nodes[0];
+
+        bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth + 1);
+        bvh.children_are_ordered_after_parents = true;
     }
-
-    insert_index = insert_index.saturating_sub(1);
-    bvh.nodes[insert_index] = current_nodes[0];
-
-    bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth + 1);
-    bvh.children_are_ordered_after_parents = true;
 }
 
 #[cfg(feature = "parallel")]
@@ -462,18 +564,34 @@ pub enum SortPrecision {
 }
 
 impl SortPrecision {
-    fn sort_nodes(&self, current_nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+    fn sort_nodes(
+        &self,
+        nodes: &mut [Bvh2Node],
+        sorted_nodes: &mut [Bvh2Node],
+        mortons_allocation: &mut [[u128; 2]],
+        scale: DVec3,
+        offset: DVec3,
+    ) {
         match self {
-            SortPrecision::U128 => sort_nodes_by_morton::<Morton128>(current_nodes, scale, offset),
-            SortPrecision::U64 => sort_nodes_by_morton::<Morton64>(current_nodes, scale, offset),
+            SortPrecision::U128 => {
+                let mortons = cast_slice_mut(mortons_allocation);
+                sort_nodes_by_morton::<Morton128>(nodes, sorted_nodes, mortons, scale, offset)
+            }
+            SortPrecision::U64 => {
+                let smaller: &mut [u128] = cast_slice_mut(mortons_allocation);
+                let mortons = cast_slice_mut(&mut smaller[..nodes.len()]);
+                sort_nodes_by_morton::<Morton64>(nodes, sorted_nodes, mortons, scale, offset)
+            }
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
 struct Morton128 {
-    index: usize,
     code: u128,
+    index: u64,
+    padding: u64,
 }
 
 impl RadixKey for Morton128 {
@@ -485,10 +603,11 @@ impl RadixKey for Morton128 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
 struct Morton64 {
-    index: usize,
     code: u64,
+    index: u64,
 }
 
 impl RadixKey for Morton64 {
@@ -509,13 +628,14 @@ impl MortonCode for Morton128 {
     #[inline(always)]
     fn new(index: usize, center: DVec3) -> Self {
         Morton128 {
-            index,
+            index: index as u64,
             code: morton_encode_u128_unorm(center),
+            padding: Default::default(),
         }
     }
     #[inline(always)]
     fn index(&self) -> usize {
-        self.index
+        self.index as usize
     }
 }
 
@@ -523,55 +643,74 @@ impl MortonCode for Morton64 {
     #[inline(always)]
     fn new(index: usize, center: DVec3) -> Self {
         Morton64 {
-            index,
+            index: index as u64,
             code: morton_encode_u64_unorm(center),
         }
     }
     #[inline(always)]
     fn index(&self) -> usize {
-        self.index
+        self.index as usize
     }
 }
 
-fn sort_nodes_by_morton<M: MortonCode>(nodes: &mut Vec<Bvh2Node>, scale: DVec3, offset: DVec3) {
+fn sort_nodes_by_morton<M: MortonCode>(
+    nodes: &mut [Bvh2Node],
+    sorted_nodes: &mut [Bvh2Node],
+    mortons: &mut [M],
+    scale: DVec3,
+    offset: DVec3,
+) {
     crate::scope!("sort_nodes");
     #[cfg(feature = "parallel")]
     let nodes_count = nodes.len();
 
-    let mut indexed_mortons: Vec<M> = {
-        let gen_mort = |(index, leaf): (usize, &Bvh2Node)| {
-            let center = leaf.aabb.center().as_dvec3() * scale + offset;
-            M::new(index, center)
-        };
-
-        #[cfg(feature = "parallel")]
-        {
-            let min_parallel = 100_000;
-            if nodes_count > min_parallel {
-                nodes.par_iter().enumerate().map(gen_mort).collect()
-            } else {
-                nodes.iter().enumerate().map(gen_mort).collect()
-            }
-        }
-        #[cfg(not(feature = "parallel"))]
-        nodes.iter().enumerate().map(gen_mort).collect()
+    let gen_mort = |(index, (morton, leaf)): (usize, (&mut M, &Bvh2Node))| {
+        let center = leaf.aabb.center().as_dvec3() * scale + offset;
+        *morton = M::new(index, center);
     };
-
-    indexed_mortons.radix_sort_unstable();
-
-    let remap = |m: &M| nodes[m.index()];
 
     #[cfg(feature = "parallel")]
     {
         let min_parallel = 100_000;
-        *nodes = if nodes_count > min_parallel {
-            indexed_mortons.par_iter().map(remap).collect()
+        if nodes_count > min_parallel {
+            mortons
+                .par_iter_mut()
+                .zip(nodes.par_iter())
+                .enumerate()
+                .for_each(gen_mort);
         } else {
-            indexed_mortons.iter().map(remap).collect()
+            mortons
+                .iter_mut()
+                .zip(nodes.iter())
+                .enumerate()
+                .for_each(gen_mort);
+        }
+    }
+    #[cfg(not(feature = "parallel"))]
+    mortons
+        .iter_mut()
+        .zip(nodes.iter())
+        .enumerate()
+        .for_each(gen_mort);
+
+    mortons.radix_sort_unstable();
+
+    let remap = |(n, m): (&mut Bvh2Node, &M)| *n = nodes[m.index()];
+
+    #[cfg(feature = "parallel")]
+    {
+        let min_parallel = 100_000;
+        if nodes_count > min_parallel {
+            sorted_nodes
+                .par_iter_mut()
+                .zip(mortons.par_iter())
+                .for_each(remap)
+        } else {
+            sorted_nodes.iter_mut().zip(mortons.iter()).for_each(remap)
         }
     }
     #[cfg(not(feature = "parallel"))]
     {
-        *nodes = indexed_mortons.iter().map(remap).collect()
+        sorted_nodes.iter_mut().zip(mortons.iter()).for_each(remap);
     }
 }

@@ -12,6 +12,7 @@ mod tests {
             bvh2_to_cwbvh::bvh2_to_cwbvh,
         },
         heapstack::HeapStack,
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         ray::{Ray, RayHit},
         test_util::{
             geometry::{demoscene, height_to_triangles, icosphere},
@@ -310,7 +311,8 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2 = PlocBuilder::new().build(
+            config.ploc_search_distance,
             &aabbs,
             indices,
             config.sort_precision,
@@ -345,7 +347,8 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2 = PlocBuilder::new().build(
+            config.ploc_search_distance,
             &aabbs,
             indices,
             config.sort_precision,
@@ -381,5 +384,56 @@ mod tests {
         cwbvh.validate(&tris, false);
         cwbvh.order_children(&aabbs, false);
         cwbvh.validate(&tris, false);
+    }
+
+    #[test]
+    pub fn reuse_allocs() {
+        fn aabbs_and_indices(tris: &Vec<Triangle>) -> (Vec<Aabb>, Vec<u32>) {
+            let mut aabbs = Vec::with_capacity(tris.len());
+            let mut indices = Vec::with_capacity(tris.len());
+            let mut largest_half_area = 0.0;
+
+            for (i, tri) in tris.iter().enumerate() {
+                let a = tri.v0;
+                let b = tri.v1;
+                let c = tri.v2;
+                let mut aabb = Aabb::empty();
+                aabb.extend(a).extend(b).extend(c);
+                let half_area = aabb.half_area();
+                largest_half_area = half_area.max(largest_half_area);
+                aabbs.push(aabb);
+                indices.push(i as u32);
+            }
+            (aabbs, indices)
+        }
+
+        let tris = demoscene(201, 0);
+        let (aabbs, indices) = aabbs_and_indices(&tris);
+
+        let mut builder = PlocBuilder::with_capacity(aabbs.len());
+
+        let mut bvh2 = builder.build(
+            PlocSearchDistance::default(),
+            &aabbs,
+            indices,
+            SortPrecision::U64,
+            0,
+        );
+
+        bvh2.validate(&tris, false, true);
+
+        let tris = demoscene(201, 0);
+        let (aabbs, indices) = aabbs_and_indices(&tris);
+
+        builder.build_with_bvh(
+            &mut bvh2,
+            PlocSearchDistance::default(),
+            &aabbs,
+            indices,
+            SortPrecision::U64,
+            0,
+        );
+
+        bvh2.validate(&tris, false, true);
     }
 }

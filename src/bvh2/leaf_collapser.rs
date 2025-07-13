@@ -378,7 +378,7 @@ fn as_slice_of_sometimes_atomic_u32(slice: &mut [u32]) -> &mut [SometimesAtomicU
 mod tests {
 
     use crate::{
-        ploc::{PlocSearchDistance, SortPrecision},
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
     };
 
@@ -395,15 +395,26 @@ mod tests {
         }
         {
             // Test without init_primitives_to_nodes & init_parents
-            let mut bvh =
-                PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices.clone(),
+                SortPrecision::U64,
+                1,
+            );
             bvh.validate(&tris, false, false);
             collapse(&mut bvh, 8, 1.0);
             bvh.validate(&tris, false, false);
         }
         {
             // Test with init_primitives_to_nodes & init_parents
-            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices,
+                SortPrecision::U64,
+                1,
+            );
             bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes_if_uninit();
             bvh.init_parents_if_uninit();

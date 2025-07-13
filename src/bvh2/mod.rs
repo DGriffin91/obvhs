@@ -7,6 +7,7 @@ pub mod leaf_collapser;
 pub mod node;
 pub mod reinsertion;
 
+use bytemuck::zeroed_vec;
 use node::Bvh2Node;
 
 use std::{
@@ -98,6 +99,38 @@ impl Default for Bvh2 {
 }
 
 impl Bvh2 {
+    /// Reset BVH while keeping allocations for rebuild. Note: results in an invalid bvh until rebuilt.
+    pub fn reset_for_reuse(&mut self, prim_count: usize, indices: Option<Vec<u32>>) {
+        let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
+        self.nodes.resize(nodes_count, Default::default());
+        if let Some(indices) = indices {
+            self.primitive_indices = indices;
+        } else {
+            self.primitive_indices
+                .resize(prim_count, Default::default());
+        }
+        self.primitive_indices_freelist.clear();
+        self.primitives_to_nodes.clear();
+        self.parents.clear();
+        self.children_are_ordered_after_parents = Default::default();
+        self.max_depth = DEFAULT_MAX_STACK_DEPTH;
+        self.uses_spatial_splits = Default::default();
+    }
+
+    pub fn zeroed(prim_count: usize) -> Self {
+        let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
+        Self {
+            nodes: zeroed_vec(nodes_count),
+            primitive_indices: zeroed_vec(prim_count),
+            primitive_indices_freelist: Default::default(),
+            primitives_to_nodes: Default::default(),
+            parents: Default::default(),
+            children_are_ordered_after_parents: Default::default(),
+            max_depth: DEFAULT_MAX_STACK_DEPTH,
+            uses_spatial_splits: Default::default(),
+        }
+    }
+
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         let mut stack = HeapStack::new_with_capacity(self.max_depth);
@@ -842,7 +875,7 @@ mod tests {
 
     use crate::{
         heapstack::HeapStack,
-        ploc::{PlocSearchDistance, SortPrecision},
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
         BvhBuildParams, Transformable,
     };
@@ -860,8 +893,13 @@ mod tests {
         }
 
         // Test without init_primitives_to_nodes & init_parents
-        let mut bvh =
-            PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+        let mut bvh = PlocBuilder::new().build(
+            PlocSearchDistance::VeryLow,
+            &aabbs,
+            indices.clone(),
+            SortPrecision::U64,
+            1,
+        );
 
         bvh.init_primitives_to_nodes_if_uninit();
         tris.transform(&Mat4::from_scale_rotation_translation(

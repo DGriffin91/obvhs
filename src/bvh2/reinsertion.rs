@@ -418,7 +418,7 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
 mod tests {
 
     use crate::{
-        ploc::{PlocSearchDistance, SortPrecision},
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
     };
 
@@ -435,8 +435,13 @@ mod tests {
         }
         {
             // Test without init_primitives_to_nodes & init_parents
-            let mut bvh =
-                PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices.clone(),
+                SortPrecision::U64,
+                1,
+            );
             bvh.validate(&tris, false, false);
             ReinsertionOptimizer::default().run(&mut bvh, 0.25, None);
             bvh.validate(&tris, false, false);
@@ -446,7 +451,13 @@ mod tests {
         }
         {
             // Test with init_primitives_to_nodes & init_parents
-            let mut bvh = PlocSearchDistance::VeryLow.build(&aabbs, indices, SortPrecision::U64, 1);
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices,
+                SortPrecision::U64,
+                1,
+            );
             bvh.validate(&tris, false, false);
             bvh.init_primitives_to_nodes_if_uninit();
             bvh.init_parents_if_uninit();

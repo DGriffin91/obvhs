@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    aabb::Aabb, splits::split_aabbs_preset, triangle::Triangle, Boundable, BvhBuildParams,
+    aabb::Aabb, ploc::PlocBuilder, splits::split_aabbs_preset, triangle::Triangle, Boundable,
+    BvhBuildParams,
 };
 
 use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
@@ -50,7 +51,8 @@ pub fn build_bvh2_from_tris(
         );
     }
 
-    let mut bvh2 = config.ploc_search_distance.build(
+    let mut bvh2 = PlocBuilder::with_capacity(aabbs.len()).build(
+        config.ploc_search_distance,
         &aabbs,
         indices,
         config.sort_precision,
@@ -105,7 +107,8 @@ pub fn build_bvh2<T: Boundable>(
 
     let start_time = Instant::now();
 
-    let mut bvh2 = config.ploc_search_distance.build(
+    let mut bvh2 = PlocBuilder::with_capacity(aabbs.len()).build(
+        config.ploc_search_distance,
         &aabbs,
         indices,
         config.sort_precision,
