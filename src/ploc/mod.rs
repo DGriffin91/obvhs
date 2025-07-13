@@ -67,7 +67,7 @@ impl PlocBuilder {
             mortons: zeroed_vec(prim_count),
 
             #[cfg(feature = "parallel")]
-            local_aabbs: zeroed_vec(rayon::current_num_threads()),
+            local_aabbs: zeroed_vec(128),
         }
     }
 
@@ -277,7 +277,6 @@ impl PlocBuilder {
             offset,
         );
         mem::swap(&mut self.current_nodes, &mut self.next_nodes);
-        self.next_nodes.clear();
 
         let mut insert_index = nodes_count;
         assert!(i8::MAX as usize > SEARCH_DISTANCE);
@@ -288,8 +287,9 @@ impl PlocBuilder {
         let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
 
         let mut depth: usize = 0;
-        while self.current_nodes.len() > 1 {
-            let count = self.current_nodes.len() - 1;
+        let mut next_nodes_idx = 0;
+        let mut count = self.current_nodes.len();
+        while count > 1 {
             if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
                 let mut last_cost = f32::MAX;
                 let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
@@ -301,9 +301,13 @@ impl PlocBuilder {
                     last_cost = cost;
                 };
 
+                let count_m1 = count - 1;
+
                 #[cfg(feature = "parallel")]
                 {
-                    let chunk_size = merge[..count].len().div_ceil(rayon::current_num_threads());
+                    let chunk_size = merge[..count_m1]
+                        .len()
+                        .div_ceil(rayon::current_num_threads());
                     let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
                         let start = chunk_id * chunk_size;
                         let mut last_cost = if start == 0 {
@@ -328,12 +332,12 @@ impl PlocBuilder {
                     // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
                     // 300k chosen from testing various scenes in tray racing
                     if count < 300_000 {
-                        merge[..count]
+                        merge[..count_m1]
                             .iter_mut()
                             .enumerate()
                             .for_each(calculate_costs);
                     } else {
-                        merge[..count]
+                        merge[..count_m1]
                             .par_chunks_mut(chunk_size.max(1))
                             .enumerate()
                             .for_each(calculate_costs_parallel)
@@ -341,42 +345,43 @@ impl PlocBuilder {
                 }
                 #[cfg(not(feature = "parallel"))]
                 {
-                    merge[..count]
+                    merge[..count_m1]
                         .iter_mut()
                         .enumerate()
                         .for_each(calculate_costs);
                 }
-                merge[self.current_nodes.len() - 1] = -1;
+                merge[count_m1] = -1;
             } else {
                 #[cfg(feature = "parallel")]
                 let iter = merge.par_iter_mut();
                 #[cfg(not(feature = "parallel"))]
                 let iter = merge.iter_mut();
-                iter.enumerate()
-                    .take(self.current_nodes.len())
-                    .for_each(|(index, best)| {
-                        #[cfg(feature = "parallel")]
-                        {
-                            *best =
-                                find_best_node_basic(index, &self.current_nodes, SEARCH_DISTANCE);
-                        }
-                        #[cfg(not(feature = "parallel"))]
-                        {
-                            *best = cache.find_best_node(index, &self.current_nodes);
-                        }
-                    });
+                iter.enumerate().take(count).for_each(|(index, best)| {
+                    #[cfg(feature = "parallel")]
+                    {
+                        *best = find_best_node_basic(
+                            index,
+                            &self.current_nodes[0..count],
+                            SEARCH_DISTANCE,
+                        );
+                    }
+                    #[cfg(not(feature = "parallel"))]
+                    {
+                        *best = cache.find_best_node(index, &self.current_nodes[0..count]);
+                    }
+                });
             };
-
             let mut index = 0;
             // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
             // https://github.com/DGriffin91/pool_racing/commit/a35b92496a1c28043b11565ee48dff0137ada68f
-            while index < self.current_nodes.len() {
+            while index < count {
                 let index_offset = merge[index] as i64;
                 let best_index = (index as i64 + index_offset) as usize;
                 // The two nodes should be merged if they agree on their respective merge indices.
                 if best_index as i64 + merge[best_index] as i64 != index as i64 {
                     // If not, the current node should be kept for the next iteration
-                    self.next_nodes.push(self.current_nodes[index]);
+                    self.next_nodes[next_nodes_idx] = self.current_nodes[index];
+                    next_nodes_idx += 1;
                     index += 1;
                     continue;
                 }
@@ -397,11 +402,9 @@ impl PlocBuilder {
                 insert_index -= 2;
 
                 // Create the parent node and place it in the array for the next iteration
-                self.next_nodes.push(Bvh2Node::new(
-                    left.aabb.union(&right.aabb),
-                    0,
-                    insert_index as u32,
-                ));
+                self.next_nodes[next_nodes_idx] =
+                    Bvh2Node::new(left.aabb.union(&right.aabb), 0, insert_index as u32);
+                next_nodes_idx += 1;
 
                 // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
                 bvh.nodes[insert_index] = left;
@@ -420,7 +423,8 @@ impl PlocBuilder {
             }
 
             mem::swap(&mut self.next_nodes, &mut self.current_nodes);
-            self.next_nodes.clear();
+            count = next_nodes_idx;
+            next_nodes_idx = 0;
             depth += 1;
         }
 
