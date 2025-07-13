@@ -286,6 +286,16 @@ impl PlocBuilder {
         #[cfg(not(feature = "parallel"))]
         let mut cache = SearchCache::<SEARCH_DISTANCE>::default();
 
+        #[cfg(feature = "parallel")]
+        let threads = rayon::current_num_threads();
+
+        #[cfg(feature = "parallel")]
+        let mut cache = if prim_count < 4000 {
+            vec![SearchCache::<SEARCH_DISTANCE>::default()]
+        } else {
+            vec![SearchCache::<SEARCH_DISTANCE>::default(); threads * 4]
+        };
+
         let mut depth: usize = 0;
         let mut next_nodes_idx = 0;
         let mut count = prim_count;
@@ -307,7 +317,7 @@ impl PlocBuilder {
 
                 #[cfg(feature = "parallel")]
                 {
-                    let chunk_size = merge_m1.len().div_ceil(rayon::current_num_threads());
+                    let chunk_size = merge_m1.len().div_ceil(threads);
                     let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
                         let start = chunk_id * chunk_size;
                         let mut last_cost = if start == 0 {
@@ -346,24 +356,41 @@ impl PlocBuilder {
                 }
                 merge[count_m1] = -1;
             } else {
-                #[cfg(feature = "parallel")]
-                let iter = merge.par_iter_mut();
                 #[cfg(not(feature = "parallel"))]
-                let iter = merge.iter_mut();
-                iter.enumerate().take(count).for_each(|(index, best)| {
-                    #[cfg(feature = "parallel")]
-                    {
-                        *best = find_best_node_basic(
-                            index,
-                            &self.current_nodes[0..count],
-                            SEARCH_DISTANCE,
+                merge.iter_mut().enumerate().for_each(|(index, best)| {
+                    *best = cache.find_best_node(index, &self.current_nodes[..count]);
+                });
+
+                #[cfg(feature = "parallel")]
+                {
+                    // TODO perf/forte Due to rayon overhead using par_iter can be slower than just iter for small quantities.
+                    // 4k chosen from testing with demoscene
+                    if count < 4000 {
+                        let cache = &mut cache[0];
+                        merge.iter_mut().enumerate().for_each(|(index, best)| {
+                            *best = cache.find_best_node(index, &self.current_nodes[..count]);
+                        });
+                    } else {
+                        // Split search into chunks in parallel
+                        let chunk_size = merge.len().div_ceil(cache.len());
+                        let chunks = merge.par_chunks_mut(merge.len().div_ceil(cache.len()));
+                        if chunks.len() > cache.len() {
+                            cache.resize(chunks.len(), SearchCache::<SEARCH_DISTANCE>::default());
+                        }
+                        chunks.zip(cache.par_iter_mut()).enumerate().for_each(
+                            |(chunk, (bests, cache))| {
+                                for (i, best) in bests.iter_mut().enumerate() {
+                                    let index = chunk * chunk_size + i;
+                                    *best = cache.find_best_node_parallel(
+                                        index,
+                                        i,
+                                        &self.current_nodes[..count],
+                                    );
+                                }
+                            },
                         );
                     }
-                    #[cfg(not(feature = "parallel"))]
-                    {
-                        *best = cache.find_best_node(index, &self.current_nodes[..count]);
-                    }
-                });
+                }
             };
             let mut index = 0;
             // Tried making this parallel but it was similar perf as the sequential version below. Could be memory bound?
@@ -430,7 +457,8 @@ impl PlocBuilder {
     }
 }
 
-#[cfg(feature = "parallel")]
+// For reference/testing
+#[allow(dead_code)]
 fn find_best_node_basic(index: usize, nodes: &[Bvh2Node], search_distance: usize) -> i8 {
     let mut best_node = index;
     let mut best_cost = f32::INFINITY;
@@ -489,6 +517,7 @@ impl From<u32> for PlocSearchDistance {
 
 // Tried using a Vec it was ~30% slower with a search distance of 14.
 // Tried making the Vec flat, used get_unchecked, etc... (without those it was ~80% slower)
+#[derive(Clone, Copy)]
 pub struct SearchCache<const SEARCH_DISTANCE: usize>([[f32; SEARCH_DISTANCE]; SEARCH_DISTANCE]);
 
 impl<const SEARCH_DISTANCE: usize> Default for SearchCache<SEARCH_DISTANCE> {
@@ -499,19 +528,53 @@ impl<const SEARCH_DISTANCE: usize> Default for SearchCache<SEARCH_DISTANCE> {
 
 impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
     #[inline]
-    #[cfg(not(feature = "parallel"))]
     fn back(&self, index: usize, other: usize) -> f32 {
         // Note: the compiler removes the bounds check due to the % SEARCH_DISTANCE
         self.0[other % SEARCH_DISTANCE][index % SEARCH_DISTANCE]
     }
 
     #[inline]
-    #[cfg(not(feature = "parallel"))]
     fn front(&mut self, index: usize, other: usize) -> &mut f32 {
         &mut self.0[index % SEARCH_DISTANCE][other % SEARCH_DISTANCE]
     }
 
-    #[cfg(not(feature = "parallel"))]
+    #[allow(dead_code)]
+    fn find_best_node_parallel(&mut self, index: usize, i: usize, nodes: &[Bvh2Node]) -> i8 {
+        let mut best_node = index;
+        let mut best_cost = f32::INFINITY;
+
+        let begin = index - SEARCH_DISTANCE.min(index);
+        let end = (index + SEARCH_DISTANCE + 1).min(nodes.len());
+
+        let our_aabb = nodes[index].aabb;
+        for other in begin..index {
+            // When using the cache in parallel, the search is broken into chunks. This means the first
+            // n = SEARCH_DISTANCE slots in the cache won't have been filled yet.
+            // (TODO this could be tighter, using more of the cache within the n = SEARCH_DISTANCE range as it's filled)
+            let area = if i <= SEARCH_DISTANCE {
+                our_aabb.union(&nodes[other].aabb).half_area()
+            } else {
+                self.back(index, other)
+            };
+
+            if area < best_cost {
+                best_node = other;
+                best_cost = area;
+            }
+        }
+
+        ((index + 1)..end).for_each(|other| {
+            let cost = our_aabb.union(&nodes[other].aabb).half_area();
+            *self.front(index, other) = cost;
+            if cost < best_cost {
+                best_node = other;
+                best_cost = cost;
+            }
+        });
+
+        (best_node as i64 - index as i64) as i8
+    }
+
     fn find_best_node(&mut self, index: usize, nodes: &[Bvh2Node]) -> i8 {
         let mut best_node = index;
         let mut best_cost = f32::INFINITY;
