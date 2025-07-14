@@ -165,6 +165,7 @@ impl Triangle {
 }
 
 impl Boundable for Triangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }

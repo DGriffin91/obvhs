@@ -210,7 +210,7 @@ impl Aabb {
 }
 
 impl Boundable for Aabb {
-    #[inline]
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         *self
     }

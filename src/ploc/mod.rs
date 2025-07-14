@@ -25,10 +25,10 @@ use rayon::{
 #[cfg(not(feature = "parallel"))]
 use rdst::RadixSort;
 
-use crate::bvh2::node::Bvh2Node;
 use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{aabb::Aabb, bvh2::Bvh2};
+use crate::{bvh2::node::Bvh2Node, Boundable};
 
 #[derive(Clone)]
 pub struct PlocBuilder {
@@ -88,10 +88,10 @@ impl PlocBuilder {
     ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
     ///   result in an overall better bvh structure.
     #[inline]
-    pub fn build(
+    pub fn build<T: Boundable>(
         &mut self,
         search_distance: PlocSearchDistance,
-        aabbs: &[Aabb],
+        aabbs: &[T],
         indices: Vec<u32>,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
@@ -122,33 +122,34 @@ impl PlocBuilder {
     ///   This pairs are initially found more quickly since it doesn't need to search as far, and they are also
     ///   found more often, since the nodes need to both agree to become paired. This also seems to occasionally
     ///   result in an overall better bvh structure.
-    pub fn build_with_bvh(
+    pub fn build_with_bvh<T: Boundable>(
         &mut self,
         bvh: &mut Bvh2,
         search_distance: PlocSearchDistance,
-        aabbs: &[Aabb],
+        aabbs: &[T],
         indices: Vec<u32>,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
     ) {
+        let search_thresh = search_depth_threshold;
         match search_distance {
             PlocSearchDistance::Minimum => {
-                self.build_ploc::<1>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<1, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
             PlocSearchDistance::VeryLow => {
-                self.build_ploc::<2>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<2, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
             PlocSearchDistance::Low => {
-                self.build_ploc::<6>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<6, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
             PlocSearchDistance::Medium => {
-                self.build_ploc::<14>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<14, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
             PlocSearchDistance::High => {
-                self.build_ploc::<24>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<24, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
             PlocSearchDistance::VeryHigh => {
-                self.build_ploc::<32>(bvh, aabbs, indices, sort_precision, search_depth_threshold)
+                self.build_ploc::<32, T>(bvh, aabbs, indices, sort_precision, search_thresh)
             }
         }
     }
@@ -162,10 +163,10 @@ impl PlocBuilder {
     ///   just use SEARCH_DISTANCE.
     ///
     /// SEARCH_DISTANCE should be <= 32
-    pub fn build_ploc<const SEARCH_DISTANCE: usize>(
+    pub fn build_ploc<const SEARCH_DISTANCE: usize, T: Boundable>(
         &mut self,
         bvh: &mut Bvh2,
-        aabbs: &[Aabb],
+        aabbs: &[T],
         indices: Vec<u32>,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
@@ -181,12 +182,12 @@ impl PlocBuilder {
         }
 
         #[inline]
-        fn init_node(prim_index: &u32, aabb: &Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
+        fn init_node(prim_index: &u32, aabb: Aabb, local_aabb: &mut Aabb) -> Bvh2Node {
             local_aabb.extend(aabb.min);
             local_aabb.extend(aabb.max);
             debug_assert!(!aabb.min.is_nan());
             debug_assert!(!aabb.max.is_nan());
-            Bvh2Node::new(*aabb, 1, *prim_index)
+            Bvh2Node::new(aabb, 1, *prim_index)
         }
 
         let mut total_aabb = None;
@@ -205,7 +206,7 @@ impl PlocBuilder {
                 .current_nodes
                 .par_iter_mut()
                 .zip(&bvh.primitive_indices)
-                .zip(aabbs)
+                .enumerate()
                 .chunks(chunk_size);
 
             self.local_aabbs.resize(chunks.len(), Aabb::empty());
@@ -213,8 +214,8 @@ impl PlocBuilder {
             chunks
                 .zip(self.local_aabbs.par_iter_mut())
                 .for_each(|(data, local_aabb)| {
-                    for ((node, prim_index), aabb) in data {
-                        *node = init_node(prim_index, aabb, local_aabb);
+                    for (i, (node, prim_index)) in data {
+                        *node = init_node(prim_index, aabbs[i].aabb(), local_aabb);
                     }
                 });
 
@@ -233,7 +234,7 @@ impl PlocBuilder {
                 .zip(&bvh.primitive_indices)
                 .zip(aabbs)
                 .for_each(|((node, prim_index), aabb)| {
-                    *node = init_node(prim_index, aabb, &mut total)
+                    *node = init_node(prim_index, aabb.aabb(), &mut total)
                 });
             total_aabb = Some(total);
         }

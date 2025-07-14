@@ -136,6 +136,7 @@ impl RtCompressedTriangle {
 }
 
 impl Boundable for RtCompressedTriangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }
@@ -320,6 +321,7 @@ impl RtTriangle {
 }
 
 impl Boundable for RtTriangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }

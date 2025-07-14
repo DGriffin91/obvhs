@@ -86,6 +86,13 @@ pub mod triangle;
 pub const INVALID: u32 = u32::MAX;
 
 /// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
+#[cfg(feature = "parallel")]
+pub trait Boundable: Send + Sync {
+    fn aabb(&self) -> Aabb;
+}
+
+/// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
+#[cfg(not(feature = "parallel"))]
 pub trait Boundable {
     fn aabb(&self) -> Aabb;
 }
