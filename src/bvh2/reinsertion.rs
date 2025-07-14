@@ -6,11 +6,10 @@
 // Note: Most asserts exist to try to elide bounds checks
 
 #[cfg(feature = "parallel")]
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
-#[cfg(feature = "parallel")]
-use std::cell::RefCell;
-#[cfg(feature = "parallel")]
-use thread_local::ThreadLocal;
+use rayon::{
+    iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 
 use rdst::{RadixKey, RadixSort};
 
@@ -26,7 +25,6 @@ use super::update_primitives_to_nodes_for_node;
 const REINSERTION_STACK_CAP: usize = 256;
 
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
-#[derive(Default)]
 pub struct ReinsertionOptimizer {
     candidates: Vec<Candidate>,
     reinsertions: Vec<Reinsertion>,
@@ -34,9 +32,29 @@ pub struct ReinsertionOptimizer {
     batch_size_ratio: f32,
     #[cfg(not(feature = "parallel"))]
     reinsertion_stack: HeapStack<(f32, u32)>,
-    // TODO replace ThreadLocal with per per_chunk stack (See parallel_prefix_sum())
     #[cfg(feature = "parallel")]
-    reinsertion_stack: ThreadLocal<RefCell<HeapStack<(f32, u32)>>>,
+    reinsertion_stack: Vec<HeapStack<(f32, u32)>>,
+}
+
+impl Default for ReinsertionOptimizer {
+    fn default() -> Self {
+        // TODO would this be better with a ThreadLocal? Seems like 32 are needed for small enough chunks to keep the
+        // CPU busy.
+        #[cfg(feature = "parallel")]
+        let reinsertion_stack = (0..rayon::current_num_threads() * 32)
+            .into_iter()
+            .map(|_| HeapStack::new_with_capacity(REINSERTION_STACK_CAP))
+            .collect();
+        #[cfg(not(feature = "parallel"))]
+        let reinsertion_stack = Default::default();
+        Self {
+            candidates: Default::default(),
+            reinsertions: Default::default(),
+            touched: Default::default(),
+            batch_size_ratio: Default::default(),
+            reinsertion_stack,
+        }
+    }
 }
 
 impl ReinsertionOptimizer {
@@ -69,8 +87,8 @@ impl ReinsertionOptimizer {
         }
         #[cfg(feature = "parallel")]
         for stack in self.reinsertion_stack.iter_mut() {
-            stack.get_mut().clear();
-            stack.get_mut().reserve(REINSERTION_STACK_CAP);
+            stack.clear();
+            stack.reserve(REINSERTION_STACK_CAP);
         }
         self.optimize_impl(bvh, ratio_sequence);
     }
@@ -112,8 +130,8 @@ impl ReinsertionOptimizer {
         }
         #[cfg(feature = "parallel")]
         for stack in self.reinsertion_stack.iter_mut() {
-            stack.get_mut().clear();
-            stack.get_mut().reserve(REINSERTION_STACK_CAP);
+            stack.clear();
+            stack.reserve(REINSERTION_STACK_CAP);
         }
 
         self.optimize_specific_candidates(bvh, iterations);
@@ -170,31 +188,33 @@ impl ReinsertionOptimizer {
 
     #[allow(unused_variables)]
     fn optimize_candidates(&mut self, bvh: &mut Bvh2, count: usize) {
-        self.reinsertions.clear();
         self.touched.fill(false);
 
         #[cfg(feature = "parallel")]
         {
-            let mut reinsertions_map = (0..count)
-                .into_par_iter()
-                .map(|i| {
-                    let stack = &mut {
-                        let mut stack = self.reinsertion_stack.get_or_default().borrow_mut();
-                        stack.reserve(REINSERTION_STACK_CAP);
-                        stack
-                    };
-
-                    find_reinsertion(bvh, self.candidates[i].node_id as usize, stack)
-                })
-                .collect::<Vec<_>>();
-            reinsertions_map.drain(..).for_each(|r| {
-                if r.area_diff > 0.0 {
-                    self.reinsertions.push(r)
-                }
-            });
+            self.reinsertions.resize(count, Default::default());
+            let chunk_count = self.reinsertion_stack.len();
+            let chunk_size = count.div_ceil(chunk_count);
+            let chunks = self
+                .reinsertions
+                .par_iter_mut()
+                .chunks(chunk_size)
+                .zip(self.reinsertion_stack.par_iter_mut());
+            assert!(chunks.len() <= chunk_count);
+            chunks
+                .enumerate()
+                .for_each(|(chunk, (mut reinsertions, mut stack))| {
+                    let start = chunk * chunk_size;
+                    for (n, reinsertion) in reinsertions.iter_mut().enumerate() {
+                        let i = start + n;
+                        **reinsertion =
+                            find_reinsertion(bvh, self.candidates[i].node_id as usize, &mut stack)
+                    }
+                });
         }
         #[cfg(not(feature = "parallel"))]
         {
+            self.reinsertions.clear();
             assert!(count <= self.candidates.len());
             (0..count).for_each(|i| {
                 let r = find_reinsertion(
@@ -208,12 +228,23 @@ impl ReinsertionOptimizer {
             });
         }
 
+        #[cfg(feature = "parallel")]
+        self.reinsertions
+            .par_sort_unstable_by(|a, b| b.area_diff.partial_cmp(&a.area_diff).unwrap());
+
+        #[cfg(not(feature = "parallel"))]
         self.reinsertions
             .sort_unstable_by(|a, b| b.area_diff.partial_cmp(&a.area_diff).unwrap());
 
         assert!(self.reinsertions.len() <= self.touched.len());
         (0..self.reinsertions.len()).for_each(|i| {
             let reinsertion = &self.reinsertions[i];
+
+            #[cfg(feature = "parallel")]
+            if reinsertion.area_diff <= 0.0 {
+                return;
+            }
+
             let conflicts = self.get_conflicts(bvh, reinsertion.from, reinsertion.to);
 
             if conflicts.iter().any(|&i| self.touched[i]) {

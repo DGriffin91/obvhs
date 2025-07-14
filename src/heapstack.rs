@@ -1,4 +1,5 @@
 //! A stack data structure implemented on the heap with adjustable capacity.
+use core::ops::{Deref, DerefMut};
 
 /// A stack data structure implemented on the heap with adjustable capacity.
 ///
@@ -7,6 +8,7 @@
 /// `HeapStack::new_with_capacity` and `HeapStack::reserve`.
 ///
 /// The elements must implement the `Clone` and `Default` traits.
+#[derive(Clone)]
 pub struct HeapStack<T: Clone + Default> {
     data: Vec<T>,
     index: usize,
@@ -129,6 +131,20 @@ impl<T: Clone + Default> HeapStack<T> {
             return;
         }
         self.data.resize(cap, Default::default());
+    }
+}
+
+impl<T: Clone + Default> Deref for HeapStack<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.data[..self.index]
+    }
+}
+
+impl<T: Clone + Default> DerefMut for HeapStack<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data[..self.index]
     }
 }
 
