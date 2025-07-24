@@ -228,18 +228,23 @@ impl Bvh2 {
     }
 
     /// Recursively traverse the bvh for a given `Ray`.
-    /// On completion, `indices` will contain a list of the intersected leaf nodes.
+    /// On completion, `leaf_indices` will contain a list of the intersected leaf node indices.
     /// This method is slower than stack traversal and only exists as a reference.
     /// This method does not check if the primitive was intersected, only the leaf node.
-    pub fn ray_traverse_recursive(&self, ray: &Ray, node_index: usize, indices: &mut Vec<usize>) {
+    pub fn ray_traverse_recursive(
+        &self,
+        ray: &Ray,
+        node_index: usize,
+        leaf_indices: &mut Vec<usize>,
+    ) {
         let node = &self.nodes[node_index];
-
-        if node.is_leaf() {
-            let primitive_id = node.first_index as usize;
-            indices.push(primitive_id);
-        } else if node.aabb.intersect_ray(ray) < f32::INFINITY {
-            self.ray_traverse_recursive(ray, node.first_index as usize, indices);
-            self.ray_traverse_recursive(ray, node.first_index as usize + 1, indices);
+        if node.aabb.intersect_ray(ray) < f32::INFINITY {
+            if node.is_leaf() {
+                leaf_indices.push(node_index);
+            } else {
+                self.ray_traverse_recursive(ray, node.first_index as usize, leaf_indices);
+                self.ray_traverse_recursive(ray, node.first_index as usize + 1, leaf_indices);
+            }
         }
     }
 
