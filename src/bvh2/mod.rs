@@ -318,6 +318,28 @@ impl Bvh2 {
     /// Refits the whole BVH from the leaves up. If the leaves have moved very much the BVH can quickly become
     /// degenerate causing significantly higher traversal times. Consider rebuilding the BVH from scratch or running a
     /// bit of reinsertion after refit.
+    /// Usage:
+    /// ```
+    ///    use glam::*;
+    ///    use obvhs::*;
+    ///    use obvhs::{ploc::*, test_util::geometry::demoscene, bvh2::builder::build_bvh2_from_tris};
+    ///    use std::time::Duration;
+    ///
+    ///    let mut tris = demoscene(32, 0);
+    ///    let mut bvh = build_bvh2_from_tris(&tris, BvhBuildParams::fastest_build(), &mut Duration::default());
+    ///
+    ///    bvh.init_primitives_to_nodes_if_uninit(); // Generate mapping from primitives to nodes
+    ///    tris.transform(&Mat4::from_scale_rotation_translation(
+    ///        Vec3::splat(1.3),
+    ///        Quat::from_rotation_y(0.1),
+    ///        vec3(0.33, 0.3, 0.37),
+    ///    ));
+    ///    for (prim_id, tri) in tris.iter().enumerate() {
+    ///        bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].aabb = tri.aabb(); // Update aabbs
+    ///    }
+    ///    bvh.refit_all(); // Refit aabbs
+    ///    bvh.validate(&tris, false, true); // Validate that aabbs are now fitting tightly
+    /// ```
     pub fn refit_all(&mut self) {
         if self.children_are_ordered_after_parents {
             // If children are already ordered after parents we can update in a single sweep.
@@ -547,7 +569,10 @@ impl Bvh2 {
         self.primitive_indices.len() - self.primitive_indices_freelist.len()
     }
 
-    /// Direct layout: The primitives are already laid out in bvh.primitive_indices order.
+    /// direct_layout: The primitives are already laid out in bvh.primitive_indices order.
+    /// tight_fit: Requires that children nodes and primitives fit tightly in parents. This is ignored for primitives
+    ///     if the bvh uses spatial splits (tight_fit can still be set to `true`). This was added for validating
+    ///     refit_all().
     pub fn validate<T: Boundable>(
         &self,
         primitives: &[T],
@@ -913,7 +938,7 @@ mod tests {
 
         bvh.refit_all();
 
-        bvh.validate(&tris, false, false);
+        bvh.validate(&tris, false, true);
     }
 
     #[test]
