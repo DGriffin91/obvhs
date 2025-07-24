@@ -71,6 +71,20 @@ mod tests {
     }
 
     #[test]
+    pub fn build_bvh_with_varying_prim_counts() {
+        let mut tris = height_to_triangles(|_x: usize, _y: usize| -> f32 { 0.0 }, 4, 4);
+        while tris.len() > 0 {
+            tris.pop();
+            for build_param in BUILD_PARAM_SET {
+                let bvh = build_bvh2_from_tris(&tris, build_param, &mut Duration::default());
+                bvh.validate(&tris, false, !build_param.pre_split);
+                let bvh = build_cwbvh_from_tris(&tris, build_param, &mut Duration::default());
+                bvh.validate(&tris, false);
+            }
+        }
+    }
+
+    #[test]
     pub fn check_flat_subdivided_plane_normals() {
         let tris = height_to_triangles(|_x: usize, _y: usize| -> f32 { 0.0 }, 4, 4);
         let mut hit_count = 0;

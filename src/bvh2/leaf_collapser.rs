@@ -20,16 +20,19 @@ use crate::bvh2::{Bvh2, Bvh2Node};
 /// cost does not improve.
 pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     crate::scope!("collapse");
+    let nodes_qty = bvh.nodes.len();
 
-    if max_prims <= 1 {
+    if max_prims <= 1 || nodes_qty as u32 <= max_prims * 2 + 1 {
+        return;
+    }
+
+    if !bvh.primitive_indices.is_empty() && bvh.primitive_indices.len() as u32 <= max_prims {
         return;
     }
 
     if bvh.nodes.is_empty() || bvh.nodes[0].is_leaf() {
         return;
     }
-
-    let nodes_qty = bvh.nodes.len();
 
     let previously_had_parents = !bvh.parents.is_empty();
 

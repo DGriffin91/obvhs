@@ -488,7 +488,7 @@ fn find_best_node_basic(index: usize, nodes: &[Bvh2Node], search_distance: usize
 /// In PLOC, the number of nodes before and after the current one that are evaluated for pairing.
 /// Minimum (1) has a fast path in building and still results in decent quality BVHs especially
 /// when paired with a bit of reinsertion.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub enum PlocSearchDistance {
     /// 1
     Minimum,

@@ -234,6 +234,7 @@ macro_rules! scope {
 }
 
 /// General build parameters for Bvh2 & CwBvh
+#[derive(Clone, Copy, Debug)]
 pub struct BvhBuildParams {
     /// Split large tris into multiple AABBs
     pub pre_split: bool,
