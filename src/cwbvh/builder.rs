@@ -67,7 +67,7 @@ pub fn build_cwbvh_from_tris(
     #[cfg(debug_assertions)]
     {
         bvh2.validate(triangles, false, config.pre_split);
-        cwbvh.validate(triangles, config.pre_split, false);
+        cwbvh.validate(triangles, config.pre_split);
     }
 
     cwbvh
@@ -110,7 +110,7 @@ pub fn build_cwbvh<T: Boundable>(
     #[cfg(debug_assertions)]
     {
         bvh2.validate(&aabbs, false, config.pre_split);
-        cwbvh.validate(&aabbs, config.pre_split, false);
+        cwbvh.validate(&aabbs, config.pre_split);
     }
 
     *core_build_time += start_time.elapsed();

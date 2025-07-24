@@ -22,7 +22,7 @@ use node::CwBvhNode;
 use crate::{
     aabb::Aabb,
     ray::{Ray, RayHit},
-    Boundable, PerComponent,
+    splits, Boundable, PerComponent,
 };
 
 pub const BRANCHING: usize = 8;
@@ -735,9 +735,10 @@ impl CwBvh {
     pub fn validate<T: Boundable>(
         &self,
         primitives: &[T],
-        splits: bool,
+        //splits: bool,
         direct_layout: bool,
     ) -> CwBvhValidationResult {
+        let splits = true;
         if !splits {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());

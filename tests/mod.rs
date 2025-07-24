@@ -187,7 +187,7 @@ mod tests {
         );
         let mut cw_intersect_count = 0;
         let mut cw_intersect_sum = 0usize;
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
 
         let mut state = cwbvh.new_traversal(Vec3A::ZERO);
         let mut node;
@@ -222,7 +222,7 @@ mod tests {
             BvhBuildParams::fast_build(),
             &mut Duration::default(),
         );
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
 
         for i in 0..512 {
             let point =
@@ -270,7 +270,7 @@ mod tests {
             BvhBuildParams::fast_build(),
             &mut Duration::default(),
         );
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         let parents = cwbvh.compute_parents();
         for (child, parent) in parents.iter().enumerate().skip(1) {
             let node = cwbvh.nodes[*parent as usize];
@@ -314,13 +314,13 @@ mod tests {
         );
         let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         for node in 0..cwbvh.nodes.len() {
             cwbvh.order_node_children(&aabbs, node, false);
         }
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
     }
 
     #[test]
@@ -374,8 +374,8 @@ mod tests {
         }
 
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
     }
 }
