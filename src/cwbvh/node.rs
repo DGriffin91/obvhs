@@ -139,8 +139,8 @@ impl CwBvhNode {
             tmin3 = tmin3 * adjusted_ray_dir_inv + adjusted_ray_origin;
             tmax3 = tmax3 * adjusted_ray_dir_inv + adjusted_ray_origin;
 
-            let tmin = tmin3.x.max(tmin3.y).max(tmin3.z).max(EPSILON); //ray.tmin?
-            let tmax = tmax3.x.min(tmax3.y).min(tmax3.z).min(ray.tmax);
+            let tmin = tmin3.max_element().max(EPSILON); //ray.tmin?
+            let tmax = tmax3.min_element().min(ray.tmax);
 
             let intersected = tmin <= tmax;
             if intersected {

@@ -189,7 +189,7 @@ impl Aabb {
     }
 
     /// Checks if this AABB intersects with a ray and returns the distance to the intersection point.
-    /// Returns `f32::MAX` if there is no intersection.
+    /// Returns `f32::INFINITY` if there is no intersection.
     #[inline]
     pub fn intersect_ray(&self, ray: &Ray) -> f32 {
         let t1 = (self.min - ray.origin) * ray.inv_direction;
@@ -198,8 +198,8 @@ impl Aabb {
         let tmin = t1.min(t2);
         let tmax = t1.max(t2);
 
-        let tmin_n = tmin.x.max(tmin.y.max(tmin.z));
-        let tmax_n = tmax.x.min(tmax.y.min(tmax.z));
+        let tmin_n = tmin.max_element();
+        let tmax_n = tmax.min_element();
 
         if tmax_n >= tmin_n && tmax_n >= 0.0 {
             tmin_n
