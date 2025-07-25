@@ -74,9 +74,9 @@ impl<'a> Bvh2Converter<'a> {
 
     pub fn convert_to_cwbvh_impl(&mut self, node_index_bvh8: usize, node_index_bvh2: usize) {
         let mut node = self.nodes[node_index_bvh8];
-        let aabb = self.bvh2.nodes[node_index_bvh2].aabb;
+        let aabb = self.bvh2.nodes[node_index_bvh2].aabb();
         if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
-            exact_node_aabbs[node_index_bvh8] = aabb;
+            exact_node_aabbs[node_index_bvh8] = *aabb;
         }
 
         let node_p = aabb.min;
@@ -119,7 +119,7 @@ impl<'a> Bvh2Converter<'a> {
                 continue; // Empty slot
             };
 
-            let child_aabb = self.bvh2.nodes[*child_index as usize].aabb;
+            let child_aabb = self.bvh2.nodes[*child_index as usize].aabb();
 
             // const PAD: f32 = 1e-20;
             // Use to force non-zero volumes.
@@ -224,7 +224,7 @@ impl<'a> Bvh2Converter<'a> {
         _current_depth: i32,
     ) -> u32 {
         let node = &self.bvh2.nodes[node_index];
-        let half_area = node.aabb.half_area();
+        let half_area = node.aabb().half_area();
         let first_index = node.first_index;
         let prim_count = node.prim_count;
 
@@ -406,7 +406,7 @@ impl<'a> Bvh2Converter<'a> {
         child_count: usize,
     ) {
         let node = &self.bvh2.nodes[node_index];
-        let p = node.aabb.center();
+        let p = node.aabb().center();
 
         let mut cost = [[f32::MAX; DIRECTIONS]; BRANCHING];
 
@@ -416,7 +416,7 @@ impl<'a> Bvh2Converter<'a> {
         for s in 0..DIRECTIONS {
             let d = self.direction_lut[s];
             for c in 0..child_count {
-                let v = self.bvh2.nodes[children[c] as usize].aabb.center() - p;
+                let v = self.bvh2.nodes[children[c] as usize].aabb().center() - p;
                 let cost_slot = unsafe { cost.get_unchecked_mut(c).get_unchecked_mut(s) };
                 *cost_slot = d.dot(v); // No benefit from normalizing
             }
@@ -503,7 +503,7 @@ pub fn bvh2_to_cwbvh(
     CwBvh {
         nodes: converter.nodes,
         primitive_indices: converter.primitive_indices,
-        total_aabb: bvh2.nodes[0].aabb,
+        total_aabb: *bvh2.nodes[0].aabb(),
         exact_node_aabbs: converter.exact_node_aabbs,
         uses_spatial_splits: bvh2.uses_spatial_splits,
     }

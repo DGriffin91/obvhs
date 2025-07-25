@@ -185,14 +185,14 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let mut min_cost = f32::MAX;
         let mut best_sibling_candidate_id = 0;
         let mut max_stack_len = 1;
-        let new_node_cost = new_node.aabb.half_area();
+        let new_node_cost = new_node.aabb().half_area();
 
         stack.clear();
-        let root_aabb = self.nodes[0].aabb;
+        let root_aabb = self.nodes[0].aabb();
 
         // Traverse the BVH to find the best sibling
         stack.push(SiblingInsertionCandidate {
-            inherited_cost: root_aabb.union(&new_node.aabb).half_area() - root_aabb.half_area(),
+            inherited_cost: root_aabb.union(&new_node.aabb()).half_area() - root_aabb.half_area(),
             index: 0,
         });
         while let Some(sibling_candidate) = stack.pop() {
@@ -200,7 +200,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
             let candidate = &self.nodes[current_node_index];
 
-            let direct_cost = candidate.aabb.union(&new_node.aabb).half_area();
+            let direct_cost = candidate.aabb().union(&new_node.aabb()).half_area();
             let total_cost = direct_cost + sibling_candidate.inherited_cost;
 
             if total_cost < min_cost {
@@ -210,7 +210,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
             // If this is not a leaf, it's possible a better cost could be found further down.
             if !candidate.is_leaf() {
-                let inherited_cost = total_cost - candidate.aabb.half_area();
+                let inherited_cost = total_cost - candidate.aabb().half_area();
                 let min_subtree_cost = new_node_cost + inherited_cost;
                 if min_subtree_cost < min_cost {
                     stack.push(SiblingInsertionCandidate {
@@ -237,7 +237,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         // The sibling and new node go on the end.
         let new_sibling_id = self.nodes.len() as u32;
         let new_parent = Bvh2Node::new(
-            new_node.aabb.union(&best_sibling_candidate.aabb),
+            new_node.aabb().union(&best_sibling_candidate.aabb()),
             0,
             new_sibling_id,
         );

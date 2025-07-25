@@ -64,9 +64,9 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
                     let left = bvh.nodes[first_child];
                     let right = bvh.nodes[first_child + 1];
                     let collapse_cost =
-                        node.aabb.half_area() * (total_count as f32 - traversal_cost);
-                    let base_cost = left.aabb.half_area() * left_count as f32
-                        + right.aabb.half_area() * right_count as f32;
+                        node.aabb().half_area() * (total_count as f32 - traversal_cost);
+                    let base_cost = left.aabb().half_area() * left_count as f32
+                        + right.aabb().half_area() * right_count as f32;
                     let both_have_same_prim =
                         (left.first_index == right.first_index) && total_count == 2;
 

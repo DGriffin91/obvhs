@@ -113,7 +113,7 @@ impl ReinsertionOptimizer {
         self.candidates = candidates
             .iter()
             .map(|node_id| {
-                let cost = bvh.nodes[*node_id as usize].aabb.half_area();
+                let cost = bvh.nodes[*node_id as usize].aabb().half_area();
                 Candidate {
                     cost,
                     node_id: *node_id,
@@ -179,7 +179,7 @@ impl ReinsertionOptimizer {
             .skip(1)
             .for_each(|(i, node)| {
                 self.candidates.push(Candidate {
-                    cost: node.aabb.half_area(),
+                    cost: node.aabb().half_area(),
                     node_id: i as u32,
                 });
             });
@@ -341,15 +341,15 @@ pub fn find_reinsertion(
         to: 0,
         area_diff: 0.0,
     };
-    let node_area = bvh.nodes[node_id].aabb.half_area();
+    let node_area = bvh.nodes[node_id].aabb().half_area();
 
-    let parent_area = bvh.nodes[bvh.parents[node_id] as usize].aabb.half_area();
+    let parent_area = bvh.nodes[bvh.parents[node_id] as usize].aabb().half_area();
     let mut area_diff = parent_area;
     let mut sibling_id = Bvh2Node::get_sibling_id(node_id);
-    let mut pivot_bbox = bvh.nodes[sibling_id].aabb;
+    let mut pivot_bbox = *bvh.nodes[sibling_id].aabb();
     let parent_id = bvh.parents[node_id] as usize;
     let mut pivot_id = parent_id;
-    let aabb = bvh.nodes[node_id].aabb;
+    let aabb = bvh.nodes[node_id].aabb();
     let mut longest = 0;
     stack.clear();
     loop {
@@ -362,7 +362,7 @@ pub fn find_reinsertion(
             }
 
             let dst_node = &bvh.nodes[*top_sibling_id as usize];
-            let merged_area = dst_node.aabb.union(&aabb).half_area();
+            let merged_area = dst_node.aabb().union(&aabb).half_area();
             let reinsert_area = top_area_diff - merged_area;
             if reinsert_area > best_reinsertion.area_diff {
                 best_reinsertion.to = *top_sibling_id;
@@ -370,15 +370,15 @@ pub fn find_reinsertion(
             }
 
             if !dst_node.is_leaf() {
-                let child_area = reinsert_area + dst_node.aabb.half_area();
+                let child_area = reinsert_area + dst_node.aabb().half_area();
                 stack.push((child_area, dst_node.first_index));
                 stack.push((child_area, dst_node.first_index + 1));
             }
         }
 
         if pivot_id != parent_id {
-            pivot_bbox = pivot_bbox.union(&bvh.nodes[sibling_id].aabb);
-            area_diff += bvh.nodes[pivot_id].aabb.half_area() - pivot_bbox.half_area();
+            pivot_bbox = pivot_bbox.union(bvh.nodes[sibling_id].aabb());
+            area_diff += bvh.nodes[pivot_id].aabb().half_area() - pivot_bbox.half_area();
         }
 
         if pivot_id == 0 {

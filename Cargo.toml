@@ -19,6 +19,7 @@ rdst = { version = "0.20.14", default-features = false }
 rayon = { version = "1.9.0", optional = true }
 thread_local = { version = "1.1.8", optional = true }
 log = "0.4"
+static_assertions = "1.1.0"
 
 # Noop unless one of the profile-with features below is also used
 profiling = { version = "1.0", optional = true }

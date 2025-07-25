@@ -208,7 +208,7 @@ impl Bvh2 {
             }
             if let Some(current_node_index) = state.stack.pop() {
                 let node = &self.nodes[*current_node_index as usize];
-                if node.aabb.intersect_ray(&state.ray) >= state.ray.tmax {
+                if node.aabb().intersect_ray(&state.ray) >= state.ray.tmax {
                     continue;
                 }
 
@@ -238,7 +238,7 @@ impl Bvh2 {
         leaf_indices: &mut Vec<usize>,
     ) {
         let node = &self.nodes[node_index];
-        if node.aabb.intersect_ray(ray) < f32::INFINITY {
+        if node.aabb().intersect_ray(ray) < f32::INFINITY {
             if node.is_leaf() {
                 leaf_indices.push(node_index);
             } else {
@@ -263,7 +263,7 @@ impl Bvh2 {
         stack.push(0);
         while let Some(current_node_index) = stack.pop() {
             let node = &self.nodes[*current_node_index as usize];
-            if !node.aabb.intersect_aabb(&aabb) {
+            if !node.aabb().intersect_aabb(&aabb) {
                 continue;
             }
 
@@ -340,7 +340,7 @@ impl Bvh2 {
     ///        vec3(0.33, 0.3, 0.37),
     ///    ));
     ///    for (prim_id, tri) in tris.iter().enumerate() {
-    ///        bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].aabb = tri.aabb(); // Update aabbs
+    ///        bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].set_aabb(tri.aabb()); // Update aabbs
     ///    }
     ///    bvh.refit_all(); // Refit aabbs
     ///    bvh.validate(&tris, false, true); // Validate that aabbs are now fitting tightly
@@ -352,9 +352,9 @@ impl Bvh2 {
             for node_id in (0..self.nodes.len()).rev() {
                 let node = &self.nodes[node_id];
                 if !node.is_leaf() {
-                    let first_child_bbox = self.nodes[node.first_index as usize].aabb;
-                    let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
-                    self.nodes[node_id].aabb = first_child_bbox.union(&second_child_bbox);
+                    let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
+                    let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
+                    self.nodes[node_id].set_aabb(first_child_bbox.union(&second_child_bbox));
                 }
             }
         } else {
@@ -376,9 +376,10 @@ impl Bvh2 {
             for node_id in reverse_stack.iter().rev() {
                 let node = &self.nodes[*node_id as usize];
                 if !node.is_leaf() {
-                    let first_child_bbox = self.nodes[node.first_index as usize].aabb;
-                    let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
-                    self.nodes[*node_id as usize].aabb = first_child_bbox.union(&second_child_bbox);
+                    let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
+                    let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
+                    self.nodes[*node_id as usize]
+                        .set_aabb(first_child_bbox.union(&second_child_bbox));
                 }
             }
         }
@@ -505,9 +506,9 @@ impl Bvh2 {
         loop {
             let node = &self.nodes[index];
             if !node.is_leaf() {
-                let first_child_bbox = self.nodes[node.first_index as usize].aabb;
-                let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
-                self.nodes[index].aabb = first_child_bbox.union(&second_child_bbox);
+                let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
+                let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
+                self.nodes[index].set_aabb(first_child_bbox.union(&second_child_bbox));
             }
             if index == 0 {
                 break;
@@ -526,11 +527,11 @@ impl Bvh2 {
         loop {
             let node = &self.nodes[index];
             if !node.is_leaf() {
-                let first_child_bbox = self.nodes[node.first_index as usize].aabb;
-                let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb;
+                let first_child_bbox = self.nodes[node.first_index as usize].aabb();
+                let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb();
                 let new_aabb = first_child_bbox.union(&second_child_bbox);
-                let node = &mut self.nodes[index].aabb;
-                if node == &new_aabb {
+                let node = &mut self.nodes[index];
+                if node.aabb() == &new_aabb {
                     same_count += 1;
                     #[cfg(not(debug_assertions))]
                     if same_count == 2 {
@@ -539,7 +540,7 @@ impl Bvh2 {
                 } else {
                     debug_assert!(same_count < 2, "Some parents still needed refitting. Unideal fitting is occurring somewhere.");
                 }
-                *node = new_aabb;
+                node.set_aabb(new_aabb);
             }
             if index == 0 {
                 break;
@@ -551,7 +552,7 @@ impl Bvh2 {
     /// Update node aabb and refit the BVH working up the tree from this node.
     #[inline]
     pub fn resize_node(&mut self, node_id: usize, aabb: Aabb) {
-        self.nodes[node_id].aabb = aabb;
+        self.nodes[node_id].set_aabb(aabb);
         self.refit_from_fast(node_id);
     }
 
@@ -670,7 +671,7 @@ impl Bvh2 {
         current_depth: u32,
     ) {
         result.max_depth = result.max_depth.max(current_depth);
-        let parent_aabb = self.nodes[parent_index as usize].aabb;
+        let parent_aabb = self.nodes[parent_index as usize].aabb();
         result.discovered_nodes.insert(node_index);
         let node = &self.nodes[node_index as usize];
         result.node_count += 1;
@@ -682,12 +683,12 @@ impl Bvh2 {
         }
 
         assert!(
-            node.aabb.min.cmpge(parent_aabb.min).all()
-                && node.aabb.max.cmple(parent_aabb.max).all(),
+            node.aabb().min.cmpge(parent_aabb.min).all()
+                && node.aabb().max.cmple(parent_aabb.max).all(),
             "Child {} does not fit in parent {}:\nchild:  {:?}\nparent: {:?}",
             node_index,
             parent_index,
-            node.aabb,
+            node.aabb(),
             parent_aabb
         );
 
@@ -717,19 +718,20 @@ impl Bvh2 {
                     let prim_aabb = primitives[prim_index].aabb();
                     temp_aabb = temp_aabb.union(&prim_aabb);
                     assert!(
-                        prim_aabb.min.cmpge(node.aabb.min).all()
-                            && prim_aabb.max.cmple(node.aabb.max).all(),
+                        prim_aabb.min.cmpge(node.aabb().min).all()
+                            && prim_aabb.max.cmple(node.aabb().max).all(),
                         "Primitive {} does not fit in parent {}:\nprimitive: {:?}\nparent:    {:?}",
                         prim_index,
                         parent_index,
                         prim_aabb,
-                        node.aabb
+                        node.aabb()
                     );
                 }
             }
             if result.require_tight_fit && !self.uses_spatial_splits {
                 assert_eq!(
-                    temp_aabb, node.aabb,
+                    temp_aabb,
+                    *node.aabb(),
                     "Primitive do not fit in tightly in parent {node_index}",
                 );
             }
@@ -741,8 +743,8 @@ impl Bvh2 {
                 let right_child_aabb = &self.nodes[right_id];
 
                 assert_eq!(
-                    left_child_aabb.aabb.union(&right_child_aabb.aabb),
-                    node.aabb,
+                    left_child_aabb.aabb().union(&right_child_aabb.aabb()),
+                    *node.aabb(),
                     "Children {left_id} & {right_id} do not fit in tightly in parent {node_index}",
                 );
             }
@@ -938,7 +940,7 @@ mod tests {
             vec3(0.33, 0.3, 0.37),
         ));
         for (prim_id, tri) in tris.iter().enumerate() {
-            bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].aabb = tri.aabb();
+            bvh.nodes[bvh.primitives_to_nodes[prim_id] as usize].set_aabb(tri.aabb());
         }
 
         bvh.refit_all();
