@@ -15,7 +15,7 @@ use rdst::{RadixKey, RadixSort};
 
 use crate::{
     bvh2::{Bvh2, Bvh2Node},
-    heapstack::HeapStack,
+    faststack::{FastStack, HeapStack},
 };
 
 use super::update_primitives_to_nodes_for_node;
@@ -362,7 +362,7 @@ pub fn find_reinsertion(
             }
 
             let dst_node = &bvh.nodes[*top_sibling_id as usize];
-            let merged_area = dst_node.aabb().union(&aabb).half_area();
+            let merged_area = dst_node.aabb().union(aabb).half_area();
             let reinsert_area = top_area_diff - merged_area;
             if reinsert_area > best_reinsertion.area_diff {
                 best_reinsertion.to = *top_sibling_id;

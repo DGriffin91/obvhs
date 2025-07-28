@@ -10,8 +10,7 @@ use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
     aabb::Aabb,
     bvh2::{insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer, Bvh2},
-    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
-    heapstack::HeapStack,
+    faststack::HeapStack,
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
     ray::{Ray, RayHit},
     PrettyDuration,
@@ -140,14 +139,8 @@ fn main() {
             physics_update(&mut physics);
             let physics_end = physics_start.elapsed();
 
-            // Seems to be faster to convert to cwbvh each frame before rendering
-            let bvh = {
-                dbg_scope!("bvh2_to_cwbvh for debug render");
-                bvh2_to_cwbvh(&physics.bvh, 3, true, false)
-            };
-
             let render_start = Instant::now();
-            debug_renderer.render(&physics, &mut buffer, bvh);
+            debug_renderer.render(&physics, &mut buffer, &physics.bvh);
             let render_end = render_start.elapsed();
 
             text.draw_timers(&mut buffer, (4, 4), 10);
@@ -201,7 +194,7 @@ impl DebugRenderer {
         }
     }
 
-    fn render(&self, physics: &PhysicsWorld, buffer: &mut Vec<u32>, bvh: CwBvh) {
+    fn render(&self, physics: &PhysicsWorld, buffer: &mut Vec<u32>, bvh: &Bvh2) {
         dbg_scope!("render");
         #[cfg(feature = "parallel")]
         let iter = buffer.par_iter_mut();

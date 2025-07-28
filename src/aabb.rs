@@ -40,13 +40,13 @@ impl Aabb {
     };
 
     /// Creates a new AABB with the given minimum and maximum points.
-    #[inline]
+    #[inline(always)]
     pub fn new(min: Vec3A, max: Vec3A) -> Self {
         Self { min, max }
     }
 
     /// Creates a new AABB with both min and max set to the given point.
-    #[inline]
+    #[inline(always)]
     pub fn from_point(point: Vec3A) -> Self {
         Self {
             min: point,
@@ -55,7 +55,7 @@ impl Aabb {
     }
 
     /// Creates an AABB that bounds the given set of points.
-    #[inline]
+    #[inline(always)]
     pub fn from_points(points: &[Vec3A]) -> Self {
         let mut points = points.iter();
         let mut aabb = Aabb::from_point(*points.next().unwrap());
@@ -66,20 +66,20 @@ impl Aabb {
     }
 
     /// Checks if the AABB contains the given point.
-    #[inline]
+    #[inline(always)]
     pub fn contains_point(&self, point: Vec3A) -> bool {
         (point.cmpge(self.min).bitand(point.cmple(self.max))).all()
     }
 
     /// Extends the AABB to include the given point.
-    #[inline]
+    #[inline(always)]
     pub fn extend(&mut self, point: Vec3A) -> &mut Self {
         *self = self.union(&Self::from_point(point));
         self
     }
 
     /// Returns the union of this AABB and another AABB.
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn union(&self, other: &Self) -> Self {
         Aabb {
@@ -94,7 +94,7 @@ impl Aabb {
     /// common to both AABBs. If the AABBs do not overlap, the resulting
     /// AABB will have min and max values that do not form a valid box
     /// (min will not be less than max).
-    #[inline]
+    #[inline(always)]
     pub fn intersection(&self, other: &Self) -> Self {
         Aabb {
             min: self.min.max(other.min),
@@ -103,19 +103,19 @@ impl Aabb {
     }
 
     /// Returns the diagonal vector of the AABB.
-    #[inline]
+    #[inline(always)]
     pub fn diagonal(&self) -> Vec3A {
         self.max - self.min
     }
 
     /// Returns the center point of the AABB.
-    #[inline]
+    #[inline(always)]
     pub fn center(&self) -> Vec3A {
         (self.max + self.min) * 0.5
     }
 
     /// Returns the center coordinate of the AABB along a specific axis.
-    #[inline]
+    #[inline(always)]
     pub fn center_axis(&self, axis: usize) -> f32 {
         (self.max[axis] + self.min[axis]) * 0.5
     }
@@ -155,21 +155,21 @@ impl Aabb {
     }
 
     /// Returns half the surface area of the AABB.
-    #[inline]
+    #[inline(always)]
     pub fn half_area(&self) -> f32 {
         let d = self.diagonal();
         (d.x + d.y) * d.z + d.x * d.y
     }
 
     /// Returns the surface area of the AABB.
-    #[inline]
+    #[inline(always)]
     pub fn surface_area(&self) -> f32 {
         let d = self.diagonal();
         2.0 * d.dot(d)
     }
 
     /// Returns an empty AABB.
-    #[inline]
+    #[inline(always)]
     pub fn empty() -> Self {
         Self {
             min: Vec3A::new(f32::MAX, f32::MAX, f32::MAX),
@@ -190,8 +190,13 @@ impl Aabb {
 
     /// Checks if this AABB intersects with a ray and returns the distance to the intersection point.
     /// Returns `f32::INFINITY` if there is no intersection.
-    #[inline]
+    #[inline(always)]
     pub fn intersect_ray(&self, ray: &Ray) -> f32 {
+        // TODO perf: this is faster with #[target_feature(enable = "avx")] without any code changes
+        // The compiler emits vsubps instead of mulps which ultimately results in less instructions.
+        // Consider using is_x86_feature_detected!("avx") or #[multiversion(targets("x86_64+avx"))] before traversal
+        // The manual impl using is_x86_feature_detected directly is a bit faster than multiversion
+
         let t1 = (self.min - ray.origin) * ray.inv_direction;
         let t2 = (self.max - ray.origin) * ray.inv_direction;
 

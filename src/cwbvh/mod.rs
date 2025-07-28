@@ -21,6 +21,7 @@ use node::CwBvhNode;
 
 use crate::{
     aabb::Aabb,
+    faststack::{FastStack, StackStack},
     ray::{Ray, RayHit},
     Boundable, PerComponent,
 };
@@ -53,63 +54,14 @@ pub struct CwBvh {
     pub uses_spatial_splits: bool,
 }
 
-const TRAVERSAL_STACK_SIZE: usize = 32;
-/// A stack data structure implemented on the stack with fixed capacity.
-#[derive(Default)]
-pub struct TraversalStack32<T: Copy + Default> {
-    data: [T; TRAVERSAL_STACK_SIZE],
-    index: usize,
-}
-
-// TODO: possibly check bounds in debug.
-// TODO allow the user to provide their own stack impl via a Trait.
 // BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no TLAS.
 // A BVH that deep would perform very slowly and would likely indicate that the geometry is degenerate in some way.
 // CwBvh::validate() will assert the CwBvh depth is less than TRAVERSAL_STACK_SIZE
-impl<T: Copy + Default> TraversalStack32<T> {
-    /// Pushes a value onto the stack. If the stack is full it will overwrite the value in the last position.
-    #[inline(always)]
-    pub fn push(&mut self, v: T) {
-        *unsafe { self.data.get_unchecked_mut(self.index) } = v;
-        self.index = (self.index + 1).min(TRAVERSAL_STACK_SIZE - 1);
-    }
-    /// Pops a value from the stack without checking bounds. If the stack is empty it will return the value in the first position.
-    #[inline(always)]
-    pub fn pop_fast(&mut self) -> T {
-        self.index = self.index.saturating_sub(1);
-        let v = *unsafe { self.data.get_unchecked(self.index) };
-        v
-    }
-    /// Pops a value from the stack.
-    #[inline(always)]
-    pub fn pop(&mut self) -> Option<&T> {
-        if self.index > 0 {
-            self.index = self.index.saturating_sub(1);
-            Some(&self.data[self.index])
-        } else {
-            None
-        }
-    }
-    /// Returns the number of elements in the stack.
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.index
-    }
-    /// Returns true if the stack is empty.
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.index == 0
-    }
-    /// Clears the stack, removing all elements.
-    #[inline(always)]
-    pub fn clear(&mut self) {
-        self.index = 0;
-    }
-}
+const TRAVERSAL_STACK_SIZE: usize = 32;
 
 /// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
 pub struct RayTraversal {
-    pub stack: TraversalStack32<UVec2>,
+    pub stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
     pub oct_inv4: u32,
@@ -130,7 +82,7 @@ impl RayTraversal {
 
 /// Holds traversal state to allow for dynamic traversal (yield on hit)
 pub struct Traversal {
-    pub stack: TraversalStack32<UVec2>,
+    pub stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
     pub oct_inv4: u32,
@@ -171,7 +123,7 @@ impl CwBvh {
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
-        let stack = TraversalStack32::default();
+        let stack = StackStack::default();
         let current_group = if self.nodes.is_empty() {
             UVec2::ZERO
         } else {
@@ -193,7 +145,7 @@ impl CwBvh {
     /// traversal_direction is used to determine the order of bvh node child traversal. This would typically be the ray direction.
     pub fn new_traversal(&self, traversal_direction: Vec3A) -> Traversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
-        let stack = TraversalStack32::default();
+        let stack = StackStack::default();
         let current_group = if self.nodes.is_empty() {
             UVec2::ZERO
         } else {
@@ -326,7 +278,7 @@ impl CwBvh {
                     break;
                 }
 
-                state.current_group = state.stack.pop_fast();
+                state.current_group = *state.stack.pop_fast();
             }
         }
 
@@ -347,7 +299,7 @@ impl CwBvh {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut stack = TraversalStack32::default();
+        let mut stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE> = StackStack::default();
         let mut current_group;
         let mut tlas_stack_size = INVALID; // tlas_stack_size is used to indicate whether we are in the TLAS or not.
         let mut current_mesh = INVALID;
@@ -477,7 +429,7 @@ impl CwBvh {
                     // https://github.com/jan-van-bergen/GPU-Raytracer/blob/6559ae2241c8fdea0ddaec959fe1a47ec9b3ab0d/Src/CUDA/Raytracing/BVH8.h#L262
                 }
 
-                current_group = stack.pop_fast();
+                current_group = *stack.pop_fast();
             }
         }
 

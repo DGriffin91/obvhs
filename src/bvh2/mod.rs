@@ -19,7 +19,8 @@ use reinsertion::find_reinsertion;
 
 use crate::{
     aabb::Aabb,
-    heapstack::HeapStack,
+    fast_stack,
+    faststack::{FastStack, HeapStack, StackStack},
     ray::{Ray, RayHit},
     Boundable, INVALID,
 };
@@ -131,20 +132,6 @@ impl Bvh2 {
         }
     }
 
-    #[inline(always)]
-    pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
-        let mut stack = HeapStack::new_with_capacity(self.max_depth);
-        if !self.nodes.is_empty() {
-            stack.push(0);
-        }
-        RayTraversal {
-            stack,
-            ray,
-            current_primitive_index: 0,
-            primitive_count: 0,
-        }
-    }
-
     /// Traverse the bvh for a given `Ray`. Returns the closest intersected primitive.
     /// `primitives` should be the list of primitives used to generate the bvh reordered per Bvh2::primitive_indices.
     /// To avoid needing to reorder the primitives at the cost of one layer of indirection, see traverse_indirect.
@@ -164,65 +151,113 @@ impl Bvh2 {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut state = self.new_ray_traversal(ray);
-        while self.ray_traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
+        let mut intersect_prims = |node: &Bvh2Node, ray: &mut Ray, hit: &mut RayHit| {
+            (node.first_index..node.first_index + node.prim_count).for_each(|primitive_id| {
+                let t = intersection_fn(ray, primitive_id as usize);
+                if t < ray.tmax {
+                    hit.primitive_id = primitive_id;
+                    ray.tmax = t;
+                }
+            });
+            true
+        };
+
+        fast_stack!(u32, (96, 192), self.max_depth, stack, {
+            Bvh2::ray_traverse_dynamic(self, &mut stack, ray, hit, &mut intersect_prims)
+        });
+
         hit.t < ray.tmax // Note this is valid since traverse_with_stack does not mutate the ray
     }
 
     /// Traverse the BVH
-    /// Yields at every primitive hit, returning true.
     /// Returns false when no hit is found.
-    /// For basic miss test, just run until the first time it yields true.
-    /// For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
-    /// For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
-    ///     and then manually setting ray.tmax to that closest opaque hit at each iteration.
     ///
     /// # Arguments
     /// * `state` - Holds the current traversal state. Allows traverse_dynamic to yield.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
-    /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
-    ///
+    /// * `intersection_fn` - should test the primitives in the given node, update the ray.tmax, and hit info.
+    ///   Return true to continue traversal.
+    ///   For basic miss test return false on first hit to halt traversal.
+    ///   For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
+    ///   For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
+    ///   and then manually setting ray.tmax to that closest opaque hit at each iteration.
+    ///   
     /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
     #[inline(always)]
-    pub fn ray_traverse_dynamic<F: FnMut(&Ray, usize) -> f32>(
-        &self,
-        state: &mut RayTraversal,
+    pub fn ray_traverse_dynamic<
+        F: FnMut(&Bvh2Node, &mut Ray, &mut RayHit) -> bool,
+        Stack: FastStack<u32>,
+    >(
+        bvh: &Bvh2,
+        stack: &mut Stack,
+        mut ray: Ray,
         hit: &mut RayHit,
         mut intersection_fn: F,
-    ) -> bool {
-        loop {
-            while state.primitive_count > 0 {
-                let primitive_id = state.current_primitive_index;
-                state.current_primitive_index += 1;
-                state.primitive_count -= 1;
-                let t = intersection_fn(&state.ray, primitive_id as usize);
-                if t < state.ray.tmax {
-                    hit.primitive_id = primitive_id;
-                    hit.t = t;
-                    state.ray.tmax = t;
-                    // Yield when we hit a primitive
-                    return true;
-                }
-            }
-            if let Some(current_node_index) = state.stack.pop() {
-                let node = &self.nodes[*current_node_index as usize];
-                if node.aabb().intersect_ray(&state.ray) >= state.ray.tmax {
-                    continue;
-                }
+    ) {
+        if bvh.nodes.is_empty() {
+            return;
+        }
 
-                if node.is_leaf() {
-                    state.primitive_count = node.prim_count;
-                    state.current_primitive_index = node.first_index;
-                } else {
-                    state.stack.push(node.first_index);
-                    state.stack.push(node.first_index + 1);
+        let root_node = &bvh.nodes[0];
+        if root_node.aabb().intersect_ray(&ray) < ray.tmax && root_node.is_leaf() {
+            intersection_fn(root_node, &mut ray, hit);
+            return;
+        };
+
+        let mut current_node_index = root_node.first_index;
+        loop {
+            let right_index = current_node_index as usize + 1;
+            assert!(right_index < bvh.nodes.len());
+            let mut left_node = unsafe { bvh.nodes.get_unchecked(current_node_index as usize) };
+            let mut right_node = unsafe { bvh.nodes.get_unchecked(right_index) };
+
+            // TODO perf: could it be faster to intersect these at the same time with avx?
+            let mut left_t = left_node.aabb().intersect_ray(&ray);
+            let mut right_t = right_node.aabb().intersect_ray(&ray);
+
+            if left_t > right_t {
+                core::mem::swap(&mut left_t, &mut right_t);
+                core::mem::swap(&mut left_node, &mut right_node);
+            }
+
+            let hit_left = left_t < ray.tmax;
+
+            let go_left = if hit_left && left_node.is_leaf() {
+                if !intersection_fn(left_node, &mut ray, hit) {
+                    return;
                 }
+                false
             } else {
-                // Returns false when there are no more primitives to test.
-                // This doesn't mean we never hit one along the way though. (and yielded then)
-                return false;
+                hit_left
+            };
+
+            let hit_right = right_t < ray.tmax;
+
+            let go_right = if hit_right && right_node.is_leaf() {
+                if !intersection_fn(right_node, &mut ray, hit) {
+                    return;
+                }
+                false
+            } else {
+                hit_right
+            };
+
+            match (go_left, go_right) {
+                (true, true) => {
+                    current_node_index = left_node.first_index;
+                    stack.push(right_node.first_index);
+                }
+                (true, false) => current_node_index = left_node.first_index,
+                (false, true) => current_node_index = right_node.first_index,
+                (false, false) => {
+                    let Some(next) = stack.pop() else {
+                        hit.t = ray.tmax;
+                        return;
+                    };
+                    current_node_index = *next;
+                }
             }
         }
     }
@@ -529,7 +564,7 @@ impl Bvh2 {
             if !node.is_leaf() {
                 let first_child_bbox = self.nodes[node.first_index as usize].aabb();
                 let second_child_bbox = self.nodes[node.first_index as usize + 1].aabb();
-                let new_aabb = first_child_bbox.union(&second_child_bbox);
+                let new_aabb = first_child_bbox.union(second_child_bbox);
                 let node = &mut self.nodes[index];
                 if node.aabb() == &new_aabb {
                     same_count += 1;
@@ -743,7 +778,7 @@ impl Bvh2 {
                 let right_child_aabb = &self.nodes[right_id];
 
                 assert_eq!(
-                    left_child_aabb.aabb().union(&right_child_aabb.aabb()),
+                    left_child_aabb.aabb().union(right_child_aabb.aabb()),
                     *node.aabb(),
                     "Children {left_id} & {right_id} do not fit in tightly in parent {node_index}",
                 );
@@ -823,26 +858,6 @@ fn update_primitives_to_nodes_for_node(
     }
 }
 
-/// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
-pub struct RayTraversal {
-    pub stack: HeapStack<u32>,
-    pub ray: Ray,
-    pub current_primitive_index: u32,
-    pub primitive_count: u32,
-}
-
-impl RayTraversal {
-    #[inline(always)]
-    /// Reinitialize traversal state with new ray.
-    pub fn reinit(&mut self, ray: Ray) {
-        self.stack.clear();
-        self.stack.push(0);
-        self.primitive_count = 0;
-        self.current_primitive_index = 0;
-        self.ray = ray;
-    }
-}
-
 /// Result of Bvh2 validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct Bvh2ValidationResult {
@@ -906,7 +921,7 @@ mod tests {
     use glam::*;
 
     use crate::{
-        heapstack::HeapStack,
+        faststack::HeapStack,
         ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
         BvhBuildParams, Transformable,

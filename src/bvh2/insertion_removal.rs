@@ -3,7 +3,7 @@ use core::f32;
 use crate::{
     aabb::Aabb,
     bvh2::{update_primitives_to_nodes_for_node, Bvh2, Bvh2Node},
-    heapstack::HeapStack,
+    faststack::{FastStack, HeapStack},
     Boundable, INVALID,
 };
 
@@ -192,7 +192,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
         // Traverse the BVH to find the best sibling
         stack.push(SiblingInsertionCandidate {
-            inherited_cost: root_aabb.union(&new_node.aabb()).half_area() - root_aabb.half_area(),
+            inherited_cost: root_aabb.union(new_node.aabb()).half_area() - root_aabb.half_area(),
             index: 0,
         });
         while let Some(sibling_candidate) = stack.pop() {
@@ -200,7 +200,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
             let candidate = &self.nodes[current_node_index];
 
-            let direct_cost = candidate.aabb().union(&new_node.aabb()).half_area();
+            let direct_cost = candidate.aabb().union(new_node.aabb()).half_area();
             let total_cost = direct_cost + sibling_candidate.inherited_cost;
 
             if total_cost < min_cost {
@@ -237,7 +237,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         // The sibling and new node go on the end.
         let new_sibling_id = self.nodes.len() as u32;
         let new_parent = Bvh2Node::new(
-            new_node.aabb().union(&best_sibling_candidate.aabb()),
+            new_node.aabb().union(best_sibling_candidate.aabb()),
             0,
             new_sibling_id,
         );

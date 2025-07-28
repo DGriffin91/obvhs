@@ -11,7 +11,7 @@ mod tests {
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
         },
-        heapstack::HeapStack,
+        faststack::HeapStack,
         ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         ray::{Ray, RayHit},
         test_util::{

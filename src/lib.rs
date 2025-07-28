@@ -75,7 +75,7 @@ use triangle::Triangle;
 pub mod aabb;
 pub mod bvh2;
 pub mod cwbvh;
-pub mod heapstack;
+pub mod faststack;
 pub mod ploc;
 pub mod ray;
 pub mod rt_triangle;

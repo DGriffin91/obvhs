@@ -58,6 +58,7 @@
 #[macro_export]
 macro_rules! traverse {
     ($cwbvh:expr, $node:expr, $state:expr, $node_intersection:expr, $primitive_intersection:expr) => {{
+        use $crate::faststack::FastStack;
         loop {
             // While the primitive group is not empty
             while $state.primitive_group.y != 0 {
@@ -115,7 +116,7 @@ macro_rules! traverse {
                     break;
                 }
 
-                $state.current_group = $state.stack.pop_fast();
+                $state.current_group = *$state.stack.pop_fast();
             }
         }
     }};

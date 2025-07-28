@@ -310,7 +310,7 @@ impl PlocBuilder {
                 let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
                     let cost = self.current_nodes[i]
                         .aabb()
-                        .union(&self.current_nodes[i + 1].aabb())
+                        .union(self.current_nodes[i + 1].aabb())
                         .half_area();
                     *merge_n = if last_cost < cost { -1 } else { 1 };
                     last_cost = cost;
@@ -428,7 +428,7 @@ impl PlocBuilder {
 
                 // Create the parent node and place it in the array for the next iteration
                 self.next_nodes[next_nodes_idx] =
-                    Bvh2Node::new(left.aabb().union(&right.aabb()), 0, insert_index as u32);
+                    Bvh2Node::new(left.aabb().union(right.aabb()), 0, insert_index as u32);
                 next_nodes_idx += 1;
 
                 // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
@@ -475,7 +475,7 @@ fn find_best_node_basic(index: usize, nodes: &[Bvh2Node], search_distance: usize
         if other == index {
             continue;
         }
-        let cost = our_aabb.union(&nodes[other].aabb()).half_area();
+        let cost = our_aabb.union(nodes[other].aabb()).half_area();
         if cost < best_cost {
             best_node = other;
             best_cost = cost;
@@ -556,7 +556,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
             // n = SEARCH_DISTANCE slots in the cache won't have been filled yet.
             // (TODO this could be tighter, using more of the cache within the n = SEARCH_DISTANCE range as it's filled)
             let area = if i <= SEARCH_DISTANCE {
-                our_aabb.union(&nodes[other].aabb()).half_area()
+                our_aabb.union(nodes[other].aabb()).half_area()
             } else {
                 self.back(index, other)
             };
@@ -568,7 +568,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
         }
 
         ((index + 1)..end).for_each(|other| {
-            let cost = our_aabb.union(&nodes[other].aabb()).half_area();
+            let cost = our_aabb.union(nodes[other].aabb()).half_area();
             *self.front(index, other) = cost;
             if cost < best_cost {
                 best_node = other;
@@ -596,7 +596,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
 
         let our_aabb = nodes[index].aabb();
         ((index + 1)..end).for_each(|other| {
-            let cost = our_aabb.union(&nodes[other].aabb()).half_area();
+            let cost = our_aabb.union(nodes[other].aabb()).half_area();
             *self.front(index, other) = cost;
             if cost < best_cost {
                 best_node = other;
