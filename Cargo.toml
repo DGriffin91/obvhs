@@ -36,6 +36,12 @@ ruzstd = "0.8.1"
 parallel = ["dep:rayon", "dep:thread_local", "rdst/multi-threaded"]
 timeit = []
 
+# Enable small_bvh2_node to pack Bvh2Node into 32 bytes. In this mode the user meta1 & meta2 fields are unavailable.
+# With small_bvh2_node traversal tends to be slightly faster, multi-threaded building tends to be faster, but 
+# single-threaded building tends to be slower.
+# (particularly: single-threaded reinsertion is slower, but collapse is faster, ploc slightly faster)
+small_bvh2_node = []
+
 profile = ["dep:profiling"]
 profile-with-puffin = ["profiling/profile-with-puffin"]
 profile-with-optick = ["profiling/profile-with-optick"]

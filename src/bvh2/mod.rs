@@ -921,7 +921,6 @@ mod tests {
     use glam::*;
 
     use crate::{
-        faststack::HeapStack,
         ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
         BvhBuildParams, Transformable,
