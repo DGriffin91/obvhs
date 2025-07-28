@@ -38,17 +38,17 @@ macro_rules! fast_stack {
     ) => {{
         match $size {
             s if s <= $first => {
-                let mut $stack_ident = StackStack::<$ty, $first>::default();
+                let mut $stack_ident = $crate::faststack::StackStack::<$ty, $first>::default();
                 $body
             }
             $(
                 s if s <= $rest => {
-                    let mut $stack_ident = StackStack::<$ty, $rest>::default();
+                    let mut $stack_ident = $crate::faststack::StackStack::<$ty, $rest>::default();
                     $body
                 }
             )*
             _ => {
-                let mut $stack_ident = HeapStack::<$ty>::new_with_capacity($size);
+                let mut $stack_ident = $crate::faststack::HeapStack::<$ty>::new_with_capacity($size);
                 $body
             }
         }

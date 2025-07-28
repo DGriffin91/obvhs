@@ -20,7 +20,7 @@ use reinsertion::find_reinsertion;
 use crate::{
     aabb::Aabb,
     fast_stack,
-    faststack::{FastStack, HeapStack, StackStack},
+    faststack::{FastStack, HeapStack},
     ray::{Ray, RayHit},
     Boundable, INVALID,
 };
@@ -594,8 +594,8 @@ impl Bvh2 {
     /// Find if there might be a better spot in the BVH for this node and move it there. The id of the reinserted node
     /// does not changed.
     #[inline]
-    pub fn reinsert_node(&mut self, node_id: usize, stack: &mut HeapStack<(f32, u32)>) {
-        let reinsertion = find_reinsertion(self, node_id, stack);
+    pub fn reinsert_node(&mut self, node_id: usize) {
+        let reinsertion = find_reinsertion(self, node_id);
         if reinsertion.area_diff > 0.0 {
             reinsertion::reinsert_node(self, reinsertion.from as usize, reinsertion.to as usize);
             self.children_are_ordered_after_parents = false;
@@ -976,9 +976,8 @@ mod tests {
         bvh.init_primitives_to_nodes_if_uninit();
         bvh.init_parents_if_uninit();
 
-        let mut stack = HeapStack::new_with_capacity(256);
         for node_id in 1..bvh.nodes.len() {
-            bvh.reinsert_node(node_id, &mut stack);
+            bvh.reinsert_node(node_id);
         }
 
         bvh.validate(&tris, false, false);

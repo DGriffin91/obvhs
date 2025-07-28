@@ -329,14 +329,14 @@ impl PlocBuilder {
                         } else {
                             self.current_nodes[start - 1]
                                 .aabb()
-                                .union(&self.current_nodes[start].aabb())
+                                .union(self.current_nodes[start].aabb())
                                 .half_area()
                         };
                         for (local_n, merge_n) in chunk.iter_mut().enumerate() {
                             let i = local_n + start;
                             let cost = self.current_nodes[i]
                                 .aabb()
-                                .union(&self.current_nodes[i + 1].aabb())
+                                .union(self.current_nodes[i + 1].aabb())
                                 .half_area();
                             *merge_n = if last_cost < cost { -1 } else { 1 };
                             last_cost = cost;

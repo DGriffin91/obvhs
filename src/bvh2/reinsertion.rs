@@ -15,46 +15,19 @@ use rdst::{RadixKey, RadixSort};
 
 use crate::{
     bvh2::{Bvh2, Bvh2Node},
-    faststack::{FastStack, HeapStack},
+    fast_stack,
+    faststack::FastStack,
 };
 
 use super::update_primitives_to_nodes_for_node;
 
-// In most scenes 16 would be enough. If more than 256 is needed the scene might have something pathological and may
-// take untenable amounts of time to render.
-const REINSERTION_STACK_CAP: usize = 256;
-
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
+#[derive(Default)]
 pub struct ReinsertionOptimizer {
     candidates: Vec<Candidate>,
     reinsertions: Vec<Reinsertion>,
     touched: Vec<bool>,
     batch_size_ratio: f32,
-    #[cfg(not(feature = "parallel"))]
-    reinsertion_stack: HeapStack<(f32, u32)>,
-    #[cfg(feature = "parallel")]
-    reinsertion_stack: Vec<HeapStack<(f32, u32)>>,
-}
-
-impl Default for ReinsertionOptimizer {
-    fn default() -> Self {
-        // TODO would this be better with a ThreadLocal? Seems like 32 are needed for small enough chunks to keep the
-        // CPU busy.
-        #[cfg(feature = "parallel")]
-        let reinsertion_stack = (0..rayon::current_num_threads() * 32)
-            .into_iter()
-            .map(|_| HeapStack::new_with_capacity(REINSERTION_STACK_CAP))
-            .collect();
-        #[cfg(not(feature = "parallel"))]
-        let reinsertion_stack = Default::default();
-        Self {
-            candidates: Default::default(),
-            reinsertions: Default::default(),
-            touched: Default::default(),
-            batch_size_ratio: Default::default(),
-            reinsertion_stack,
-        }
-    }
 }
 
 impl ReinsertionOptimizer {
@@ -80,16 +53,6 @@ impl ReinsertionOptimizer {
         self.touched.clear();
         self.touched.resize(bvh.nodes.len(), false);
         self.batch_size_ratio = batch_size_ratio;
-        #[cfg(not(feature = "parallel"))]
-        {
-            self.reinsertion_stack.clear();
-            self.reinsertion_stack.reserve(REINSERTION_STACK_CAP);
-        }
-        #[cfg(feature = "parallel")]
-        for stack in self.reinsertion_stack.iter_mut() {
-            stack.clear();
-            stack.reserve(REINSERTION_STACK_CAP);
-        }
         self.optimize_impl(bvh, ratio_sequence);
     }
 
@@ -123,17 +86,6 @@ impl ReinsertionOptimizer {
         self.reinsertions.reserve(cap);
         self.touched.clear();
         self.touched.resize(bvh.nodes.len(), false);
-        #[cfg(not(feature = "parallel"))]
-        {
-            self.reinsertion_stack.clear();
-            self.reinsertion_stack.reserve(REINSERTION_STACK_CAP);
-        }
-        #[cfg(feature = "parallel")]
-        for stack in self.reinsertion_stack.iter_mut() {
-            stack.clear();
-            stack.reserve(REINSERTION_STACK_CAP);
-        }
-
         self.optimize_specific_candidates(bvh, iterations);
     }
 
@@ -193,23 +145,11 @@ impl ReinsertionOptimizer {
         #[cfg(feature = "parallel")]
         {
             self.reinsertions.resize(count, Default::default());
-            let chunk_count = self.reinsertion_stack.len();
-            let chunk_size = count.div_ceil(chunk_count);
-            let chunks = self
-                .reinsertions
+            self.reinsertions
                 .par_iter_mut()
-                .chunks(chunk_size)
-                .zip(self.reinsertion_stack.par_iter_mut());
-            assert!(chunks.len() <= chunk_count);
-            chunks
                 .enumerate()
-                .for_each(|(chunk, (mut reinsertions, mut stack))| {
-                    let start = chunk * chunk_size;
-                    for (n, reinsertion) in reinsertions.iter_mut().enumerate() {
-                        let i = start + n;
-                        **reinsertion =
-                            find_reinsertion(bvh, self.candidates[i].node_id as usize, &mut stack)
-                    }
+                .for_each(|(i, reinsertion)| {
+                    *reinsertion = find_reinsertion(bvh, self.candidates[i].node_id as usize)
                 });
         }
         #[cfg(not(feature = "parallel"))]
@@ -217,11 +157,7 @@ impl ReinsertionOptimizer {
             self.reinsertions.clear();
             assert!(count <= self.candidates.len());
             (0..count).for_each(|i| {
-                let r = find_reinsertion(
-                    bvh,
-                    self.candidates[i].node_id as usize,
-                    &mut self.reinsertion_stack,
-                );
+                let r = find_reinsertion(bvh, self.candidates[i].node_id as usize);
                 if r.area_diff > 0.0 {
                     self.reinsertions.push(r)
                 }
@@ -294,11 +230,7 @@ impl RadixKey for Candidate {
     }
 }
 
-pub fn find_reinsertion(
-    bvh: &Bvh2,
-    node_id: usize,
-    stack: &mut HeapStack<(f32, u32)>,
-) -> Reinsertion {
+pub fn find_reinsertion(bvh: &Bvh2, node_id: usize) -> Reinsertion {
     if bvh.parents.is_empty() {
         panic!("Parents mapping required. Please run Bvh2::init_parents() before reinsert_node()")
     }
@@ -351,43 +283,46 @@ pub fn find_reinsertion(
     let mut pivot_id = parent_id;
     let aabb = bvh.nodes[node_id].aabb();
     let mut longest = 0;
-    stack.clear();
-    loop {
-        stack.push((area_diff, sibling_id as u32));
-        while !stack.is_empty() {
-            longest = stack.len().max(longest);
-            let (top_area_diff, top_sibling_id) = stack.pop_fast();
-            if top_area_diff - node_area <= best_reinsertion.area_diff {
-                continue;
+    fast_stack!((f32, u32), (96, 192), bvh.max_depth, stack, {
+        stack.clear();
+        loop {
+            stack.push((area_diff, sibling_id as u32));
+            while !stack.is_empty() {
+                longest = stack.len().max(longest);
+                let (top_area_diff, top_sibling_id) = stack.pop_fast();
+                if top_area_diff - node_area <= best_reinsertion.area_diff {
+                    continue;
+                }
+
+                let dst_node = &bvh.nodes[*top_sibling_id as usize];
+                let merged_area = dst_node.aabb().union(aabb).half_area();
+                let reinsert_area = top_area_diff - merged_area;
+                if reinsert_area > best_reinsertion.area_diff {
+                    best_reinsertion.to = *top_sibling_id;
+                    best_reinsertion.area_diff = reinsert_area;
+                }
+
+                if !dst_node.is_leaf() {
+                    let child_area = reinsert_area + dst_node.aabb().half_area();
+                    stack.push((child_area, dst_node.first_index));
+                    stack.push((child_area, dst_node.first_index + 1));
+                }
             }
 
-            let dst_node = &bvh.nodes[*top_sibling_id as usize];
-            let merged_area = dst_node.aabb().union(aabb).half_area();
-            let reinsert_area = top_area_diff - merged_area;
-            if reinsert_area > best_reinsertion.area_diff {
-                best_reinsertion.to = *top_sibling_id;
-                best_reinsertion.area_diff = reinsert_area;
+            if pivot_id != parent_id {
+                pivot_bbox = pivot_bbox.union(bvh.nodes[sibling_id].aabb());
+                area_diff += bvh.nodes[pivot_id].aabb().half_area() - pivot_bbox.half_area();
             }
 
-            if !dst_node.is_leaf() {
-                let child_area = reinsert_area + dst_node.aabb().half_area();
-                stack.push((child_area, dst_node.first_index));
-                stack.push((child_area, dst_node.first_index + 1));
+            if pivot_id == 0 {
+                break;
             }
-        }
 
-        if pivot_id != parent_id {
-            pivot_bbox = pivot_bbox.union(bvh.nodes[sibling_id].aabb());
-            area_diff += bvh.nodes[pivot_id].aabb().half_area() - pivot_bbox.half_area();
+            sibling_id = Bvh2Node::get_sibling_id(pivot_id);
+            pivot_id = bvh.parents[pivot_id] as usize;
         }
+    });
 
-        if pivot_id == 0 {
-            break;
-        }
-
-        sibling_id = Bvh2Node::get_sibling_id(pivot_id);
-        pivot_id = bvh.parents[pivot_id] as usize;
-    }
     if best_reinsertion.to == Bvh2Node::get_sibling_id32(best_reinsertion.from)
         || best_reinsertion.to == bvh.parents[best_reinsertion.from as usize]
     {
