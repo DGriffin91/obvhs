@@ -20,7 +20,7 @@ use reinsertion::find_reinsertion;
 use crate::{
     aabb::Aabb,
     fast_stack,
-    faststack::{FastStack, HeapStack},
+    faststack::FastStack,
     ray::{Ray, RayHit},
     Boundable, INVALID,
 };
@@ -393,28 +393,29 @@ impl Bvh2 {
         } else {
             // If not, we need to create a safe order in which we can make updates.
             // This is much faster than reordering the whole bvh with Bvh2::reorder_in_stack_traversal_order()
-            let mut stack = HeapStack::new_with_capacity(self.max_depth);
-            let mut reverse_stack = Vec::with_capacity(self.nodes.len());
-            stack.push(0);
-            reverse_stack.push(0);
-            while let Some(current_node_index) = stack.pop() {
-                let node = &self.nodes[*current_node_index as usize];
-                if !node.is_leaf() {
-                    reverse_stack.push(node.first_index);
-                    reverse_stack.push(node.first_index + 1);
-                    stack.push(node.first_index);
-                    stack.push(node.first_index + 1);
+            fast_stack!(u32, (96, 192), self.max_depth, stack, {
+                let mut reverse_stack = Vec::with_capacity(self.nodes.len());
+                stack.push(0);
+                reverse_stack.push(0);
+                while let Some(current_node_index) = stack.pop() {
+                    let node = &self.nodes[*current_node_index as usize];
+                    if !node.is_leaf() {
+                        reverse_stack.push(node.first_index);
+                        reverse_stack.push(node.first_index + 1);
+                        stack.push(node.first_index);
+                        stack.push(node.first_index + 1);
+                    }
                 }
-            }
-            for node_id in reverse_stack.iter().rev() {
-                let node = &self.nodes[*node_id as usize];
-                if !node.is_leaf() {
-                    let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
-                    let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
-                    self.nodes[*node_id as usize]
-                        .set_aabb(first_child_bbox.union(&second_child_bbox));
+                for node_id in reverse_stack.iter().rev() {
+                    let node = &self.nodes[*node_id as usize];
+                    if !node.is_leaf() {
+                        let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
+                        let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
+                        self.nodes[*node_id as usize]
+                            .set_aabb(first_child_bbox.union(&second_child_bbox));
+                    }
                 }
-            }
+            });
         }
     }
 
