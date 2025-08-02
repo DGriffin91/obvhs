@@ -201,7 +201,10 @@ impl Bvh2 {
         }
 
         let root_node = &bvh.nodes[0];
-        if root_node.aabb().intersect_ray(&ray) < ray.tmax && root_node.is_leaf() {
+        let hit_root = root_node.aabb().intersect_ray(&ray) < ray.tmax;
+        if !hit_root {
+            return;
+        } else if root_node.is_leaf() {
             intersection_fn(root_node, &mut ray, hit);
             return;
         };
