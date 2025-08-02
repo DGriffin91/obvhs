@@ -289,10 +289,6 @@ struct PhysicsWorld {
     temp_pairs: ThreadLocal<RefCell<Vec<Pair>>>,
     config: Args,
     updated_leaves_this_frame: usize,
-    #[cfg(not(feature = "parallel"))]
-    traversal_stack: HeapStack<u32>,
-    #[cfg(feature = "parallel")]
-    traversal_stack: ThreadLocal<RefCell<HeapStack<u32>>>,
 }
 
 impl Default for PhysicsWorld {
@@ -308,10 +304,6 @@ impl Default for PhysicsWorld {
             temp_pairs: ThreadLocal::new(),
             config: Args::default(),
             updated_leaves_this_frame: Default::default(),
-            #[cfg(not(feature = "parallel"))]
-            traversal_stack: HeapStack::new_with_capacity(256),
-            #[cfg(feature = "parallel")]
-            traversal_stack: ThreadLocal::new(),
         }
     }
 }
@@ -530,37 +522,27 @@ fn physics_update(physics: &mut PhysicsWorld) {
 
         let traverse_closure = |s1| {
             #[cfg(feature = "parallel")]
-            let traversal_stack = &mut {
-                let mut traversal_stack = physics.traversal_stack.get_or_default().borrow_mut();
-                traversal_stack.reserve(256);
-                traversal_stack
-            };
-            #[cfg(feature = "parallel")]
             let pairs = &mut physics.temp_pairs.get_or_default().borrow_mut();
 
-            #[cfg(not(feature = "parallel"))]
-            let traversal_stack = &mut physics.traversal_stack;
             #[cfg(not(feature = "parallel"))]
             let pairs = &mut physics.collision_pairs;
 
             let item: &SphereCollider = &physics.items[s1];
             let s1_min_aabb = item.min_aabb;
 
-            physics
-                .bvh
-                .aabb_traverse(traversal_stack, s1_min_aabb, |bvh, node_id| {
-                    let node = &bvh.nodes[node_id as usize];
-                    let start = node.first_index as usize;
-                    let end = start + node.prim_count as usize;
-                    for node_prim_id in start..end {
-                        let s2 = bvh.primitive_indices[node_prim_id] as usize;
-                        // Check against all primitives in this leaf node
-                        if physics.items[s2].min_aabb.intersect_aabb(&s1_min_aabb) && s1 != s2 {
-                            pairs.push(Pair::new(s1 as u32, s2 as u32));
-                        }
+            physics.bvh.aabb_traverse(s1_min_aabb, |bvh, node_id| {
+                let node = &bvh.nodes[node_id as usize];
+                let start = node.first_index as usize;
+                let end = start + node.prim_count as usize;
+                for node_prim_id in start..end {
+                    let s2 = bvh.primitive_indices[node_prim_id] as usize;
+                    // Check against all primitives in this leaf node
+                    if physics.items[s2].min_aabb.intersect_aabb(&s1_min_aabb) && s1 != s2 {
+                        pairs.push(Pair::new(s1 as u32, s2 as u32));
                     }
-                    true
-                });
+                }
+                true
+            });
         };
 
         let range = 0..physics.items.len();

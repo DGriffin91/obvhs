@@ -291,30 +291,25 @@ impl Bvh2 {
     /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
     /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
-    pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(
-        &self,
-        stack: &mut HeapStack<u32>,
-        aabb: Aabb,
-        mut eval: F,
-    ) {
-        stack.clear();
-        stack.push(0);
-        while let Some(current_node_index) = stack.pop() {
-            let node = &self.nodes[*current_node_index as usize];
-            if !node.aabb().intersect_aabb(&aabb) {
-                continue;
-            }
-
-            if node.is_leaf() {
-                if !eval(self, *current_node_index) {
-                    return;
+    pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
+        fast_stack!(u32, (96, 192), self.max_depth, stack, {
+            stack.push(0);
+            while let Some(current_node_index) = stack.pop() {
+                let node = &self.nodes[*current_node_index as usize];
+                if !node.aabb().intersect_aabb(&aabb) {
+                    continue;
                 }
-            } else {
-                stack.push(node.first_index);
-                stack.push(node.first_index + 1);
+
+                if node.is_leaf() {
+                    if !eval(self, *current_node_index) {
+                        return;
+                    }
+                } else {
+                    stack.push(node.first_index);
+                    stack.push(node.first_index + 1);
+                }
             }
-        }
-        stack.clear();
+        });
     }
 
     /// Order node array in stack traversal order. Ensures parents are always at lower indices than children. Fairly

@@ -11,7 +11,6 @@ mod tests {
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
         },
-        faststack::HeapStack,
         ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         ray::{Ray, RayHit},
         test_util::{
@@ -182,8 +181,7 @@ mod tests {
         let mut intersect_sum = 0usize;
         let mut intersect_count = 0;
         bvh2.validate(&tris, false, false);
-        let mut stack = HeapStack::new_with_capacity(bvh2.max_depth);
-        bvh2.aabb_traverse(&mut stack, aabb, |bvh, id| {
+        bvh2.aabb_traverse(aabb, |bvh, id| {
             let node = &bvh.nodes[id as usize];
             for i in 0..node.prim_count {
                 let primitive_id = bvh.primitive_indices[(node.first_index + i) as usize] as usize;
