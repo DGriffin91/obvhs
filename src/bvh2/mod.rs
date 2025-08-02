@@ -259,7 +259,7 @@ impl Bvh2 {
                         hit.t = ray.tmax;
                         return;
                     };
-                    current_node_index = *next;
+                    current_node_index = next;
                 }
             }
         }
@@ -295,13 +295,13 @@ impl Bvh2 {
         fast_stack!(u32, (96, 192), self.max_depth, stack, {
             stack.push(0);
             while let Some(current_node_index) = stack.pop() {
-                let node = &self.nodes[*current_node_index as usize];
+                let node = &self.nodes[current_node_index as usize];
                 if !node.aabb().intersect_aabb(&aabb) {
                     continue;
                 }
 
                 if node.is_leaf() {
-                    if !eval(self, *current_node_index) {
+                    if !eval(self, current_node_index) {
                         return;
                     }
                 } else {
@@ -398,7 +398,7 @@ impl Bvh2 {
                 stack.push(0);
                 reverse_stack.push(0);
                 while let Some(current_node_index) = stack.pop() {
-                    let node = &self.nodes[*current_node_index as usize];
+                    let node = &self.nodes[current_node_index as usize];
                     if !node.is_leaf() {
                         reverse_stack.push(node.first_index);
                         reverse_stack.push(node.first_index + 1);

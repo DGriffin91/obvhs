@@ -116,7 +116,7 @@ macro_rules! traverse {
                     break;
                 }
 
-                $state.current_group = *$state.stack.pop_fast();
+                $state.current_group = $state.stack.pop_fast();
             }
         }
     }};

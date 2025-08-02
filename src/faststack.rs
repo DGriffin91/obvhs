@@ -4,8 +4,8 @@ use core::ops::{Deref, DerefMut};
 // TODO could allow Clone + Zeroable instead of Copy
 pub trait FastStack<T: Copy + Default> {
     fn push(&mut self, v: T);
-    fn pop_fast(&mut self) -> &T;
-    fn pop(&mut self) -> Option<&T>;
+    fn pop_fast(&mut self) -> T;
+    fn pop(&mut self) -> Option<T>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool;
     fn clear(&mut self);
@@ -156,10 +156,10 @@ impl<T: Copy + Default> FastStack<T> for HeapStack<T> {
     /// # Returns
     /// `Some(T)` if the stack is not empty, otherwise `None`.
     #[inline(always)]
-    fn pop(&mut self) -> Option<&T> {
+    fn pop(&mut self) -> Option<T> {
         if self.index > 0 {
             self.index = self.index.saturating_sub(1);
-            Some(&self.data[self.index])
+            Some(self.data[self.index])
         } else {
             None
         }
@@ -174,10 +174,10 @@ impl<T: Copy + Default> FastStack<T> for HeapStack<T> {
     /// # Returns
     /// The value at the top of the stack.
     #[inline(always)]
-    fn pop_fast(&mut self) -> &T {
+    fn pop_fast(&mut self) -> T {
         self.index = self.index.saturating_sub(1);
         let v = unsafe { self.data.get_unchecked(self.index) };
-        v
+        *v
     }
 
     /// Returns the number of elements in the stack.
@@ -223,9 +223,9 @@ mod tests {
         stack.push(3);
 
         assert_eq!(stack.len(), 3);
-        assert_eq!(stack.pop(), Some(&3));
-        assert_eq!(stack.pop(), Some(&2));
-        assert_eq!(stack.pop(), Some(&1));
+        assert_eq!(stack.pop(), Some(3));
+        assert_eq!(stack.pop(), Some(2));
+        assert_eq!(stack.pop(), Some(1));
         assert_eq!(stack.pop(), None);
     }
 
@@ -245,9 +245,9 @@ mod tests {
         stack.push(2);
         stack.push(3);
 
-        assert_eq!(*stack.pop_fast(), 3);
-        assert_eq!(*stack.pop_fast(), 2);
-        assert_eq!(*stack.pop_fast(), 1);
+        assert_eq!(stack.pop_fast(), 3);
+        assert_eq!(stack.pop_fast(), 2);
+        assert_eq!(stack.pop_fast(), 1);
     }
 
     #[test]
@@ -300,17 +300,17 @@ impl<T: Copy + Default, const STACK_SIZE: usize> FastStack<T> for StackStack<T, 
     }
     /// Pops a value from the stack without checking bounds. If the stack is empty it will return the value in the first position.
     #[inline(always)]
-    fn pop_fast(&mut self) -> &T {
+    fn pop_fast(&mut self) -> T {
         self.index = self.index.saturating_sub(1);
         let v = unsafe { self.data.get_unchecked(self.index) };
-        v
+        *v
     }
     /// Pops a value from the stack.
     #[inline(always)]
-    fn pop(&mut self) -> Option<&T> {
+    fn pop(&mut self) -> Option<T> {
         if self.index > 0 {
             self.index = self.index.saturating_sub(1);
-            Some(&self.data[self.index])
+            Some(self.data[self.index])
         } else {
             None
         }
@@ -329,5 +329,26 @@ impl<T: Copy + Default, const STACK_SIZE: usize> FastStack<T> for StackStack<T, 
     #[inline(always)]
     fn clear(&mut self) {
         self.index = 0;
+    }
+}
+
+impl<T: Copy + Default> FastStack<T> for Vec<T> {
+    fn push(&mut self, v: T) {
+        self.push(v);
+    }
+    fn pop_fast(&mut self) -> T {
+        self.pop().unwrap()
+    }
+    fn pop(&mut self) -> Option<T> {
+        self.pop()
+    }
+    fn len(&self) -> usize {
+        self.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.is_empty()
+    }
+    fn clear(&mut self) {
+        self.clear();
     }
 }

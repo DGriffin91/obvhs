@@ -278,7 +278,7 @@ impl CwBvh {
                     break;
                 }
 
-                state.current_group = *state.stack.pop_fast();
+                state.current_group = state.stack.pop_fast();
             }
         }
 
@@ -429,7 +429,7 @@ impl CwBvh {
                     // https://github.com/jan-van-bergen/GPU-Raytracer/blob/6559ae2241c8fdea0ddaec959fe1a47ec9b3ab0d/Src/CUDA/Raytracing/BVH8.h#L262
                 }
 
-                current_group = *stack.pop_fast();
+                current_group = stack.pop_fast();
             }
         }
 

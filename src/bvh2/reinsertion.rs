@@ -294,11 +294,11 @@ pub fn find_reinsertion(bvh: &Bvh2, node_id: usize) -> Reinsertion {
                     continue;
                 }
 
-                let dst_node = &bvh.nodes[*top_sibling_id as usize];
+                let dst_node = &bvh.nodes[top_sibling_id as usize];
                 let merged_area = dst_node.aabb().union(aabb).half_area();
                 let reinsert_area = top_area_diff - merged_area;
                 if reinsert_area > best_reinsertion.area_diff {
-                    best_reinsertion.to = *top_sibling_id;
+                    best_reinsertion.to = top_sibling_id;
                     best_reinsertion.area_diff = reinsert_area;
                 }
 
