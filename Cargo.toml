@@ -12,7 +12,7 @@ keywords = ["bvh", "sah", "aabb", "cwbvh", "ploc"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = { version = "0.29", features = ["bytemuck"] }
+glam = { version = "0.30", features = ["bytemuck"] }
 half = "2.3.1"
 bytemuck = { version = "1.23", features = ["derive", "extern_crate_alloc"] }
 rdst = { version = "0.20.14", default-features = false }
