@@ -17,6 +17,7 @@ unsafe impl Zeroable for Triangle {}
 
 impl Triangle {
     /// Compute the normal of the triangle geometry.
+    #[must_use]
     #[inline(always)]
     pub fn compute_normal(&self) -> Vec3A {
         let e1 = self.v1 - self.v0;
@@ -25,6 +26,7 @@ impl Triangle {
     }
 
     /// Compute the bounding box of the triangle.
+    #[must_use]
     #[inline(always)]
     pub fn aabb(&self) -> Aabb {
         Aabb::from_points(&[self.v0, self.v1, self.v2])
@@ -32,6 +34,7 @@ impl Triangle {
 
     /// Find the distance (t) of the intersection of the `Ray` and this Triangle.
     /// Returns f32::INFINITY for miss.
+    #[must_use]
     #[inline(always)]
     pub fn intersect(&self, ray: &Ray) -> f32 {
         // TODO not very water tight from the back side in some contexts (tris with edges at 0,0,0 show 1px gap)
@@ -155,6 +158,7 @@ impl Triangle {
         f32::INFINITY
     }
 
+    #[must_use]
     #[inline(always)]
     pub fn compute_barycentric(&self, ray: &Ray) -> Vec2 {
         let e1 = self.v0 - self.v1;
