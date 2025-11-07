@@ -7,6 +7,8 @@ pub mod morton;
 // https://meistdan.github.io/publications/ploc/paper.pdf
 // https://github.com/madmann91/bvh/blob/v1/include/bvh/locally_ordered_clustering_builder.hpp
 
+use core::f32;
+
 use glam::DVec3;
 use rdst::{RadixKey, RadixSort};
 
@@ -151,7 +153,7 @@ pub fn build_ploc_from_leafs<const SEARCH_DISTANCE: usize>(
         if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
             // TODO try making build_ploc_from_leafs_one that embeds this logic into
             // the main `while index < merge.len() {` loop  (may not be faster, tbd)
-            let mut last_cost = f32::MAX;
+            let mut last_cost = f32::INFINITY;
             let count = current_nodes.len() - 1;
             assert!(count < merge.len()); // Try to elide bounds check
             (0..count).for_each(|i| {
@@ -256,7 +258,7 @@ fn find_best_node_basic(index: usize, nodes: &[Bvh2Node], search_distance: usize
             continue;
         }
         let cost = our_aabb.union(&nodes[other].aabb).half_area();
-        if cost < best_cost {
+        if cost <= best_cost {
             best_node = other;
             best_cost = cost;
         }
@@ -333,7 +335,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
 
         for other in begin..index {
             let area = self.back(index, other);
-            if area < best_cost {
+            if area <= best_cost {
                 best_node = other;
                 best_cost = area;
             }
@@ -343,7 +345,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
         ((index + 1)..end).for_each(|other| {
             let cost = our_aabb.union(&nodes[other].aabb).half_area();
             *self.front(index, other) = cost;
-            if cost < best_cost {
+            if cost <= best_cost {
                 best_node = other;
                 best_cost = cost;
             }
