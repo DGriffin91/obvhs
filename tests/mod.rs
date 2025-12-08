@@ -33,6 +33,28 @@ mod tests {
     }
 
     #[test]
+    pub fn build_bvh2_with_many_inf() {
+        let bvh = build_bvh2(
+            &[Aabb::INFINITY; 10],
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
+        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+    }
+
+    #[test]
+    pub fn build_bvh2_with_many_max() {
+        let bvh = build_bvh2(
+            &[Aabb::LARGEST; 10],
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
+        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+    }
+
+    #[test]
     pub fn build_cwbvh_with_empty_aabb() {
         let bvh = build_cwbvh(
             &[Aabb::empty()],
