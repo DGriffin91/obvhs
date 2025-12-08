@@ -133,8 +133,6 @@ impl Bvh2 {
     }
 
     /// Traverse the bvh for a given `Ray`. Returns the closest intersected primitive.
-    /// `primitives` should be the list of primitives used to generate the bvh reordered per Bvh2::primitive_indices.
-    /// To avoid needing to reorder the primitives at the cost of one layer of indirection, see traverse_indirect.
     ///
     /// # Arguments
     /// * `ray` - The ray to be tested for intersection.
@@ -156,6 +154,7 @@ impl Bvh2 {
                 let t = intersection_fn(ray, primitive_id as usize);
                 if t < ray.tmax {
                     hit.primitive_id = primitive_id;
+                    hit.t = t;
                     ray.tmax = t;
                 }
             });
@@ -169,19 +168,85 @@ impl Bvh2 {
         hit.t < ray.tmax // Note this is valid since traverse_with_stack does not mutate the ray
     }
 
+    /// Traverse the bvh for a given `Ray`. Returns true if the ray missed all primitives.
+    ///
+    /// # Arguments
+    /// * `ray` - The ray to be tested for intersection.
+    /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
+    /// * `intersection_fn` - should take the given ray and primitive index and return the distance to the intersection, if any.
+    ///
+    /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
+    /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
+    /// original primitives per primitive_indices.
+    #[inline(always)]
+    pub fn ray_traverse_miss<F: FnMut(&Ray, usize) -> f32>(
+        &self,
+        ray: Ray,
+        mut intersection_fn: F,
+    ) -> bool {
+        let mut miss = true;
+        let mut intersect_prims = |node: &Bvh2Node, ray: &mut Ray, _hit: &mut RayHit| {
+            for primitive_id in node.first_index..node.first_index + node.prim_count {
+                let t = intersection_fn(ray, primitive_id as usize);
+                if t < ray.tmax {
+                    miss = false;
+                    return false;
+                }
+            }
+            true
+        };
+
+        fast_stack!(u32, (96, 192), self.max_depth, stack, {
+            Bvh2::ray_traverse_dynamic(
+                self,
+                &mut stack,
+                ray,
+                &mut RayHit::none(),
+                &mut intersect_prims,
+            )
+        });
+
+        miss
+    }
+
+    /// Traverse the bvh for a given `Ray`. Intersects all primitives along ray (for things like evaluating transparency)
+    ///   intersection_fn is called for all intersections. Ray is not updated to allow for evaluating at every hit.
+    ///
+    /// # Arguments
+    /// * `ray` - The ray to be tested for intersection.
+    /// * `intersection_fn` - takes the given ray and primitive index.
+    ///
+    /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
+    /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
+    /// original primitives per primitive_indices.
+    #[inline(always)]
+    pub fn ray_traverse_anyhit<F: FnMut(&Ray, usize)>(&self, ray: Ray, mut intersection_fn: F) {
+        let mut intersect_prims = |node: &Bvh2Node, ray: &mut Ray, _hit: &mut RayHit| {
+            for primitive_id in node.first_index..node.first_index + node.prim_count {
+                intersection_fn(ray, primitive_id as usize);
+            }
+            true
+        };
+
+        let mut hit = RayHit::none();
+        fast_stack!(u32, (96, 192), self.max_depth, stack, {
+            self.ray_traverse_dynamic(&mut stack, ray, &mut hit, &mut intersect_prims)
+        });
+    }
+
     /// Traverse the BVH
     /// Returns false when no hit is found.
     ///
     /// # Arguments
     /// * `state` - Holds the current traversal state. Allows traverse_dynamic to yield.
     /// * `hit` - As traverse_dynamic intersects primitives, it will update `hit` with the closest.
-    /// * `intersection_fn` - should test the primitives in the given node, update the ray.tmax, and hit info.
-    ///   Return true to continue traversal.
+    /// * `intersection_fn` - should test the primitives in the given node, update the ray.tmax, and hit info. Return
+    ///   false to halt traversal.
     ///   For basic miss test return false on first hit to halt traversal.
     ///   For closest hit run until it returns false and check hit.t < ray.tmax to see if it hit something
     ///   For transparency, you want to hit every primitive in the ray's path, keeping track of the closest opaque hit.
     ///   and then manually setting ray.tmax to that closest opaque hit at each iteration.
-    ///   
+    ///
     /// Note the primitive index should index first into Bvh2::primitive_indices then that will be index of original primitive.
     /// Various parts of the BVH building process might reorder the primitives. To avoid this indirection, reorder your
     /// original primitives per primitive_indices.
@@ -190,17 +255,17 @@ impl Bvh2 {
         F: FnMut(&Bvh2Node, &mut Ray, &mut RayHit) -> bool,
         Stack: FastStack<u32>,
     >(
-        bvh: &Bvh2,
+        &self,
         stack: &mut Stack,
         mut ray: Ray,
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) {
-        if bvh.nodes.is_empty() {
+        if self.nodes.is_empty() {
             return;
         }
 
-        let root_node = &bvh.nodes[0];
+        let root_node = &self.nodes[0];
         let hit_root = root_node.aabb().intersect_ray(&ray) < ray.tmax;
         if !hit_root {
             return;
@@ -212,9 +277,9 @@ impl Bvh2 {
         let mut current_node_index = root_node.first_index;
         loop {
             let right_index = current_node_index as usize + 1;
-            assert!(right_index < bvh.nodes.len());
-            let mut left_node = unsafe { bvh.nodes.get_unchecked(current_node_index as usize) };
-            let mut right_node = unsafe { bvh.nodes.get_unchecked(right_index) };
+            assert!(right_index < self.nodes.len());
+            let mut left_node = unsafe { self.nodes.get_unchecked(current_node_index as usize) };
+            let mut right_node = unsafe { self.nodes.get_unchecked(right_index) };
 
             // TODO perf: could it be faster to intersect these at the same time with avx?
             let mut left_t = left_node.aabb().intersect_ray(&ray);

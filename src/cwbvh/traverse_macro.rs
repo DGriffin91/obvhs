@@ -103,7 +103,7 @@ macro_rules! traverse {
                 $state.primitive_group.y = &$state.hitmask & 0x00ffffffu32;
             } else {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // $state.primitive_group = $state.current_group;
                 $state.current_group = UVec2::ZERO;
             }

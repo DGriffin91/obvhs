@@ -194,7 +194,54 @@ impl CwBvh {
         // let mut state = self.new_ray_traversal(ray);
         // while self.ray_traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
 
-        hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
+        hit.t < ray.tmax // Note this is valid since this does not mutate the ray
+    }
+
+    /// Traverse the bvh for a given `Ray`. Returns true if the ray missed all primitives.
+    pub fn ray_traverse_miss<F: FnMut(&Ray, usize) -> f32>(
+        &self,
+        ray: Ray,
+        mut intersection_fn: F,
+    ) -> bool {
+        let mut state = self.new_traversal(ray.direction);
+        let mut node;
+        let mut miss = true;
+        'outer: {
+            crate::traverse!(
+                self,
+                node,
+                state,
+                node.intersect_ray(&ray, state.oct_inv4),
+                {
+                    let t = intersection_fn(&ray, state.primitive_id as usize);
+                    if t < ray.tmax {
+                        miss = false;
+                        break 'outer;
+                    }
+                }
+            );
+        }
+        miss
+    }
+
+    /// Traverse the bvh for a given `Ray`. Intersects all primitives along ray (for things like evaluating transparency)
+    ///   intersection_fn is called for all intersections. Ray is not updated to allow for evaluating at every hit.
+    ///
+    /// # Arguments
+    /// * `ray` - The ray to be tested for intersection.
+    /// * `intersection_fn` - takes the given ray and primitive index.
+    pub fn ray_traverse_anyhit<F: FnMut(&Ray, usize)>(&self, ray: Ray, mut intersection_fn: F) {
+        let mut state = self.new_traversal(ray.direction);
+        let mut node;
+        crate::traverse!(
+            self,
+            node,
+            state,
+            node.intersect_ray(&ray, state.oct_inv4),
+            {
+                intersection_fn(&ray, state.primitive_id as usize);
+            }
+        );
     }
 
     /// Traverse the BVH
@@ -265,7 +312,7 @@ impl CwBvh {
             // There's no nodes left in the current group
             {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // state.primitive_group = state.current_group;
                 state.current_group = UVec2::ZERO;
             }
@@ -345,7 +392,7 @@ impl CwBvh {
             // There's no nodes left in the current group
             {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // primitive_group = current_group;
                 current_group = UVec2::ZERO;
             }
@@ -361,7 +408,6 @@ impl CwBvh {
                     // Remove primitive from current_group
                     primitive_group.y &= !(1u32 << local_primitive_index);
 
-                    // Mesh id or entitiy id. If entitiy, it would be necessary to look up mesh id from entity.
                     let global_primitive_index = primitive_group.x + local_primitive_index;
 
                     if primitive_group.y != 0 {
@@ -713,7 +759,7 @@ impl CwBvh {
         }
         //self.print_nodes();
 
-        result.max_depth = self.caclulate_max_depth(0, &mut result, 0);
+        result.max_depth = self.calculate_max_depth(0, &mut result, 0);
 
         if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
             for node in &self.nodes {
@@ -859,7 +905,7 @@ impl CwBvh {
     }
 
     /// Calculate the maximum depth of the BVH from this node down.
-    fn caclulate_max_depth(
+    fn calculate_max_depth(
         &self,
         node_idx: usize,
         result: &mut CwBvhValidationResult,
@@ -894,7 +940,7 @@ impl CwBvh {
                 let child_node_idx = node.child_base_idx as usize + relative_index as usize;
 
                 let child_depth =
-                    self.caclulate_max_depth(child_node_idx, result, current_depth + 1);
+                    self.calculate_max_depth(child_node_idx, result, current_depth + 1);
 
                 max_depth = max_depth.max(child_depth);
             } else {
