@@ -673,11 +673,10 @@ impl CwBvh {
             }
             let new_idx = new_node.child_node_index(new_ch) as usize;
             self.nodes[new_idx] = old_child_nodes[ch];
-            if let Some(old_child_exact_aabbs) = &old_child_exact_aabbs {
-                if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
+            if let Some(old_child_exact_aabbs) = &old_child_exact_aabbs
+                && let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
                     exact_node_aabbs[new_idx] = old_child_exact_aabbs[ch];
                 }
-            }
             assert!(new_idx >= old_node.child_base_idx as usize);
             assert!(new_idx < old_node.child_base_idx as usize + child_inner_count);
         }
