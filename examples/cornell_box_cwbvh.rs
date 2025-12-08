@@ -3,11 +3,11 @@ use std::{f32::consts::PI, time::Duration};
 use glam::*;
 use image::{ImageBuffer, Rgba};
 use obvhs::{
+    BvhBuildParams, Transformable,
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
     test_util::geometry::{CUBE, PLANE},
     triangle::Triangle,
-    BvhBuildParams, Transformable,
 };
 
 #[path = "./helpers/debug.rs"]

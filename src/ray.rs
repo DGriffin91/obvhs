@@ -1,6 +1,6 @@
 //! A ray in 3D space.
 
-use glam::{vec3a, Vec3A};
+use glam::{Vec3A, vec3a};
 
 /// Computes the inverse of `x` avoiding division by zero.
 pub fn safe_inverse(x: f32) -> f32 {

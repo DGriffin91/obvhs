@@ -2,10 +2,10 @@ use argh::FromArgs;
 use glam::*;
 use image::{ImageBuffer, Rgba};
 use obvhs::{
+    BvhBuildParams,
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
     triangle::Triangle,
-    BvhBuildParams,
 };
 use std::{path::PathBuf, time::Duration};
 

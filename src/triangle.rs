@@ -1,9 +1,9 @@
 //! Triangle representation in 3D space.
 
 use bytemuck::{Pod, Zeroable};
-use glam::{vec2, Mat4, Vec2, Vec3A};
+use glam::{Mat4, Vec2, Vec3A, vec2};
 
-use crate::{aabb::Aabb, ray::Ray, Boundable, Transformable};
+use crate::{Boundable, Transformable, aabb::Aabb, ray::Ray};
 
 #[derive(Clone, Copy, Default, Debug, Zeroable)]
 pub struct Triangle {

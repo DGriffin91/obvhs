@@ -147,7 +147,10 @@ impl<T: Copy + Default> FastStack<T> for HeapStack<T> {
             *unsafe { self.data.get_unchecked_mut(self.index) } = v;
             self.index += 1;
         } else {
-            panic!("Index out of bounds: the HeapStack is full (length: {}) and cannot accommodate more elements", self.data.len());
+            panic!(
+                "Index out of bounds: the HeapStack is full (length: {}) and cannot accommodate more elements",
+                self.data.len()
+            );
         }
     }
 

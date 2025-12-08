@@ -1,10 +1,10 @@
 use std::thread::{self, JoinHandle};
 
-use glam::{vec4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Vec3, Vec4, Vec4Swizzles, vec4};
 use minifb::{Key, Window, WindowOptions};
 use std::sync::{
-    atomic::{AtomicU32, Ordering},
     Arc,
+    atomic::{AtomicU32, Ordering},
 };
 
 /// Spawn a debug window in a separate thread.
@@ -127,11 +127,7 @@ pub mod text {
     #[inline(always)]
     fn color_from_bit(bit: u8) -> u32 {
         // argb, alpha mask
-        if bit == 0 {
-            0x00000000
-        } else {
-            0xFFFFFFFF
-        }
+        if bit == 0 { 0x00000000 } else { 0xFFFFFFFF }
     }
 
     impl Text {

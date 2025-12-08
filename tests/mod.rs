@@ -5,6 +5,7 @@ mod tests {
 
     use glam::*;
     use obvhs::{
+        BvhBuildParams,
         aabb::Aabb,
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::{
@@ -19,7 +20,6 @@ mod tests {
         },
         traverse,
         triangle::Triangle,
-        BvhBuildParams,
     };
 
     const BUILD_PARAM_SET: [BvhBuildParams; 6] = [
@@ -379,14 +379,18 @@ mod tests {
 
                         assert!(exact_aabb.min.cmpge(compressed_aabb.min).all());
                         assert!(exact_aabb.max.cmple(compressed_aabb.max).all());
-                        assert!(exact_aabb
-                            .min
-                            .cmpge(child_node_self_compressed_aabb.min)
-                            .all());
-                        assert!(exact_aabb
-                            .max
-                            .cmple(child_node_self_compressed_aabb.max)
-                            .all());
+                        assert!(
+                            exact_aabb
+                                .min
+                                .cmpge(child_node_self_compressed_aabb.min)
+                                .all()
+                        );
+                        assert!(
+                            exact_aabb
+                                .max
+                                .cmple(child_node_self_compressed_aabb.max)
+                                .all()
+                        );
                     }
                 }
             }

@@ -1,12 +1,12 @@
 // Uses cost / merging from cwbvh paper
 
-use glam::{vec3a, UVec3, Vec3A};
+use glam::{UVec3, Vec3A, vec3a};
 
 use crate::{
+    PerComponent, VecExt,
     aabb::Aabb,
     bvh2::Bvh2,
-    cwbvh::{CwBvh, CwBvhNode, BRANCHING, DENOM},
-    PerComponent, VecExt,
+    cwbvh::{BRANCHING, CwBvh, CwBvhNode, DENOM},
 };
 
 use super::DIRECTIONS;

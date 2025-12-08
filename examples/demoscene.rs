@@ -4,6 +4,7 @@ use argh::FromArgs;
 use glam::*;
 use image::{ImageBuffer, Rgba};
 use obvhs::{
+    BvhBuildParams,
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
     rt_triangle::RtTriangle,
@@ -14,14 +15,14 @@ use obvhs::{
             somewhat_boring_display_transform, uniform_sample_cone, uniform_sample_sphere,
         },
     },
-    timeit, BvhBuildParams,
+    timeit,
 };
 use std::{io::Write, time::Duration};
 
 #[path = "./helpers/debug.rs"]
 mod debug;
 use debug::{
-    debug_window, {color_to_minifb_pixel, AtomicColorBuffer},
+    debug_window, {AtomicColorBuffer, color_to_minifb_pixel},
 };
 
 #[derive(FromArgs)]
@@ -310,7 +311,7 @@ fn post_process(exposure: f32, color: &Vec3A) -> Vec3A {
 mod sky {
     use std::f32::consts::PI;
 
-    use glam::{vec3a, Vec3A};
+    use glam::{Vec3A, vec3a};
 
     use obvhs::test_util::sampling::smoothstep;
 

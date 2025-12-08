@@ -2,7 +2,7 @@ use std::fmt::{self, Formatter};
 
 use crate::{aabb::Aabb, ray::Ray};
 use bytemuck::{Pod, Zeroable};
-use glam::{vec3a, Vec3, Vec3A};
+use glam::{Vec3, Vec3A, vec3a};
 use std::fmt::Debug;
 
 use super::NQ_SCALE;

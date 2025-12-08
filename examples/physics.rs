@@ -8,12 +8,12 @@ use argh::FromArgs;
 use glam::*;
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
+    PrettyDuration,
     aabb::Aabb,
-    bvh2::{insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer, Bvh2},
+    bvh2::{Bvh2, insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer},
     faststack::HeapStack,
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
     ray::{Ray, RayHit},
-    PrettyDuration,
 };
 
 #[cfg(feature = "parallel")]

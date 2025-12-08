@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    ploc::PlocBuilder, splits::split_aabbs_preset, triangle::Triangle, Boundable, BvhBuildParams,
+    Boundable, BvhBuildParams, ploc::PlocBuilder, splits::split_aabbs_preset, triangle::Triangle,
 };
 
-use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
+use super::{Bvh2, leaf_collapser::collapse, reinsertion::ReinsertionOptimizer};
 
 /// Build a bvh2 from the given list of Triangles.
 /// Just a helper function / example, feel free to reimplement for your specific use case.

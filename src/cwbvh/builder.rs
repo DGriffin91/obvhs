@@ -1,12 +1,12 @@
 use std::time::{Duration, Instant};
 
 use crate::{
+    Boundable, BvhBuildParams,
     bvh2::reinsertion::ReinsertionOptimizer,
-    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
+    cwbvh::{CwBvh, bvh2_to_cwbvh::bvh2_to_cwbvh},
     ploc::PlocBuilder,
     splits::split_aabbs_preset,
     triangle::Triangle,
-    Boundable, BvhBuildParams,
 };
 
 /// Build a cwbvh from the given list of Triangles.

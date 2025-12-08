@@ -18,11 +18,11 @@ use std::{
 use reinsertion::find_reinsertion;
 
 use crate::{
+    Boundable, INVALID,
     aabb::Aabb,
     fast_stack,
     faststack::FastStack,
     ray::{Ray, RayHit},
-    Boundable, INVALID,
 };
 
 /// A binary BVH
@@ -572,7 +572,10 @@ impl Bvh2 {
                         return;
                     }
                 } else {
-                    debug_assert!(same_count < 2, "Some parents still needed refitting. Unideal fitting is occurring somewhere.");
+                    debug_assert!(
+                        same_count < 2,
+                        "Some parents still needed refitting. Unideal fitting is occurring somewhere."
+                    );
                 }
                 node.set_aabb(new_aabb);
             }
@@ -675,7 +678,11 @@ impl Bvh2 {
             self.max_depth as u32
         );
         if result.max_depth > DEFAULT_MAX_STACK_DEPTH as u32 {
-            log::warn!("bvh depth is: {}, a depth beyond {} may be indicative of something pathological in the scene (like thousands of instances perfectly overlapping geometry) that will result in a BVH that is very slow to traverse.", result.max_depth, DEFAULT_MAX_STACK_DEPTH);
+            log::warn!(
+                "bvh depth is: {}, a depth beyond {} may be indicative of something pathological in the scene (like thousands of instances perfectly overlapping geometry) that will result in a BVH that is very slow to traverse.",
+                result.max_depth,
+                DEFAULT_MAX_STACK_DEPTH
+            );
         }
 
         if self.children_are_ordered_after_parents {
@@ -920,9 +927,9 @@ mod tests {
     use glam::*;
 
     use crate::{
+        BvhBuildParams, Transformable,
         ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
-        BvhBuildParams, Transformable,
     };
 
     use super::builder::build_bvh2_from_tris;

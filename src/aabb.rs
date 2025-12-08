@@ -5,7 +5,7 @@ use std::ops::BitAnd;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec3A;
 
-use crate::{ray::Ray, Boundable};
+use crate::{Boundable, ray::Ray};
 
 /// An Axis-Aligned Bounding Box (AABB) represented by its minimum and maximum points.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Zeroable)]
@@ -125,11 +125,7 @@ impl Aabb {
     pub fn largest_axis(&self) -> usize {
         let d = self.diagonal();
         if d.x < d.y {
-            if d.y < d.z {
-                2
-            } else {
-                1
-            }
+            if d.y < d.z { 2 } else { 1 }
         } else if d.x < d.z {
             2
         } else {
@@ -142,11 +138,7 @@ impl Aabb {
     pub fn smallest_axis(&self) -> usize {
         let d = self.diagonal();
         if d.x > d.y {
-            if d.y > d.z {
-                2
-            } else {
-                1
-            }
+            if d.y > d.z { 2 } else { 1 }
         } else if d.x > d.z {
             2
         } else {

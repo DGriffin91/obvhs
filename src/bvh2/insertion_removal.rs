@@ -1,10 +1,10 @@
 use core::f32;
 
 use crate::{
-    aabb::Aabb,
-    bvh2::{update_primitives_to_nodes_for_node, Bvh2, Bvh2Node},
-    faststack::{FastStack, HeapStack},
     Boundable, INVALID,
+    aabb::Aabb,
+    bvh2::{Bvh2, Bvh2Node, update_primitives_to_nodes_for_node},
+    faststack::{FastStack, HeapStack},
 };
 
 use super::DEFAULT_MAX_STACK_DEPTH;
@@ -446,7 +446,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::{bvh2::builder::build_bvh2, test_util::geometry::demoscene, BvhBuildParams};
+    use crate::{BvhBuildParams, bvh2::builder::build_bvh2, test_util::geometry::demoscene};
 
     #[test]
     fn build_by_insertion() {
@@ -501,7 +501,9 @@ mod tests {
             }
         }
         if !found_leaf_with_multiple_nodes {
-            panic!("Test remove_all_primitives bvh2 should have some nodes that contain multiple primitives");
+            panic!(
+                "Test remove_all_primitives bvh2 should have some nodes that contain multiple primitives"
+            );
         }
 
         for bvh in &mut [bvh1, bvh2] {

@@ -9,7 +9,7 @@ pub mod morton;
 
 use std::mem;
 
-use bytemuck::{cast_slice_mut, zeroed_vec, Pod, Zeroable};
+use bytemuck::{Pod, Zeroable, cast_slice_mut, zeroed_vec};
 use glam::DVec3;
 use rdst::RadixKey;
 
@@ -26,9 +26,9 @@ use rayon::{
 use rdst::RadixSort;
 
 use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
-use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
+use crate::ploc::morton::{morton_encode_u64_unorm, morton_encode_u128_unorm};
+use crate::{Boundable, bvh2::node::Bvh2Node};
 use crate::{aabb::Aabb, bvh2::Bvh2};
-use crate::{bvh2::node::Bvh2Node, Boundable};
 
 #[derive(Clone)]
 pub struct PlocBuilder {

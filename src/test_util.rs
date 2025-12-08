@@ -168,7 +168,7 @@ pub mod sampling {
 }
 
 pub mod geometry {
-    use crate::{test_util::sampling::bicubic_noise, Triangle};
+    use crate::{Triangle, test_util::sampling::bicubic_noise};
     use glam::*;
 
     #[inline(always)]

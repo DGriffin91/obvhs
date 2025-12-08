@@ -5,7 +5,7 @@ use glam::*;
 
 use half::f16;
 
-use crate::{aabb::Aabb, ray::Ray, triangle::Triangle, Boundable};
+use crate::{Boundable, aabb::Aabb, ray::Ray, triangle::Triangle};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
