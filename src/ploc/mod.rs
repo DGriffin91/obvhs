@@ -7,7 +7,7 @@ pub mod morton;
 // https://meistdan.github.io/publications/ploc/paper.pdf
 // https://github.com/madmann91/bvh/blob/v1/include/bvh/locally_ordered_clustering_builder.hpp
 
-use std::mem;
+use std::{f32, mem};
 
 use bytemuck::{Pod, Zeroable, cast_slice_mut, zeroed_vec};
 use glam::DVec3;
@@ -306,7 +306,7 @@ impl PlocBuilder {
         while count > 1 {
             let merge = &mut merge_buffer[..count];
             if SEARCH_DISTANCE == 1 || depth < search_depth_threshold {
-                let mut last_cost = f32::MAX;
+                let mut last_cost = f32::INFINITY;
                 let calculate_costs = |(i, merge_n): (usize, &mut i8)| {
                     let cost = self.current_nodes[i]
                         .aabb()
@@ -325,7 +325,7 @@ impl PlocBuilder {
                     let calculate_costs_parallel = |(chunk_id, chunk): (usize, &mut [i8])| {
                         let start = chunk_id * chunk_size;
                         let mut last_cost = if start == 0 {
-                            f32::MAX
+                            f32::INFINITY
                         } else {
                             self.current_nodes[start - 1]
                                 .aabb()
@@ -476,7 +476,7 @@ fn find_best_node_basic(index: usize, nodes: &[Bvh2Node], search_distance: usize
             continue;
         }
         let cost = our_aabb.union(nodes[other].aabb()).half_area();
-        if cost < best_cost {
+        if cost <= best_cost {
             best_node = other;
             best_cost = cost;
         }
@@ -561,7 +561,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
                 self.back(index, other)
             };
 
-            if area < best_cost {
+            if area <= best_cost {
                 best_node = other;
                 best_cost = area;
             }
@@ -570,7 +570,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
         ((index + 1)..end).for_each(|other| {
             let cost = our_aabb.union(nodes[other].aabb()).half_area();
             *self.front(index, other) = cost;
-            if cost < best_cost {
+            if cost <= best_cost {
                 best_node = other;
                 best_cost = cost;
             }
@@ -588,7 +588,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
 
         for other in begin..index {
             let area = self.back(index, other);
-            if area < best_cost {
+            if area <= best_cost {
                 best_node = other;
                 best_cost = area;
             }
@@ -598,7 +598,7 @@ impl<const SEARCH_DISTANCE: usize> SearchCache<SEARCH_DISTANCE> {
         ((index + 1)..end).for_each(|other| {
             let cost = our_aabb.union(nodes[other].aabb()).half_area();
             *self.front(index, other) = cost;
-            if cost < best_cost {
+            if cost <= best_cost {
                 best_node = other;
                 best_cost = cost;
             }
