@@ -30,6 +30,7 @@ minifb = "0.28"
 argh = "0.1"
 obj = { version = "0.10", features = ["genmesh"] }
 ruzstd = "0.8"
+rayon = "1"
 
 [features]
 #default = ["parallel"]

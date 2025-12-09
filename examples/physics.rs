@@ -17,9 +17,8 @@ use obvhs::{
 };
 
 #[cfg(feature = "parallel")]
-use rayon::iter::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
 #[cfg(feature = "parallel")]
 use std::cell::RefCell;
 #[cfg(feature = "parallel")]
@@ -34,7 +33,7 @@ use crate::debug::timer::for_each_sorted_timer;
 #[derive(FromArgs, Default)]
 /// `physics` example.
 /// Runs an extremely simple physics simulation, optionally using a bvh for the broad phase and real time CPU ray
-/// tracing. Click the window to drop another ball. Run with `--release` and `--features parallel` for best performance.
+/// tracing. Click the window to drop another ball. Run with `--release` for best performance.
 struct Args {
     /// disables the renderer and window. Only runs physics sim for `count` steps, disables ray tracing.
     #[argh(switch)]
@@ -43,7 +42,7 @@ struct Args {
     #[argh(switch)]
     no_physics_bvh: bool,
     /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert', 'remove_and_insert'
-    #[argh(option, default = "BvhUpdate::Reinsert")]
+    #[argh(option, default = "BvhUpdate::Rebuild")]
     bvh_update: BvhUpdate,
     /// check that we got the same list of pairs from the bvh broad phase as brute force method
     #[argh(switch)]
@@ -66,6 +65,9 @@ struct Args {
     /// render resolution (width:height are 1:1)
     #[argh(option, default = "512")]
     render_res: usize,
+    #[argh(switch)]
+    /// for rendering to use a single thread (control building parallelism with `--features parallel`)
+    single_threaded_render: bool,
 }
 
 fn main() {
@@ -196,12 +198,8 @@ impl DebugRenderer {
 
     fn render(&self, physics: &PhysicsWorld, buffer: &mut Vec<u32>, bvh: &Bvh2) {
         dbg_scope!("render");
-        #[cfg(feature = "parallel")]
-        let iter = buffer.par_iter_mut();
-        #[cfg(not(feature = "parallel"))]
-        let iter = buffer.iter_mut();
 
-        iter.enumerate().for_each(|(i, color)| {
+        let render = |(i, color): (usize, &mut u32)| {
             // TODO there seems to be precision issues with rendering if the sphere are far away from the camera.
             // This issue occurs regardless of using a BVH. Maybe something in the projection or ray calculation?
             let frag_coord = uvec2((i % self.width) as u32, (i / self.width) as u32);
@@ -229,7 +227,13 @@ impl DebugRenderer {
             } else {
                 *color = 0; // Clear
             }
-        });
+        };
+
+        if physics.config.single_threaded_render {
+            buffer.iter_mut().enumerate().for_each(render);
+        } else {
+            buffer.par_iter_mut().enumerate().for_each(render);
+        };
     }
 }
 
@@ -281,6 +285,7 @@ impl FromStr for BvhUpdate {
 struct PhysicsWorld {
     items: Vec<SphereCollider>,
     bvh: Bvh2,
+    ploc_builder: PlocBuilder,
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
     reinsertion_optimizer: ReinsertionOptimizer,
     temp_aabbs: Vec<Aabb>,
@@ -296,6 +301,7 @@ impl Default for PhysicsWorld {
         Self {
             items: Default::default(),
             bvh: Default::default(),
+            ploc_builder: Default::default(),
             reinsertion_optimizer: Default::default(),
             bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(1000),
             temp_aabbs: Default::default(),
@@ -355,7 +361,8 @@ impl PhysicsWorld {
                 self.temp_aabbs.push(item.oversized_aabb);
             }
         }
-        self.bvh = PlocBuilder::new().build(
+        self.ploc_builder.build_with_bvh(
+            &mut self.bvh,
             PlocSearchDistance::Minimum,
             &self.temp_aabbs,
             indices,

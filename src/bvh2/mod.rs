@@ -30,7 +30,7 @@ use crate::{
 pub struct Bvh2 {
     /// List of nodes contained in this bvh. first_index in Bvh2Node for inner nodes indexes into this list. This list
     /// fully represents the BVH tree. The other fields in this struct provide additional information that allow the BVH
-    /// to be manipulated more efficently, but are not actually part of the BVH itself. The only other critical field is
+    /// to be manipulated more efficiently, but are not actually part of the BVH itself. The only other critical field is
     /// `primitive_indices`, assuming the BVH is not using a direct mapping.
     pub nodes: Vec<Bvh2Node>,
 
