@@ -86,6 +86,18 @@ impl Bvh2Node {
     #[cfg(feature = "small_bvh2_node")]
     #[inline(always)]
     pub fn aabb(&self) -> &Aabb {
+        // Note(Lokathor): (from bytemuck::try_cast_ref()) everything with `align_of` and `size_of` will optimize away
+        // after monomorphization.
+        // Note(Griffin): checked asm and this appears to be correct. Test with:
+
+        // #[unsafe(no_mangle)] pub unsafe extern "C" fn aabb_shim(node: &Bvh2Node) -> &Aabb { node.aabb() }
+        // (use basic_bvh2 in black_box in basic_bvh2)
+        // cargo objdump --example basic_bvh2 --release --features small_bvh2_node -- -d --disassemble-symbols=aabb_shim -C
+
+        // 000000000003e260 <aabb_shim>:
+        // 3e260: 48 89 f8   movq	%rdi, %rax
+        // 3e263: c3         retq
+
         bytemuck::cast_ref(self)
     }
 
