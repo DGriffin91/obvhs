@@ -77,8 +77,9 @@ pub struct Bvh2 {
     /// primitives will extend outside the leaf in some cases.
     /// If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1 correlation
     /// between the total number of primitives in leaf nodes and in Bvh2::primitive_indices, vs the input triangles.
-    /// If spatial splits are used, some validation steps have to be skipped and some features are unavailable.
-    /// (TODO: list unavailable features)
+    /// If spatial splits are used, some validation steps have to be skipped and some features are unavailable:
+    /// `Bvh2::add_leaf()`, `Bvh2::remove_leaf()`, `Bvh2::add_primitive()`, `Bvh2::remove_primitive()` as these would
+    /// require a mapping from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`
     pub uses_spatial_splits: bool,
 }
 
@@ -529,15 +530,24 @@ impl Bvh2 {
         }
     }
 
-    /// Compute compute_primitives_to_nodes and update cache only if they have not already been computed
+    /// Compute compute_primitives_to_nodes and update cache only if they have not already been computed. Not supported
+    /// if using spatial splits as it would require a mapping from one primitive to multiple nodes.
     pub fn init_primitives_to_nodes_if_uninit(&mut self) {
         if self.primitives_to_nodes.is_empty() {
             self.update_primitives_to_nodes();
         }
     }
 
-    /// Compute the mapping from primitive index to node index and update local cache.
+    /// Compute the mapping from primitive index to node index and update local cache. Not supported if using spatial
+    /// splits as it would require a mapping from one primitive to multiple nodes.
     pub fn update_primitives_to_nodes(&mut self) {
+        if self.uses_spatial_splits {
+            log::warn!(
+                "Calculating primitives_to_nodes while using spatial splits is currently unsupported as it would \
+                require a mapping from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
+            );
+        }
+
         Bvh2::compute_primitives_to_nodes(
             &self.nodes,
             &self.primitive_indices,
