@@ -1,5 +1,3 @@
-use std::thread::{self, JoinHandle};
-
 use glam::{Vec3, Vec4, Vec4Swizzles, vec4};
 use minifb::{Key, Window, WindowOptions};
 use std::sync::{
@@ -9,46 +7,27 @@ use std::sync::{
 
 /// Spawn a debug window in a separate thread.
 #[allow(dead_code)]
-pub fn debug_window<F>(
-    width: usize,
-    height: usize,
-    options: WindowOptions,
-    draw: F,
-) -> JoinHandle<()>
+pub fn debug_window<F>(width: usize, height: usize, options: WindowOptions, draw: F)
 where
     F: Fn(&mut Window, &mut [u32]) + Send + 'static,
 {
-    thread::spawn(move || {
-        let mut window = Window::new("", width, height, options).unwrap();
-        window.set_target_fps(30);
-        let mut buffer = vec![0u32; width * height];
-        while window.is_open() && !window.is_key_down(Key::Escape) {
-            draw(&mut window, &mut buffer);
-            window.update_with_buffer(&buffer, width, height).unwrap();
-        }
-    })
-}
-
-#[allow(dead_code)]
-pub struct DebugWindow {
-    pub buffer: AtomicColorBuffer,
-    pub thread: std::thread::JoinHandle<()>,
+    let mut window = Window::new("", width, height, options).unwrap();
+    window.set_target_fps(30);
+    let mut buffer = vec![0u32; width * height];
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        draw(&mut window, &mut buffer);
+        window.update_with_buffer(&buffer, width, height).unwrap();
+    }
 }
 
 /// Spawn a simple debug window in a separate thread. Shared buffer is drawn directly to window.
 #[allow(dead_code)]
-pub fn simple_debug_window(width: usize, height: usize) -> DebugWindow {
-    let shared_buffer = AtomicColorBuffer::new(width, height);
-    let window_buffer = shared_buffer.clone();
-    let window_thread = debug_window(width, height, Default::default(), move |_window, buffer| {
+pub fn simple_debug_window(width: usize, height: usize, shared_buffer: AtomicColorBuffer) {
+    debug_window(width, height, Default::default(), move |_window, buffer| {
         for (i, pixel) in buffer.iter_mut().enumerate() {
             *pixel = color_to_minifb_pixel(shared_buffer.get(i));
         }
     });
-    DebugWindow {
-        buffer: window_buffer,
-        thread: window_thread,
-    }
 }
 
 /// A very basic buffer for async debug rendering

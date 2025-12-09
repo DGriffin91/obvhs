@@ -7,7 +7,7 @@ use obvhs::{
     ray::{Ray, RayHit},
     triangle::Triangle,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, thread, time::Duration};
 
 #[cfg(feature = "parallel")]
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -18,6 +18,8 @@ use debug::simple_debug_window;
 #[path = "./helpers/load_obj.rs"]
 mod load_obj;
 use load_obj::load_obj_mesh_data;
+
+use crate::debug::AtomicColorBuffer;
 
 #[derive(FromArgs)]
 /// `demoscene` example
@@ -78,16 +80,18 @@ fn render(args: Args, bvh_build_params: BvhBuildParams) -> Vec<Vec3A> {
         Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
     let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
 
-    let window = (!args.no_window).then(|| simple_debug_window(width, height));
+    let shared_buffer =
+        (!args.no_window).then(|| AtomicColorBuffer::new(width as usize, height as usize));
+    let shared_buffer_clone = shared_buffer.clone();
 
-    #[cfg(feature = "parallel")]
-    let iter = (0..width * height).into_par_iter();
-    #[cfg(not(feature = "parallel"))]
-    let iter = (0..width * height).into_iter();
+    let render_thread = thread::spawn(move || {
+        #[cfg(feature = "parallel")]
+        let iter = (0..width * height).into_par_iter();
+        #[cfg(not(feature = "parallel"))]
+        let iter = (0..width * height).into_iter();
 
-    // For each pixel trace ray into scene and write normal as color to image buffer
-    let fragments = iter
-        .map(|i| {
+        // For each pixel trace ray into scene and write normal as color to image buffer
+        iter.map(|i| {
             let frag_coord = uvec2((i % width) as u32, (i / width) as u32);
             let mut screen_uv = frag_coord.as_vec2() / target_size;
             screen_uv.y = 1.0 - screen_uv.y;
@@ -103,18 +107,21 @@ fn render(args: Args, bvh_build_params: BvhBuildParams) -> Vec<Vec3A> {
             if bvh.ray_traverse(ray, &mut hit, |ray, id| bvh_tris[id].intersect(ray)) {
                 let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
                 normal *= normal.dot(-ray.direction).signum(); // Double sided
-                if let Some(window) = &window {
-                    window.buffer.set(i, normal.extend(0.0));
+                if let Some(shared_buffer_clone) = &shared_buffer_clone {
+                    shared_buffer_clone.set(i, normal.extend(0.0));
                 }
                 normal
             } else {
                 Vec3A::ZERO
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    });
 
-    if let Some(window) = window {
-        window.thread.join().unwrap(); // Wait for window to close.
+    let fragments = render_thread.join().unwrap();
+
+    if let Some(shared_buffer) = shared_buffer {
+        simple_debug_window(width, height, shared_buffer); // Wait for window to close.
     }
 
     if let Some(output) = args.output {
