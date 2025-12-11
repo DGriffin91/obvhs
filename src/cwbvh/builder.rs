@@ -25,19 +25,21 @@ pub fn build_cwbvh_from_tris(
     let mut bvh2;
     let start_time;
     if config.pre_split {
-        let mut aabbs = Vec::with_capacity(triangles.len());
-        let mut indices = Vec::with_capacity(triangles.len());
         let mut largest_half_area = 0.0;
         let mut avg_area = 0.0;
 
-        for (i, tri) in triangles.iter().enumerate() {
-            let aabb = tri.aabb();
-            let half_area = aabb.half_area();
-            largest_half_area = half_area.max(largest_half_area);
-            avg_area += half_area;
-            aabbs.push(aabb);
-            indices.push(i as u32);
-        }
+        let mut aabbs = triangles
+            .iter()
+            .map(|tri| {
+                let aabb = tri.aabb();
+                let half_area = aabb.half_area();
+                largest_half_area = half_area.max(largest_half_area);
+                avg_area += half_area;
+                aabb
+            })
+            .collect::<Vec<_>>();
+        let mut indices = (0..triangles.len() as u32).collect::<Vec<_>>();
+
         avg_area /= triangles.len() as f32;
 
         start_time = Instant::now();
