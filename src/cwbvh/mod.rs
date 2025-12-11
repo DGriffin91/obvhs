@@ -462,7 +462,10 @@ impl CwBvh {
             if (current_group.y & 0xff000000) == 0 {
                 // If the stack is empty, end traversal.
                 if stack.is_empty() {
-                    current_group.y = 0;
+                    #[allow(unused)]
+                    {
+                        current_group.y = 0;
+                    }
                     break;
                 }
 

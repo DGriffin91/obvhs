@@ -112,7 +112,10 @@ macro_rules! traverse {
             if $state.primitive_group.y == 0 && ($state.current_group.y & 0xff000000) == 0 {
                 // If the stack is empty, end traversal.
                 if $state.stack.is_empty() {
-                    $state.current_group.y = 0;
+                    #[allow(unused)]
+                    {
+                        $state.current_group.y = 0;
+                    }
                     break;
                 }
 

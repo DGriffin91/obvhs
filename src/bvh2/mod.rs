@@ -59,7 +59,7 @@ pub struct Bvh2 {
     pub primitives_to_nodes: Vec<u32>,
 
     /// An optional mapping from a given node index to that node's parent for each node in the bvh.
-    /// See: Bvh2::init_parents().
+    /// See: Bvh2::init_parents_if_uninit().
     /// If `parents` is empty it's expected that it has not been initialized yet or has been invalidated.
     /// If `parents` is not empty it's expected that functions that modify the BVH will keep the mapping valid.
     pub parents: Vec<u32>,
