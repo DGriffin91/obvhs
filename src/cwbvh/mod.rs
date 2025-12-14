@@ -44,6 +44,7 @@ pub struct CwBvh {
     pub primitive_indices: Vec<u32>,
     pub total_aabb: Aabb,
     pub exact_node_aabbs: Option<Vec<Aabb>>,
+    pub uses_spatial_splits: bool,
 }
 
 const TRAVERSAL_STACK_SIZE: usize = 32;

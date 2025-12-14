@@ -504,5 +504,9 @@ pub fn bvh2_to_cwbvh(
         primitive_indices: converter.primitive_indices,
         total_aabb: bvh2.nodes[0].aabb,
         exact_node_aabbs: converter.exact_node_aabbs,
+
+        //incorrect, just temp for compat for embree, this would come from bvh2.uses_spatial_splits but that doesn't
+        //exist in this version
+        uses_spatial_splits: false,
     }
 }

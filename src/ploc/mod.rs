@@ -19,7 +19,7 @@ use rayon::iter::{
 use crate::ploc::morton::{morton_encode_u128_unorm, morton_encode_u64_unorm};
 use crate::{
     aabb::Aabb,
-    bvh2::{Bvh2, Bvh2Node},
+    bvh2::{node::Bvh2Node, Bvh2},
 };
 
 impl PlocSearchDistance {
