@@ -689,6 +689,9 @@ impl Bvh2 {
     /// does not changed.
     #[inline]
     pub fn reinsert_node(&mut self, node_id: usize) {
+        if node_id == 0 {
+            return;
+        }
         let reinsertion = find_reinsertion(self, node_id);
         if reinsertion.area_diff > 0.0 {
             reinsertion::reinsert_node(self, reinsertion.from as usize, reinsertion.to as usize);
