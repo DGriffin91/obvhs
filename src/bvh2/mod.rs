@@ -341,6 +341,9 @@ impl Bvh2 {
         node_index: usize,
         leaf_indices: &mut Vec<usize>,
     ) {
+        if self.nodes.is_empty() {
+            return;
+        }
         let node = &self.nodes[node_index];
         if node.aabb().intersect_ray(ray) < f32::INFINITY {
             if node.is_leaf() {
@@ -383,6 +386,9 @@ impl Bvh2 {
     /// Doesn't seem to speed up traversal much for a new BVH created from PLOC, but if it has had many
     /// removals/insertions it can help.
     pub fn reorder_in_stack_traversal_order(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
         let mut new_nodes: Vec<Bvh2Node> = Vec::with_capacity(self.nodes.len());
         let mut mapping = vec![0; self.nodes.len()]; // Map from where n node used to be to where it is now
         let mut stack = Vec::new();
@@ -445,6 +451,9 @@ impl Bvh2 {
     ///    bvh.validate(&tris, false, true); // Validate that aabbs are now fitting tightly
     /// ```
     pub fn refit_all(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
         if self.children_are_ordered_after_parents {
             // If children are already ordered after parents we can update in a single sweep.
             // Around 3x faster than the fallback below.
@@ -502,6 +511,11 @@ impl Bvh2 {
     /// reusing the allocation.
     pub fn compute_parents(nodes: &[Bvh2Node], parents: &mut Vec<u32>) {
         parents.resize(nodes.len(), 0);
+
+        if nodes.is_empty() {
+            return;
+        }
+
         parents[0] = 0;
 
         #[cfg(not(feature = "parallel"))]
@@ -697,6 +711,18 @@ impl Bvh2 {
         direct_layout: bool,
         tight_fit: bool,
     ) -> Bvh2ValidationResult {
+        let mut result = Bvh2ValidationResult {
+            direct_layout,
+            require_tight_fit: tight_fit,
+            ..Default::default()
+        };
+
+        if self.nodes.is_empty() {
+            assert!(self.parents.is_empty());
+            assert!(self.primitives_to_nodes.is_empty());
+            return result;
+        }
+
         if !self.primitives_to_nodes.is_empty() {
             self.validate_primitives_to_nodes();
         }
@@ -704,12 +730,6 @@ impl Bvh2 {
         if !self.parents.is_empty() {
             self.validate_parents();
         }
-
-        let mut result = Bvh2ValidationResult {
-            direct_layout,
-            require_tight_fit: tight_fit,
-            ..Default::default()
-        };
 
         if !self.nodes.is_empty() {
             self.validate_impl::<T>(primitives, &mut result, 0, 0, 0);
