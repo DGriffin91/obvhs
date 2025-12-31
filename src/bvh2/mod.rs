@@ -361,6 +361,9 @@ impl Bvh2 {
     /// `node.prim_count` is the quantity of primitives contained in the given node.
     /// Return false from eval to halt traversal
     pub fn aabb_traverse<F: FnMut(&Self, u32) -> bool>(&self, aabb: Aabb, mut eval: F) {
+        if self.nodes.is_empty() {
+            return;
+        }
         fast_stack!(u32, (96, 192), self.max_depth, stack, {
             stack.push(0);
             while let Some(current_node_index) = stack.pop() {
