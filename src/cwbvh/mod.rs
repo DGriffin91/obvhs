@@ -16,13 +16,14 @@ use std::{
     fmt,
 };
 
-use glam::{uvec2, UVec2, UVec3, Vec3A};
+use glam::{UVec2, UVec3, Vec3A, uvec2};
 use node::CwBvhNode;
 
 use crate::{
-    aabb::Aabb,
-    ray::{Ray, RayHit},
     Boundable, PerComponent,
+    aabb::Aabb,
+    faststack::{FastStack, StackStack},
+    ray::{Ray, RayHit},
 };
 
 pub const BRANCHING: usize = 8;
@@ -44,65 +45,23 @@ pub struct CwBvh {
     pub primitive_indices: Vec<u32>,
     pub total_aabb: Aabb,
     pub exact_node_aabbs: Option<Vec<Aabb>>,
+
+    /// Indicates that this BVH is using spatial splits. Large triangles are split into multiple smaller Aabbs, so
+    /// primitives will extend outside the leaf in some cases.
+    /// If the bvh uses splits, a primitive can show up in multiple leaf nodes so there wont be a 1 to 1 correlation
+    /// between the total number of primitives in leaf nodes and in Bvh2::primitive_indices, vs the input triangles.
+    /// If spatial splits are used, some validation steps have to be skipped.
+    pub uses_spatial_splits: bool,
 }
 
-const TRAVERSAL_STACK_SIZE: usize = 32;
-/// A stack data structure implemented on the stack with fixed capacity.
-#[derive(Default)]
-pub struct TraversalStack32<T: Copy + Default> {
-    data: [T; TRAVERSAL_STACK_SIZE],
-    index: usize,
-}
-
-// TODO: possibly check bounds in debug.
-// TODO allow the user to provide their own stack impl via a Trait.
 // BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no TLAS.
 // A BVH that deep would perform very slowly and would likely indicate that the geometry is degenerate in some way.
 // CwBvh::validate() will assert the CwBvh depth is less than TRAVERSAL_STACK_SIZE
-impl<T: Copy + Default> TraversalStack32<T> {
-    /// Pushes a value onto the stack. If the stack is full it will overwrite the value in the last position.
-    #[inline(always)]
-    pub fn push(&mut self, v: T) {
-        *unsafe { self.data.get_unchecked_mut(self.index) } = v;
-        self.index = (self.index + 1).min(TRAVERSAL_STACK_SIZE - 1);
-    }
-    /// Pops a value from the stack without checking bounds. If the stack is empty it will return the value in the first position.
-    #[inline(always)]
-    pub fn pop_fast(&mut self) -> T {
-        self.index = self.index.saturating_sub(1);
-        let v = *unsafe { self.data.get_unchecked(self.index) };
-        v
-    }
-    /// Pops a value from the stack.
-    #[inline(always)]
-    pub fn pop(&mut self) -> Option<&T> {
-        if self.index > 0 {
-            self.index = self.index.saturating_sub(1);
-            Some(&self.data[self.index])
-        } else {
-            None
-        }
-    }
-    /// Returns the number of elements in the stack.
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.index
-    }
-    /// Returns true if the stack is empty.
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.index == 0
-    }
-    /// Clears the stack, removing all elements.
-    #[inline(always)]
-    pub fn clear(&mut self) {
-        self.index = 0;
-    }
-}
+const TRAVERSAL_STACK_SIZE: usize = 32;
 
 /// Holds Ray traversal state to allow for dynamic traversal (yield on hit)
 pub struct RayTraversal {
-    pub stack: TraversalStack32<UVec2>,
+    pub stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
     pub oct_inv4: u32,
@@ -123,7 +82,7 @@ impl RayTraversal {
 
 /// Holds traversal state to allow for dynamic traversal (yield on hit)
 pub struct Traversal {
-    pub stack: TraversalStack32<UVec2>,
+    pub stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE>,
     pub current_group: UVec2,
     pub primitive_group: UVec2,
     pub oct_inv4: u32,
@@ -164,7 +123,7 @@ impl CwBvh {
     #[inline(always)]
     pub fn new_ray_traversal(&self, ray: Ray) -> RayTraversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
-        let stack = TraversalStack32::default();
+        let stack = StackStack::default();
         let current_group = if self.nodes.is_empty() {
             UVec2::ZERO
         } else {
@@ -186,7 +145,7 @@ impl CwBvh {
     /// traversal_direction is used to determine the order of bvh node child traversal. This would typically be the ray direction.
     pub fn new_traversal(&self, traversal_direction: Vec3A) -> Traversal {
         //  BVH8's tend to be shallow. A stack of 32 would be very deep even for a large scene with no tlas.
-        let stack = TraversalStack32::default();
+        let stack = StackStack::default();
         let current_group = if self.nodes.is_empty() {
             UVec2::ZERO
         } else {
@@ -235,7 +194,54 @@ impl CwBvh {
         // let mut state = self.new_ray_traversal(ray);
         // while self.ray_traverse_dynamic(&mut state, hit, &mut intersection_fn) {}
 
-        hit.t < ray.tmax // Note this is valid since traverse_dynamic does not mutate the ray
+        hit.t < ray.tmax // Note this is valid since this does not mutate the ray
+    }
+
+    /// Traverse the bvh for a given `Ray`. Returns true if the ray missed all primitives.
+    pub fn ray_traverse_miss<F: FnMut(&Ray, usize) -> f32>(
+        &self,
+        ray: Ray,
+        mut intersection_fn: F,
+    ) -> bool {
+        let mut state = self.new_traversal(ray.direction);
+        let mut node;
+        let mut miss = true;
+        'outer: {
+            crate::traverse!(
+                self,
+                node,
+                state,
+                node.intersect_ray(&ray, state.oct_inv4),
+                {
+                    let t = intersection_fn(&ray, state.primitive_id as usize);
+                    if t < ray.tmax {
+                        miss = false;
+                        break 'outer;
+                    }
+                }
+            );
+        }
+        miss
+    }
+
+    /// Traverse the bvh for a given `Ray`. Intersects all primitives along ray (for things like evaluating transparency)
+    ///   intersection_fn is called for all intersections. Ray is not updated to allow for evaluating at every hit.
+    ///
+    /// # Arguments
+    /// * `ray` - The ray to be tested for intersection.
+    /// * `intersection_fn` - takes the given ray and primitive index.
+    pub fn ray_traverse_anyhit<F: FnMut(&Ray, usize)>(&self, ray: Ray, mut intersection_fn: F) {
+        let mut state = self.new_traversal(ray.direction);
+        let mut node;
+        crate::traverse!(
+            self,
+            node,
+            state,
+            node.intersect_ray(&ray, state.oct_inv4),
+            {
+                intersection_fn(&ray, state.primitive_id as usize);
+            }
+        );
     }
 
     /// Traverse the BVH
@@ -306,7 +312,7 @@ impl CwBvh {
             // There's no nodes left in the current group
             {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // state.primitive_group = state.current_group;
                 state.current_group = UVec2::ZERO;
             }
@@ -340,7 +346,7 @@ impl CwBvh {
         hit: &mut RayHit,
         mut intersection_fn: F,
     ) -> bool {
-        let mut stack = TraversalStack32::default();
+        let mut stack: StackStack<UVec2, TRAVERSAL_STACK_SIZE> = StackStack::default();
         let mut current_group;
         let mut tlas_stack_size = INVALID; // tlas_stack_size is used to indicate whether we are in the TLAS or not.
         let mut current_mesh = INVALID;
@@ -386,7 +392,7 @@ impl CwBvh {
             // There's no nodes left in the current group
             {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // primitive_group = current_group;
                 current_group = UVec2::ZERO;
             }
@@ -402,7 +408,6 @@ impl CwBvh {
                     // Remove primitive from current_group
                     primitive_group.y &= !(1u32 << local_primitive_index);
 
-                    // Mesh id or entitiy id. If entitiy, it would be necessary to look up mesh id from entity.
                     let global_primitive_index = primitive_group.x + local_primitive_index;
 
                     if primitive_group.y != 0 {
@@ -457,7 +462,10 @@ impl CwBvh {
             if (current_group.y & 0xff000000) == 0 {
                 // If the stack is empty, end traversal.
                 if stack.is_empty() {
-                    current_group.y = 0;
+                    #[allow(unused)]
+                    {
+                        current_group.y = 0;
+                    }
                     break;
                 }
 
@@ -499,7 +507,9 @@ impl CwBvh {
         parents
     }
 
-    /// Reorder the children of every BVH node. This results in a slightly different order since the normal reordering during
+    /// Reorder the children of every BVH node. Arranges child nodes in Morton order according to their centroids
+    /// so that the order in which the intersected children are traversed can be determined by the ray octant.
+    /// This results in a slightly different order since the normal reordering during
     /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
@@ -513,7 +523,9 @@ impl CwBvh {
         }
     }
 
-    /// Reorder the children of the given node_idx. This results in a slightly different order since the normal reordering during
+    /// Reorder the children of the given node_idx. Arranges child nodes in Morton order according to their centroids
+    /// so that the order in which the intersected children are traversed can be determined by the ray octant.
+    /// This results in a slightly different order since the normal reordering during
     /// building is using the aabb's from the Bvh2 and this uses the children node.p and node.e to compute the aabb. Traversal
     /// seems to be a bit slower on some scenes and a bit faster on others. Note this will rearrange self.nodes. Anything that
     /// depends on the order of self.nodes will need to be updated.
@@ -529,6 +541,7 @@ impl CwBvh {
         direct_layout: bool,
     ) {
         // TODO could this use ints and work in local node grid space?
+        // TODO support using exact_node_aabbs
 
         let old_node = self.nodes[node_index];
 
@@ -577,7 +590,6 @@ impl CwBvh {
         assert!(child_count <= BRANCHING);
         assert!(cost.len() >= child_count);
         // Fill cost table
-        // TODO parallel: check to see if this is faster w/ par_iter
         for s in 0..DIRECTIONS {
             let d = Vec3A::new(
                 if (s & 0b100) != 0 { -1.0 } else { 1.0 },
@@ -710,10 +722,10 @@ impl CwBvh {
             }
             let new_idx = new_node.child_node_index(new_ch) as usize;
             self.nodes[new_idx] = old_child_nodes[ch];
-            if let Some(old_child_exact_aabbs) = &old_child_exact_aabbs {
-                if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
-                    exact_node_aabbs[new_idx] = old_child_exact_aabbs[ch];
-                }
+            if let Some(old_child_exact_aabbs) = &old_child_exact_aabbs
+                && let Some(exact_node_aabbs) = &mut self.exact_node_aabbs
+            {
+                exact_node_aabbs[new_idx] = old_child_exact_aabbs[ch];
             }
             assert!(new_idx >= old_node.child_base_idx as usize);
             assert!(new_idx < old_node.child_base_idx as usize + child_inner_count);
@@ -735,15 +747,13 @@ impl CwBvh {
     pub fn validate<T: Boundable>(
         &self,
         primitives: &[T],
-        splits: bool,
         direct_layout: bool,
     ) -> CwBvhValidationResult {
-        if !splits {
+        if !self.uses_spatial_splits {
             // Could still check this if duplicated were removed from self.primitive_indices first
             assert_eq!(self.primitive_indices.len(), primitives.len());
         }
         let mut result = CwBvhValidationResult {
-            splits,
             direct_layout,
             ..Default::default()
         };
@@ -752,7 +762,7 @@ impl CwBvh {
         }
         //self.print_nodes();
 
-        result.max_depth = self.caclulate_max_depth(0, &mut result, 0);
+        result.max_depth = self.calculate_max_depth(0, &mut result, 0);
 
         if let Some(exact_node_aabbs) = &self.exact_node_aabbs {
             for node in &self.nodes {
@@ -880,7 +890,7 @@ impl CwBvh {
                         }
                         let prim_aabb = primitives[prim_index].aabb();
 
-                        if !result.splits {
+                        if !self.uses_spatial_splits {
                             // TODO: option that correctly takes into account error of compressed triangle.
                             // Maybe Boundable can return an epsilon, and for compressed triangles it
                             // can take into account the edge length
@@ -898,7 +908,7 @@ impl CwBvh {
     }
 
     /// Calculate the maximum depth of the BVH from this node down.
-    fn caclulate_max_depth(
+    fn calculate_max_depth(
         &self,
         node_idx: usize,
         result: &mut CwBvhValidationResult,
@@ -933,7 +943,7 @@ impl CwBvh {
                 let child_node_idx = node.child_base_idx as usize + relative_index as usize;
 
                 let child_depth =
-                    self.caclulate_max_depth(child_node_idx, result, current_depth + 1);
+                    self.calculate_max_depth(child_node_idx, result, current_depth + 1);
 
                 max_depth = max_depth.max(child_depth);
             } else {
@@ -1002,8 +1012,6 @@ fn ray_get_octant_inv4(dir: &Vec3A) -> u32 {
 /// Result of CwBvh validation. Contains various bvh stats.
 #[derive(Default)]
 pub struct CwBvhValidationResult {
-    /// Whether the BVH primitives have splits or not.
-    pub splits: bool,
     /// The primitives are already laid out in bvh.primitive_indices order.
     pub direct_layout: bool,
     /// Set of primitives discovered though validation traversal.
@@ -1014,7 +1022,7 @@ pub struct CwBvhValidationResult {
     pub node_count: usize,
     /// Total number of node children discovered though validation traversal.
     pub child_count: usize,
-    /// Total number of leafs discovered though validation traversal.
+    /// Total number of leaves discovered though validation traversal.
     pub leaf_count: usize,
     /// Total number of primitives discovered though validation traversal.
     pub prim_count: usize,
