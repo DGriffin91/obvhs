@@ -182,6 +182,16 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         stack: &mut HeapStack<SiblingInsertionCandidate>,
     ) -> usize {
         assert!(new_node.is_leaf());
+
+        if self.nodes.is_empty() {
+            self.nodes.push(new_node);
+            self.parents.clear();
+            self.parents.push(0);
+            return 0;
+        }
+
+        self.init_parents_if_uninit();
+
         let mut min_cost = f32::MAX;
         let mut best_sibling_candidate_id = 0;
         let mut max_stack_len = 1;
@@ -394,11 +404,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 /// (goes up by something like n^3 after a certain threshold).
 /// (BVH quality still improved afterward lot by reinsertion/collapse).
 pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
-    let mut bvh = Bvh2 {
-        nodes: vec![Bvh2Node::new(primitives[0].aabb(), 1, 0)],
-        primitive_indices: vec![0],
-        ..Default::default()
-    };
+    let mut bvh = Bvh2::default();
 
     let mut stack = HeapStack::new_with_capacity(1000);
 
@@ -411,7 +417,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     #[cfg(debug_assertions)]
     {
-        bvh.validate(primitives, false, false);
+        bvh.validate(primitives, false, true);
     }
 
     bvh
