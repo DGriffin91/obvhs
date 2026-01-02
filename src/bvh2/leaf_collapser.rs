@@ -10,7 +10,7 @@ use rayon::{
 };
 
 #[cfg(feature = "parallel")]
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use crate::bvh2::{Bvh2, Bvh2Node};
 
@@ -206,7 +206,7 @@ fn bottom_up_traverse<F>(
         return;
     }
 
-    let mut flags: Vec<u32> = zeroed_vec(bvh.nodes.len());
+    let mut flags: Vec<u8> = zeroed_vec(bvh.nodes.len());
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
     (1..bvh.nodes.len()).for_each(|i| {
@@ -219,13 +219,15 @@ fn bottom_up_traverse<F>(
             while j != 0 {
                 j = bvh.parents[j] as usize;
 
+                let flag = &mut flags[j];
+
                 // Make sure that the children of this inner node have been processed
-                let previous_flag = flags[j];
-                flags[j] += 1;
+                let previous_flag = *flag;
+                *flag = previous_flag.saturating_add(1);
                 if previous_flag != 1 {
                     break;
                 }
-                flags[j] = 0;
+                *flag = 0;
 
                 process_node(false, j);
             }
@@ -249,9 +251,9 @@ fn bottom_up_traverse<F>(
     }
 
     // Compiles down to just alloc_zeroed https://users.rust-lang.org/t/create-vector-of-atomicusize-etc/121695/5
-    let flags = vec![0u32; bvh.nodes.len()]
+    let flags = vec![0u8; bvh.nodes.len()]
         .into_iter()
-        .map(AtomicU32::new)
+        .map(AtomicU8::new)
         .collect::<Vec<_>>();
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
@@ -265,11 +267,13 @@ fn bottom_up_traverse<F>(
             while j != 0 {
                 j = bvh.parents[j] as usize;
 
+                let flag = &flags[j];
+
                 // Make sure that the children of this inner node have been processed
-                if flags[j].fetch_add(1, Ordering::SeqCst) != 1 {
+                if flag.fetch_add(1, Ordering::SeqCst) != 1 {
                     break;
                 }
-                flags[j].store(0, Ordering::SeqCst);
+                flag.store(0, Ordering::SeqCst);
 
                 process_node(false, j);
             }
