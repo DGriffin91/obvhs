@@ -235,6 +235,12 @@ fn bottom_up_traverse<F>(
     });
 }
 
+// Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
+// https://research.nvidia.com/sites/default/files/pubs/2012-06_Maximizing-Parallelism-in/karras2012hpg_paper.pdf
+// Paths from leaf nodes to the root are processed in parallel. Each thread starts from one leaf node and walks up the
+// tree using parent pointers. We track how many threads have visited each internal node using atomic counters—the first
+// thread terminates immediately while the second one gets to process the node. This way, each node is processed by
+// exactly one thread, which leads to O(n) time complexity.
 #[cfg(feature = "parallel")]
 /// Caller must make sure Bvh2::parents is initialized
 fn bottom_up_traverse<F>(
