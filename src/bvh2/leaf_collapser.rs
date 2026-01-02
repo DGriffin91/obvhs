@@ -193,6 +193,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
 // Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
 #[cfg(not(feature = "parallel"))]
+/// Caller must make sure Bvh2::parents is initialized
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
     mut process_node: F, // True is for leaf
@@ -209,7 +210,7 @@ fn bottom_up_traverse<F>(
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
     (1..bvh.nodes.len()).for_each(|i| {
-        // Only process leaves
+        // Always start at leaf
         if bvh.nodes[i].is_leaf() {
             process_node(true, i);
 
@@ -233,6 +234,7 @@ fn bottom_up_traverse<F>(
 }
 
 #[cfg(feature = "parallel")]
+/// Caller must make sure Bvh2::parents is initialized
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
     process_node: F, // True is for leaf
@@ -254,14 +256,13 @@ fn bottom_up_traverse<F>(
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
     (1..bvh.nodes.len()).into_par_iter().for_each(|i| {
-        // Only process leaves
+        // Always start at leaf
         if bvh.nodes[i].is_leaf() {
             process_node(true, i);
 
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i;
             while j != 0 {
-                // SAFETY: Caller asserts self.bvh.parents is Some outside of hot loop
                 j = bvh.parents[j] as usize;
 
                 // Make sure that the children of this inner node have been processed
