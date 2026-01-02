@@ -10,7 +10,7 @@ use rayon::{
 };
 
 #[cfg(feature = "parallel")]
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::bvh2::{Bvh2, Bvh2Node};
 
@@ -257,9 +257,9 @@ fn bottom_up_traverse<F>(
     }
 
     // Compiles down to just alloc_zeroed https://users.rust-lang.org/t/create-vector-of-atomicusize-etc/121695/5
-    let flags = vec![0u8; bvh.nodes.len()]
+    let flags = vec![0u32; bvh.nodes.len()]
         .into_iter()
-        .map(AtomicU8::new)
+        .map(AtomicU32::new)
         .collect::<Vec<_>>();
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
