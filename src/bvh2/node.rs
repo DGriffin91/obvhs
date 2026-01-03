@@ -20,6 +20,8 @@ pub struct Bvh2Node {
     /// Number of primitives contained in this node.
     /// If prim_count is 0, this is a inner node.
     /// If prim_count > 0 this node is a leaf node.
+    /// Note: CwBvh will clamp to max 3, Bvh2 will clamp to max 255
+    ///   partial rebuilds uses u32::MAX to temporarily designate a subtree root.
     pub prim_count: u32,
     /// The bounding box maximum coordinate for the primitive(s) contained in this node
     pub max: Vec3,
@@ -44,6 +46,8 @@ pub struct Bvh2Node {
     /// Number of primitives contained in this node.
     /// If prim_count is 0, this is a inner node.
     /// If prim_count > 0 this node is a leaf node.
+    /// Note: CwBvh will clamp to max 3, Bvh2 will clamp to max 255
+    ///   partial rebuilds uses u32::MAX to temporarily designate a subtree root.
     pub prim_count: u32,
     /// The index of the first child Aabb or primitive.
     /// If this node is an inner node the first child will be at `nodes[first_index]`, and the second at `nodes[first_index + 1]`.

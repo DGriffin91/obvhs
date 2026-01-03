@@ -71,7 +71,7 @@ pub fn build_bvh2_from_tris(
     reinsertion_optimizer.run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
-        config.max_prims_per_leaf,
+        config.max_prims_per_leaf.clamp(1, 255),
         config.collapse_traversal_cost,
     );
     reinsertion_optimizer.run(
@@ -118,7 +118,7 @@ pub fn build_bvh2<T: Boundable>(
     reinsertion_optimizer.run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
-        config.max_prims_per_leaf,
+        config.max_prims_per_leaf.clamp(1, 255),
         config.collapse_traversal_cost,
     );
     reinsertion_optimizer.run(

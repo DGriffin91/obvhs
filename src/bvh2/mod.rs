@@ -364,21 +364,39 @@ impl Bvh2 {
         if self.nodes.is_empty() {
             return;
         }
+
+        let root_node = &self.nodes[0];
+        if root_node.is_leaf() && root_node.aabb().intersect_aabb(&aabb) {
+            eval(self, 0);
+            return;
+        }
+
         fast_stack!(u32, (96, 192), self.max_depth, stack, {
-            stack.push(0);
-            while let Some(current_node_index) = stack.pop() {
-                let node = &self.nodes[current_node_index as usize];
-                if !node.aabb().intersect_aabb(&aabb) {
-                    continue;
+            stack.push(1);
+            while let Some(node_index) = stack.pop() {
+                // Left
+                let node = &self.nodes[node_index as usize];
+                if node.aabb().intersect_aabb(&aabb) {
+                    if node.is_leaf() {
+                        if !eval(self, node_index) {
+                            return;
+                        }
+                    } else {
+                        stack.push(node.first_index);
+                    }
                 }
 
-                if node.is_leaf() {
-                    if !eval(self, current_node_index) {
-                        return;
+                // Right
+                let node_index = node_index + 1;
+                let node = &self.nodes[node_index as usize];
+                if node.aabb().intersect_aabb(&aabb) {
+                    if node.is_leaf() {
+                        if !eval(self, node_index) {
+                            return;
+                        }
+                    } else {
+                        stack.push(node.first_index);
                     }
-                } else {
-                    stack.push(node.first_index);
-                    stack.push(node.first_index + 1);
                 }
             }
         });

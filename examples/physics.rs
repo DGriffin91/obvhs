@@ -41,20 +41,20 @@ struct Args {
     /// disables using the bvh for physics broad phase (still uses it for rendering)
     #[argh(switch)]
     no_physics_bvh: bool,
-    /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert', 'remove_and_insert'
+    /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert', 'remove_and_insert', "partial_rebuild"
     #[argh(option, default = "BvhUpdate::Rebuild")]
     bvh_update: BvhUpdate,
     /// check that we got the same list of pairs from the bvh broad phase as brute force method
     #[argh(switch)]
     verify_pairs: bool,
     /// how much to oversize the AABBs when using Reinsert or RemoveAndInsert `min_aabb + radius * aabb_oversize_factor`
-    #[argh(option, default = "0.1")]
+    #[argh(option, default = "0.3")]
     aabb_oversize: f32,
     /// physics delta step. Constant so it's deterministic.
     #[argh(option, default = "0.015")]
     dt: f32,
     /// initial sphere count
-    #[argh(option, default = "3000")]
+    #[argh(option, default = "10000")]
     count: u32,
     /// how many steps to take when the renderer is disabled
     #[argh(option, default = "2000")]
@@ -85,7 +85,7 @@ fn main() {
     for i in 0..physics.config.count {
         let x = (i as f32 * 0.001).sin() * 1.0;
         let z = (i as f32 * 0.001).cos() * 1.0;
-        physics.add_sphere(vec3a(x, i as f32 * 0.25, z), Vec3A::ZERO, 0.5, 0.5);
+        physics.add_sphere(vec3a(x, i as f32 * 0.25, z), Vec3A::ZERO, 0.3, 0.5);
     }
     physics.bvh_full_rebuild();
 
@@ -264,6 +264,7 @@ enum BvhUpdate {
     Reinsert,
     ParallelReinsert,
     RemoveAndInsert,
+    PartialRebuild,
 }
 
 impl FromStr for BvhUpdate {
@@ -275,8 +276,9 @@ impl FromStr for BvhUpdate {
             "reinsert" => Ok(Self::Reinsert),
             "parallel_reinsert" => Ok(Self::ParallelReinsert),
             "remove_and_insert" => Ok(Self::RemoveAndInsert),
+            "partial_rebuild" => Ok(Self::PartialRebuild),
             _ => Err(format!(
-                "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'remove_and_insert'"
+                "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'remove_and_insert', 'partial_rebuild'"
             )),
         }
     }
@@ -289,6 +291,8 @@ struct PhysicsWorld {
     bvh_insertion_stack: HeapStack<SiblingInsertionCandidate>,
     reinsertion_optimizer: ReinsertionOptimizer,
     temp_aabbs: Vec<Aabb>,
+    temp_indices: Vec<u32>,
+    temp_bvh: Bvh2,
     collision_pairs: Vec<Pair>,
     #[cfg(feature = "parallel")]
     temp_pairs: ThreadLocal<RefCell<Vec<Pair>>>,
@@ -303,8 +307,10 @@ impl Default for PhysicsWorld {
             bvh: Default::default(),
             ploc_builder: Default::default(),
             reinsertion_optimizer: Default::default(),
-            bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(1000),
+            bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(10000),
             temp_aabbs: Default::default(),
+            temp_indices: Default::default(),
+            temp_bvh: Default::default(),
             collision_pairs: Vec::new(),
             #[cfg(feature = "parallel")]
             temp_pairs: ThreadLocal::new(),
@@ -337,9 +343,10 @@ impl PhysicsWorld {
         let id = self.add_sphere(position, velocity, radius, mass);
         let aabb = match self.config.bvh_update {
             BvhUpdate::Rebuild => self.items[id as usize].min_aabb,
-            BvhUpdate::Reinsert | BvhUpdate::ParallelReinsert | BvhUpdate::RemoveAndInsert => {
-                self.items[id as usize].oversized_aabb
-            }
+            BvhUpdate::Reinsert
+            | BvhUpdate::ParallelReinsert
+            | BvhUpdate::RemoveAndInsert
+            | BvhUpdate::PartialRebuild => self.items[id as usize].oversized_aabb,
         };
         self.bvh
             .insert_primitive(aabb, id, &mut self.bvh_insertion_stack);
@@ -390,17 +397,17 @@ impl PhysicsWorld {
         dbg_scope!("bvh_partial_rebuild_parallel_reinsert");
         let oversize_factor = self.oversize_factor();
         self.bvh.init_primitives_to_nodes_if_uninit();
-        let mut candidates = vec![]; // TODO reuse allocation
+        self.temp_indices.clear();
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 let node_id = self.bvh.primitives_to_nodes[primitive_id];
                 self.bvh.resize_node(node_id as usize, item.oversized_aabb);
-                candidates.push(node_id);
+                self.temp_indices.push(node_id);
                 self.updated_leaves_this_frame += 1;
             }
         }
         self.reinsertion_optimizer
-            .run_with_candidates(&mut self.bvh, &candidates, 1);
+            .run_with_candidates(&mut self.bvh, &self.temp_indices, 1);
     }
 
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
@@ -420,12 +427,39 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn bvh_partial_rebuild(&mut self) {
+        dbg_scope!("bvh_partial_rebuild");
+        let oversize_factor = self.oversize_factor();
+        self.updated_leaves_this_frame = 0;
+        self.temp_indices.clear();
+
+        self.bvh.init_primitives_to_nodes_if_uninit();
+        for (primitive_id, item) in self.items.iter_mut().enumerate() {
+            if item.update_oversized_aabb(oversize_factor) {
+                let node_id = self.bvh.primitives_to_nodes[primitive_id];
+                self.temp_indices.push(node_id);
+                self.bvh.nodes[node_id as usize].set_aabb(item.oversized_aabb);
+                self.updated_leaves_this_frame += 1;
+            }
+        }
+
+        self.ploc_builder.partial_rebuild(
+            &mut self.bvh,
+            &mut self.temp_bvh,
+            &self.temp_indices,
+            PlocSearchDistance::VeryLow,
+            SortPrecision::U64,
+            0,
+        );
+    }
+
     pub fn oversize_factor(&self) -> f32 {
         match self.config.bvh_update {
             BvhUpdate::Rebuild => 0.0,
-            BvhUpdate::Reinsert | BvhUpdate::ParallelReinsert | BvhUpdate::RemoveAndInsert => {
-                self.config.aabb_oversize
-            }
+            BvhUpdate::Reinsert
+            | BvhUpdate::ParallelReinsert
+            | BvhUpdate::RemoveAndInsert
+            | BvhUpdate::PartialRebuild => self.config.aabb_oversize,
         }
     }
 }
@@ -500,6 +534,7 @@ fn physics_update(physics: &mut PhysicsWorld) {
         BvhUpdate::Reinsert => physics.bvh_partial_rebuild_reinsert(),
         BvhUpdate::ParallelReinsert => physics.bvh_partial_rebuild_parallel_reinsert(),
         BvhUpdate::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
+        BvhUpdate::PartialRebuild => physics.bvh_partial_rebuild(),
     }
 
     physics.collision_pairs.clear();

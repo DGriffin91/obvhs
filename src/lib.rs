@@ -251,7 +251,7 @@ pub struct BvhBuildParams {
     pub post_collapse_reinsertion_batch_ratio_multiplier: f32,
     /// Bits used for ploc radix sort.
     pub sort_precision: SortPrecision,
-    /// Min 1 (CwBvh will clamp to max 3)
+    /// Min 1 (CwBvh will clamp to max 3, Bvh2 will clamp to max 255)
     pub max_prims_per_leaf: u32,
     /// Multiplier for traversal cost calculation during Bvh2 collapse (Does not affect CwBvh). A higher value will
     /// result in more primitives per leaf.

@@ -283,7 +283,8 @@ pub fn find_reinsertion(bvh: &Bvh2, node_id: usize) -> Reinsertion {
     let mut pivot_id = parent_id;
     let aabb = bvh.nodes[node_id].aabb();
     let mut longest = 0;
-    fast_stack!((f32, u32), (96, 192), bvh.max_depth, stack, {
+    // TODO is it possible to push only the left pair and reduce the stack size?
+    fast_stack!((f32, u32), (96, 192), bvh.max_depth * 2, stack, {
         stack.clear();
         loop {
             stack.push((area_diff, sibling_id as u32));
