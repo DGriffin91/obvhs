@@ -447,7 +447,7 @@ impl PhysicsWorld {
             &mut self.bvh,
             &mut self.temp_bvh,
             &self.temp_indices,
-            PlocSearchDistance::VeryLow,
+            PlocSearchDistance::Minimum,
             SortPrecision::U64,
             0,
         );
