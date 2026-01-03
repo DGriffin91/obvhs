@@ -35,7 +35,10 @@ use crate::{aabb::Aabb, bvh2::Bvh2};
 pub struct PlocBuilder {
     pub current_nodes: Vec<Bvh2Node>,
     pub next_nodes: Vec<Bvh2Node>,
-    pub mortons: Vec<[u128; 2]>, // Enough space/align for Morton64 or Morton128
+
+    // Enough space/align for Morton64 or Morton128. If this is updated make sure to also update anything that uses it.
+    // As things depend on it being exactly Vec<[u128; 2]>
+    pub mortons: Vec<[u128; 2]>,
 
     #[cfg(feature = "parallel")]
     pub local_aabbs: Vec<Aabb>,

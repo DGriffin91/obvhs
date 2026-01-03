@@ -35,10 +35,13 @@ impl PlocBuilder {
 
         bvh.init_parents_if_uninit();
         self.current_nodes.clear();
+        self.current_nodes.reserve(bvh.primitive_indices.len());
         self.next_nodes.clear();
         self.mortons.clear();
 
         // Bottom up traverse flagging nodes as being parents of leaves that need to be rebuilt.
+
+        // TODO reuse allocations. Tried reusing self.mortons as [u8] but the perf seemed the same.
         let mut flagged: Vec<bool> = vec![false; bvh.nodes.len()];
         for leaf_id in leaves {
             let mut index = *leaf_id as usize;
