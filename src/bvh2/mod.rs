@@ -366,8 +366,10 @@ impl Bvh2 {
         }
 
         let root_node = &self.nodes[0];
-        if root_node.is_leaf() && root_node.aabb().intersect_aabb(&aabb) {
-            eval(self, 0);
+        if root_node.is_leaf() {
+            if root_node.aabb().intersect_aabb(&aabb) {
+                eval(self, 0);
+            }
             return;
         }
 
