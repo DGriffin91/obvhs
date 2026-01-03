@@ -24,7 +24,7 @@ impl PlocBuilder {
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
     ) {
-        if bvh.nodes.is_empty() {
+        if bvh.nodes.len() < 2 {
             return;
         }
         if leaves.is_empty() {
@@ -56,25 +56,25 @@ impl PlocBuilder {
 
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
-            stack.push(0);
-            while let Some(current_node_index) = stack.pop() {
-                let node = &bvh.nodes[current_node_index as usize];
-                let flag = flagged[current_node_index as usize];
+            stack.push(1);
+            while let Some(left_node_index) = stack.pop() {
+                for node_index in [left_node_index as usize, left_node_index as usize + 1] {
+                    let node = &bvh.nodes[node_index];
+                    let flag = flagged[node_index];
 
-                if node.is_leaf() {
-                    self.current_nodes
-                        .push(bvh.nodes[current_node_index as usize]);
-                } else {
-                    if flag {
-                        stack.push(node.first_index);
-                        stack.push(node.first_index + 1);
+                    if node.is_leaf() {
+                        self.current_nodes.push(bvh.nodes[node_index]);
                     } else {
-                        // Unflagged sub tree. Make leaf node out of subtree root with index into old bvh.
-                        self.current_nodes.push(Bvh2Node::new(
-                            node.aabb,
-                            SUBTREE_ROOT,
-                            current_node_index,
-                        ));
+                        if flag {
+                            stack.push(node.first_index);
+                        } else {
+                            // Unflagged sub tree. Make leaf node out of subtree root with index into old bvh.
+                            self.current_nodes.push(Bvh2Node::new(
+                                node.aabb,
+                                SUBTREE_ROOT,
+                                node_index as u32,
+                            ));
+                        }
                     }
                 }
             }
@@ -171,9 +171,8 @@ mod tests {
 
     #[test]
     fn test_partial_rebuild_with_all_leaves() {
-        for res in 30..=32 {
-            let tris = demoscene(res, 0);
-
+        let sm = demoscene(5, 0);
+        for tris in [&demoscene(31, 0), &sm, &sm[..1], &sm[..2], &sm[..3], &[]] {
             let mut builder = PlocBuilder::with_capacity(tris.len());
             let mut temp_bvh = Bvh2::zeroed(tris.len());
 
@@ -248,9 +247,8 @@ mod tests {
 
     #[test]
     fn test_partial_rebuild_with_random_leaves() {
-        for res in 30..=32 {
-            let tris = demoscene(res, 0);
-
+        let sm = demoscene(5, 0);
+        for tris in [&demoscene(31, 0), &sm, &sm[..1], &sm[..2], &sm[..3], &[]] {
             let mut builder = PlocBuilder::with_capacity(tris.len());
             let mut temp_bvh = Bvh2::zeroed(tris.len());
 
