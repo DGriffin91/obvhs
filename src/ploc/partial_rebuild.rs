@@ -63,7 +63,7 @@ impl PlocBuilder {
                     let flag = flagged[node_index];
 
                     if node.is_leaf() {
-                        self.current_nodes.push(bvh.nodes[node_index]);
+                        self.current_nodes.push(*node);
                     } else {
                         if flag {
                             stack.push(node.first_index);
@@ -107,35 +107,36 @@ impl PlocBuilder {
         // Append subtrees onto new bvh
         fast_stack!((u32, u32), (96, 192), bvh.max_depth, stack, {
             for i in 0..temp_bvh.nodes.len() {
-                if temp_bvh.nodes[i].prim_count == SUBTREE_ROOT {
-                    let old_bvh_subtree_root = &bvh.nodes[temp_bvh.nodes[i].first_index as usize];
+                let node = &mut temp_bvh.nodes[i];
+                if node.prim_count == SUBTREE_ROOT {
+                    let old_bvh_subtree_root = &bvh.nodes[node.first_index as usize];
 
-                    // Convert back to inner node and point to end of node list as we'll put sub tree there.
-                    temp_bvh.nodes[i].prim_count = 0;
-                    temp_bvh.nodes[i].first_index = temp_bvh.nodes.len() as u32;
+                    // Convert back to inner node.
+                    node.prim_count = 0;
+
+                    // node.first_index will point to end of node list as we'll put sub tree there but it would be
+                    // overwritten later below so don't bother here: subtree_root.first_index = temp_bvh.nodes.len();
 
                     stack.clear();
-
                     stack.push((old_bvh_subtree_root.first_index, i as u32));
 
                     while let Some((old_left_index, new_parent)) = stack.pop() {
                         let old_right_index = old_left_index + 1;
-                        let old_left_node = &bvh.nodes[old_left_index as usize];
-                        let old_right_node = &bvh.nodes[old_right_index as usize];
 
                         let current_left_idx = temp_bvh.nodes.len() as u32;
 
                         // Update parent with location of children in new bvh
                         temp_bvh.nodes[new_parent as usize].first_index = current_left_idx;
 
+                        let old_left_node = &bvh.nodes[old_left_index as usize];
+                        let old_right_node = &bvh.nodes[old_right_index as usize];
                         if !old_left_node.is_leaf() {
-                            stack.push((old_left_node.first_index, temp_bvh.nodes.len() as u32));
+                            stack.push((old_left_node.first_index, current_left_idx));
+                        }
+                        if !old_right_node.is_leaf() {
+                            stack.push((old_right_node.first_index, current_left_idx + 1));
                         }
                         temp_bvh.nodes.push(*old_left_node);
-
-                        if !old_right_node.is_leaf() {
-                            stack.push((old_right_node.first_index, temp_bvh.nodes.len() as u32));
-                        }
                         temp_bvh.nodes.push(*old_right_node);
                     }
                 }
