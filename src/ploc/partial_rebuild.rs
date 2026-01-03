@@ -59,7 +59,7 @@ impl PlocBuilder {
 
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
-            stack.push(1);
+            stack.push(bvh.nodes[0].first_index);
             while let Some(left_node_index) = stack.pop() {
                 for node_index in [left_node_index as usize, left_node_index as usize + 1] {
                     let node = &bvh.nodes[node_index];

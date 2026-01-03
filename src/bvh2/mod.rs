@@ -374,7 +374,7 @@ impl Bvh2 {
         }
 
         fast_stack!(u32, (96, 192), self.max_depth, stack, {
-            stack.push(1);
+            stack.push(root_node.first_index);
             while let Some(node_index) = stack.pop() {
                 // Left
                 let node = &self.nodes[node_index as usize];
@@ -409,13 +409,13 @@ impl Bvh2 {
     /// Doesn't seem to speed up traversal much for a new BVH created from PLOC, but if it has had many
     /// removals/insertions it can help.
     pub fn reorder_in_stack_traversal_order(&mut self) {
-        if self.nodes.is_empty() {
+        if self.nodes.len() < 2 {
             return;
         }
         let mut new_nodes: Vec<Bvh2Node> = Vec::with_capacity(self.nodes.len());
         let mut mapping = vec![0; self.nodes.len()]; // Map from where n node used to be to where it is now
         let mut stack = Vec::new();
-        stack.push(1);
+        stack.push(self.nodes[0].first_index);
         new_nodes.push(self.nodes[0]);
         mapping[0] = 0;
         while let Some(current_node_index) = stack.pop() {
