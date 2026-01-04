@@ -295,6 +295,7 @@ struct PhysicsWorld {
     temp_aabbs: Vec<Aabb>,
     temp_indices: Vec<u32>,
     temp_bvh: Bvh2,
+    temp_flags: Vec<bool>,
     collision_pairs: Vec<Pair>,
     #[cfg(feature = "parallel")]
     temp_pairs: ThreadLocal<RefCell<Vec<Pair>>>,
@@ -313,6 +314,7 @@ impl Default for PhysicsWorld {
             temp_aabbs: Default::default(),
             temp_indices: Default::default(),
             temp_bvh: Default::default(),
+            temp_flags: Default::default(),
             collision_pairs: Vec::new(),
             #[cfg(feature = "parallel")]
             temp_pairs: ThreadLocal::new(),
@@ -445,13 +447,12 @@ impl PhysicsWorld {
             }
         }
 
-        let mut flags = Vec::new();
         self.bvh.init_parents_if_uninit();
-        compute_rebuild_path_flags(&self.bvh, &self.temp_indices, &mut flags);
+        compute_rebuild_path_flags(&self.bvh, &self.temp_indices, &mut self.temp_flags);
         self.ploc_builder.partial_rebuild(
             &mut self.bvh,
             &mut self.temp_bvh,
-            |node_id| flags[node_id],
+            |node_id| self.temp_flags[node_id],
             PlocSearchDistance::Minimum,
             SortPrecision::U64,
             0,
