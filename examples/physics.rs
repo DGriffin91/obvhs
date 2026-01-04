@@ -12,7 +12,9 @@ use obvhs::{
     aabb::Aabb,
     bvh2::{Bvh2, insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer},
     faststack::HeapStack,
-    ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
+    ploc::{
+        PlocBuilder, PlocSearchDistance, SortPrecision, partial_rebuild::compute_rebuild_path_flags,
+    },
     ray::{Ray, RayHit},
 };
 
@@ -443,10 +445,13 @@ impl PhysicsWorld {
             }
         }
 
+        let mut flags = Vec::new();
+        self.bvh.init_parents_if_uninit();
+        compute_rebuild_path_flags(&self.bvh, &self.temp_indices, &mut flags);
         self.ploc_builder.partial_rebuild(
             &mut self.bvh,
             &mut self.temp_bvh,
-            &self.temp_indices,
+            |node_id| flags[node_id],
             PlocSearchDistance::Minimum,
             SortPrecision::U64,
             0,

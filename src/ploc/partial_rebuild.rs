@@ -1,4 +1,4 @@
-use std::{mem, u32};
+use std::{borrow::Borrow, mem, u32};
 
 use crate::{
     bvh2::{Bvh2, node::Bvh2Node},
@@ -8,6 +8,38 @@ use crate::{
 };
 
 const SUBTREE_ROOT: u32 = u32::MAX;
+
+pub fn compute_rebuild_path_flags<I, L>(bvh: &Bvh2, leaves: I, flags: &mut Vec<bool>)
+where
+    I: IntoIterator<Item = L>,
+    L: Borrow<u32>,
+{
+    if bvh.nodes.len() < 2 {
+        return;
+    }
+    if bvh.parents.is_empty() {
+        panic!(
+            "Parents must be init before running compute_rebuild_path_flags. Call `bvh.init_parents_if_uninit()` first."
+        )
+    }
+
+    flags.clear();
+    flags.resize(bvh.nodes.len(), false);
+    // Bottom up traverse flagging nodes as being parents of leaves that need to be rebuilt.
+    for leaf_id in leaves {
+        let mut index = *leaf_id.borrow() as usize;
+        debug_assert!(bvh.nodes[index].is_leaf());
+        flags[index] = true;
+        while index > 0 {
+            index = bvh.parents[index] as usize;
+            if flags[index] {
+                // If already flagged don't need to continue up further, above this has already been traversed.
+                break;
+            }
+            flags[index] = true;
+        }
+    }
+}
 
 impl PlocBuilder {
     /// Partially rebuild the bvh. The given set of leaves and the subtrees that do not include any of the given leaves
@@ -19,7 +51,7 @@ impl PlocBuilder {
         &mut self,
         bvh: &mut Bvh2,
         temp_bvh: &mut Bvh2,
-        leaves: &[u32],
+        check_flag: impl Fn(usize) -> bool,
         search_distance: PlocSearchDistance,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
@@ -27,35 +59,13 @@ impl PlocBuilder {
         if bvh.nodes.len() < 2 {
             return;
         }
-        if leaves.is_empty() {
-            return;
-        }
 
         temp_bvh.reset_for_reuse(bvh.primitive_indices.len(), None);
 
-        bvh.init_parents_if_uninit();
         self.current_nodes.clear();
         self.current_nodes.reserve(bvh.primitive_indices.len());
         self.next_nodes.clear();
         self.mortons.clear();
-
-        // Bottom up traverse flagging nodes as being parents of leaves that need to be rebuilt.
-
-        // TODO reuse allocations. Tried reusing self.mortons as [u8] but the perf seemed the same.
-        let mut flagged: Vec<bool> = vec![false; bvh.nodes.len()];
-        for leaf_id in leaves {
-            let mut index = *leaf_id as usize;
-            debug_assert!(bvh.nodes[index].is_leaf());
-            flagged[index] = true;
-            while index > 0 {
-                index = bvh.parents[index] as usize;
-                if flagged[index] {
-                    // If already flagged don't need to continue up further, above this has already been traversed.
-                    break;
-                }
-                flagged[index] = true;
-            }
-        }
 
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
@@ -63,7 +73,7 @@ impl PlocBuilder {
             while let Some(left_node_index) = stack.pop() {
                 for node_index in [left_node_index as usize, left_node_index as usize + 1] {
                     let node = &bvh.nodes[node_index];
-                    let flag = flagged[node_index];
+                    let flag = check_flag(node_index);
 
                     if node.is_leaf() {
                         self.current_nodes.push(*node);
@@ -181,7 +191,7 @@ mod tests {
             let mut temp_bvh = Bvh2::zeroed(tris.len());
 
             let mut bvh = builder.build(
-                PlocSearchDistance::VeryLow,
+                PlocSearchDistance::Minimum,
                 &tris,
                 (0..tris.len() as u32).collect::<Vec<_>>(),
                 SortPrecision::U64,
@@ -190,19 +200,23 @@ mod tests {
 
             bvh.validate(&tris, false, true);
 
-            let leaves = bvh
-                .nodes
-                .iter()
-                .enumerate()
-                .filter(|(_i, n)| n.is_leaf())
-                .map(|(i, _n)| i as u32)
-                .collect::<Vec<u32>>();
+            bvh.init_parents_if_uninit();
+            let mut flags = Vec::new();
+            compute_rebuild_path_flags(
+                &bvh,
+                bvh.nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_i, n)| n.is_leaf())
+                    .map(|(i, _n)| i as u32),
+                &mut flags,
+            );
 
             builder.partial_rebuild(
                 &mut bvh,
                 &mut temp_bvh,
-                &leaves,
-                PlocSearchDistance::VeryLow,
+                |node_id| flags[node_id],
+                PlocSearchDistance::Minimum,
                 SortPrecision::U64,
                 1,
             );
@@ -219,31 +233,35 @@ mod tests {
         let mut temp_bvh = Bvh2::zeroed(tris.len());
 
         let mut bvh = builder.build(
-            PlocSearchDistance::VeryLow,
+            PlocSearchDistance::Minimum,
             &tris,
             (0..tris.len() as u32).collect::<Vec<_>>(),
             SortPrecision::U64,
-            1,
+            0,
         );
 
         bvh.validate(&tris, false, true);
 
-        let mut leaf = 0;
-
-        for (i, node) in bvh.nodes.iter().enumerate() {
-            if node.is_leaf() {
-                leaf = i as u32;
-                break;
-            }
-        }
+        bvh.init_parents_if_uninit();
+        let mut flags = Vec::new();
+        compute_rebuild_path_flags(
+            &bvh,
+            bvh.nodes
+                .iter()
+                .enumerate()
+                .filter(|(_i, n)| n.is_leaf())
+                .map(|(i, _n)| i as u32)
+                .take(1),
+            &mut flags,
+        );
 
         builder.partial_rebuild(
             &mut bvh,
             &mut temp_bvh,
-            &[leaf],
-            PlocSearchDistance::VeryLow,
+            |node_id| flags[node_id],
+            PlocSearchDistance::Minimum,
             SortPrecision::U64,
-            1,
+            0,
         );
 
         bvh.validate(&tris, false, true);
@@ -257,7 +275,7 @@ mod tests {
             let mut temp_bvh = Bvh2::zeroed(tris.len());
 
             let mut bvh = builder.build(
-                PlocSearchDistance::VeryLow,
+                PlocSearchDistance::Minimum,
                 &tris,
                 (0..tris.len() as u32).collect::<Vec<_>>(),
                 SortPrecision::U64,
@@ -266,21 +284,26 @@ mod tests {
 
             bvh.validate(&tris, false, true);
 
-            let mut leaves = Vec::new();
-
-            for (i, node) in bvh.nodes.iter().enumerate() {
-                if node.is_leaf() && hash_noise(UVec2::ZERO, i as u32) > 0.5 {
-                    leaves.push(i as u32);
-                }
-            }
+            bvh.init_parents_if_uninit();
+            let mut flags = Vec::new();
+            compute_rebuild_path_flags(
+                &bvh,
+                bvh.nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, n)| n.is_leaf() && hash_noise(UVec2::ZERO, *i as u32) > 0.5)
+                    .map(|(i, _n)| i as u32)
+                    .take(1),
+                &mut flags,
+            );
 
             builder.partial_rebuild(
                 &mut bvh,
                 &mut temp_bvh,
-                &leaves,
-                PlocSearchDistance::VeryLow,
+                |node_id| flags[node_id],
+                PlocSearchDistance::Minimum,
                 SortPrecision::U64,
-                1,
+                0,
             );
 
             bvh.validate(&tris, false, true);
