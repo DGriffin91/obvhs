@@ -262,12 +262,19 @@ impl PlocBuilder {
 
         let prim_count = self.current_nodes.len();
 
+        if prim_count == 0 {
+            return;
+        }
+
         // Merge nodes until there is only one left
         let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
 
         let mut insert_index = if REBUILD {
+            if bvh.nodes.is_empty() {
+                return;
+            }
             assert!(bvh.nodes.len() >= nodes_count);
-            1 // Would it be better if this went down?
+            bvh.nodes.len() - 1
         } else {
             bvh.nodes.resize(nodes_count, Bvh2Node::default());
             nodes_count
@@ -438,18 +445,16 @@ impl PlocBuilder {
                 if REBUILD {
                     loop {
                         // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
-                        let left_slot = &mut bvh.nodes[insert_index];
+                        let left_slot = &mut bvh.nodes[insert_index - 1];
                         if left_slot.prim_count == FREE_NODE_MARKER {
                             *left_slot = left;
-                            debug_assert!(
-                                bvh.nodes[insert_index + 1].prim_count == FREE_NODE_MARKER
-                            );
-                            bvh.nodes[insert_index + 1] = right;
-                            first_child = insert_index;
-                            insert_index += 2;
+                            debug_assert!(bvh.nodes[insert_index].prim_count == FREE_NODE_MARKER);
+                            bvh.nodes[insert_index] = right;
+                            first_child = insert_index - 1;
+                            insert_index -= 2;
                             break;
                         }
-                        insert_index += 2;
+                        insert_index -= 2;
                     }
                 } else {
                     debug_assert!(insert_index >= 2);
