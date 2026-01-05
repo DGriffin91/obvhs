@@ -141,17 +141,15 @@ impl PlocBuilder {
 
                     bvh.nodes[parent as usize].first_index = new_left_slot as u32;
 
-                    if !temp_left_node.is_leaf() {
-                        stack.push((temp_left_node.first_index, new_left_slot as u32));
-                    }
-                    if !temp_right_node.is_leaf() {
-                        stack.push((temp_right_node.first_index, new_right_slot as u32));
-                    }
                     if temp_left_node.prim_count == SUBTREE_ROOT {
                         temp_left_node.prim_count = 0;
+                    } else if !temp_left_node.is_leaf() {
+                        stack.push((temp_left_node.first_index, new_left_slot as u32));
                     }
                     if temp_right_node.prim_count == SUBTREE_ROOT {
                         temp_right_node.prim_count = 0;
+                    } else if !temp_right_node.is_leaf() {
+                        stack.push((temp_right_node.first_index, new_right_slot as u32));
                     }
 
                     bvh.nodes[new_left_slot] = temp_left_node;
