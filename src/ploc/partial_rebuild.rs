@@ -7,8 +7,8 @@ use crate::{
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
 };
 
-pub const FREE_NODE_MARKER: u32 = u32::MAX;
-
+/// Provide a set of leaves that need to be rebuilt. After calling flags will be true for any node index up the tree
+/// that needs to be included in the partial rebuild.
 pub fn compute_rebuild_path_flags<I, L>(bvh: &Bvh2, leaves: I, flags: &mut Vec<bool>)
 where
     I: IntoIterator<Item = L>,
@@ -44,13 +44,24 @@ where
 impl PlocBuilder {
     /// Partially rebuild the bvh. The given set of leaves and the subtrees that do not include any of the given leaves
     /// will be built into a new bvh. If the set of leaves is a small enough proportion of the total this can be faster
-    /// since there may be large portions of the BVH that don't need to be updated. If the proportion is too high it
-    /// can be faster to build from scratch instead, avoiding the overhead of doing a partial rebuild. If only a tiny
-    /// proportion are updated, it might be faster to selectively reinsert only the few leaves that need to be updated.
+    /// since there may be large portions of the BVH that don't need to be updated. If the proportion is very high it
+    /// can be faster to build from scratch instead, avoiding the overhead of doing a partial rebuild. If only a few
+    /// nodes need to be updated it might be faster and produce a better BVH to selectively reinsert them.
+    ///
+    /// # Arguments
+    /// * `bvh` - An existing bvh with valid layout (AABBs in the tree above nodes that are to be rebuilt does not need
+    /// to be correct)
+    /// * `should_remove()` - should return true for any node that should be include in the rebuild. This includes the
+    ///   entire chain up from any leaves that need to be updated. The leaves should have their new AABB before calling
+    ///   partial_rebuild() but the BVH does not need to be refit to accommodate them.
+    /// * `search_distance` - Which search distance should be used when building the ploc.
+    /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
+    /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
+    ///   just use search_distance.
     pub fn partial_rebuild(
         &mut self,
         bvh: &mut Bvh2,
-        check_flag: impl Fn(usize) -> bool,
+        should_remove: impl Fn(usize) -> bool,
         search_distance: PlocSearchDistance,
         sort_precision: SortPrecision,
         search_depth_threshold: usize,
@@ -72,12 +83,12 @@ impl PlocBuilder {
             while let Some(left_node_index) = stack.pop() {
                 for node_index in [left_node_index as usize, left_node_index as usize + 1] {
                     let node = &mut bvh.nodes[node_index];
-                    if !check_flag(node_index) || node.is_leaf() {
+                    if !should_remove(node_index) || node.is_leaf() {
                         self.current_nodes.push(*node);
                     } else {
                         stack.push(node.first_index);
                     }
-                    node.prim_count = FREE_NODE_MARKER;
+                    node.set_invalid();
                 }
             }
         });

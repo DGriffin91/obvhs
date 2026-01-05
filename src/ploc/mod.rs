@@ -26,10 +26,10 @@ use rayon::{
 #[cfg(not(feature = "parallel"))]
 use rdst::RadixSort;
 
+use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u64_unorm, morton_encode_u128_unorm};
 use crate::{Boundable, bvh2::node::Bvh2Node};
 use crate::{aabb::Aabb, bvh2::Bvh2};
-use crate::{bvh2::DEFAULT_MAX_STACK_DEPTH, ploc::partial_rebuild::FREE_NODE_MARKER};
 
 #[derive(Clone)]
 pub struct PlocBuilder {
@@ -161,7 +161,6 @@ impl PlocBuilder {
     /// # Arguments
     /// * `bvh` - An existing bvh. The builder will clear this bvh and reuse its allocations.
     /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
-    /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used
     /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
     /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
     ///   just use SEARCH_DISTANCE.
@@ -251,6 +250,9 @@ impl PlocBuilder {
         );
     }
 
+    /// REBUILD is for partial BVH rebuilds. In that case inner nodes should be freed by setting them to invalid
+    /// (with Bvh2Node::set_invalid()) and both respective inner and leaf nodes moved on to PlocBuilder::current_nodes.
+    /// They must always be removed in pairs with the starting on an odd number. See PlocBuilder::partial_rebuild()
     pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize, const REBUILD: bool>(
         &mut self,
         bvh: &mut Bvh2,
@@ -446,9 +448,9 @@ impl PlocBuilder {
                     loop {
                         // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
                         let left_slot = &mut bvh.nodes[insert_index - 1];
-                        if left_slot.prim_count == FREE_NODE_MARKER {
+                        if left_slot.is_invalid() {
                             *left_slot = left;
-                            debug_assert!(bvh.nodes[insert_index].prim_count == FREE_NODE_MARKER);
+                            debug_assert!(bvh.nodes[insert_index].is_invalid());
                             bvh.nodes[insert_index] = right;
                             first_child = insert_index - 1;
                             insert_index -= 2;

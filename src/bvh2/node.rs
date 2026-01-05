@@ -125,8 +125,22 @@ impl Bvh2Node {
     }
 
     #[inline(always)]
+    /// Also returns true for invalid nodes. If that matters in the context you are using this also check
+    /// Bvh2::is_invalid (used internally for partial BVH rebuilds)
     pub fn is_leaf(&self) -> bool {
         self.prim_count != 0
+    }
+
+    #[inline(always)]
+    /// Used internally for partial BVH rebuilds. Does not usually need to be checked. Currently, a bvh will only
+    /// temporarily contain any invalid nodes.
+    pub fn is_invalid(&self) -> bool {
+        self.prim_count == u32::MAX
+    }
+
+    #[inline(always)]
+    pub fn set_invalid(&mut self) {
+        self.prim_count = u32::MAX
     }
 
     #[inline(always)]
