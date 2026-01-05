@@ -59,7 +59,7 @@ struct Args {
     #[argh(option, default = "10000")]
     count: u32,
     /// how many steps to take when the renderer is disabled
-    #[argh(option, default = "2000")]
+    #[argh(option, default = "4000")]
     bench_steps: u32,
     /// fps limit when rending output (also limits physics sim), 0 for none
     #[argh(option, default = "120")]
