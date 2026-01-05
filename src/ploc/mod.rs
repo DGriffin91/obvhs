@@ -448,9 +448,9 @@ impl PlocBuilder {
                     loop {
                         // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
                         let left_slot = &mut bvh.nodes[insert_index - 1];
-                        if left_slot.is_invalid() {
+                        if !left_slot.valid() {
                             *left_slot = left;
-                            debug_assert!(bvh.nodes[insert_index].is_invalid());
+                            debug_assert!(!bvh.nodes[insert_index].valid());
                             bvh.nodes[insert_index] = right;
                             first_child = insert_index - 1;
                             insert_index -= 2;

@@ -134,13 +134,18 @@ impl Bvh2Node {
     #[inline(always)]
     /// Used internally for partial BVH rebuilds. Does not usually need to be checked. Currently, a bvh will only
     /// temporarily contain any invalid nodes.
-    pub fn is_invalid(&self) -> bool {
-        self.prim_count == u32::MAX
+    pub fn valid(&self) -> bool {
+        (self.prim_count & 0b10000000000000000000000000000000) == 0
     }
 
     #[inline(always)]
     pub fn set_invalid(&mut self) {
-        self.prim_count = u32::MAX
+        self.prim_count |= 0b10000000000000000000000000000000
+    }
+
+    #[inline(always)]
+    pub fn set_valid(&mut self) {
+        self.prim_count &= 0b01111111111111111111111111111111
     }
 
     #[inline(always)]
