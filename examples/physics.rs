@@ -294,7 +294,6 @@ struct PhysicsWorld {
     reinsertion_optimizer: ReinsertionOptimizer,
     temp_aabbs: Vec<Aabb>,
     temp_indices: Vec<u32>,
-    temp_bvh: Bvh2,
     temp_flags: Vec<bool>,
     collision_pairs: Vec<Pair>,
     #[cfg(feature = "parallel")]
@@ -313,7 +312,6 @@ impl Default for PhysicsWorld {
             bvh_insertion_stack: HeapStack::<SiblingInsertionCandidate>::new_with_capacity(10000),
             temp_aabbs: Default::default(),
             temp_indices: Default::default(),
-            temp_bvh: Default::default(),
             temp_flags: Default::default(),
             collision_pairs: Vec::new(),
             #[cfg(feature = "parallel")]
@@ -451,7 +449,6 @@ impl PhysicsWorld {
         compute_rebuild_path_flags(&self.bvh, &self.temp_indices, &mut self.temp_flags);
         self.ploc_builder.partial_rebuild(
             &mut self.bvh,
-            &mut self.temp_bvh,
             |node_id| self.temp_flags[node_id],
             PlocSearchDistance::Minimum,
             SortPrecision::U64,

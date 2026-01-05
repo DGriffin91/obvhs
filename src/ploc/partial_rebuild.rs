@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, mem, u32};
+use std::{borrow::Borrow, u32};
 
 use crate::{
     bvh2::Bvh2,
@@ -6,8 +6,6 @@ use crate::{
     faststack::FastStack,
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
 };
-
-const SUBTREE_ROOT: u32 = u32::MAX;
 
 pub fn compute_rebuild_path_flags<I, L>(bvh: &Bvh2, leaves: I, flags: &mut Vec<bool>)
 where
@@ -50,7 +48,6 @@ impl PlocBuilder {
     pub fn partial_rebuild(
         &mut self,
         bvh: &mut Bvh2,
-        temp_bvh: &mut Bvh2,
         check_flag: impl Fn(usize) -> bool,
         search_distance: PlocSearchDistance,
         sort_precision: SortPrecision,
@@ -60,15 +57,16 @@ impl PlocBuilder {
             return;
         }
 
-        temp_bvh.reset_for_reuse(bvh.primitive_indices.len(), None);
+        let had_parents = !bvh.parents.is_empty();
+        let had_primitives_to_nodes = !bvh.primitives_to_nodes.is_empty();
 
         self.current_nodes.clear();
         self.current_nodes.reserve(bvh.primitive_indices.len());
         self.next_nodes.clear();
         self.mortons.clear();
 
-        // We'll temporarily use this allocation for a node slot freelist
-        temp_bvh.primitive_indices.clear();
+        // Temporarily reuse this parents allocation for a node slot freelist, we are already invalidating it.
+        bvh.parents.clear();
 
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
@@ -76,22 +74,13 @@ impl PlocBuilder {
             while let Some(left_node_index) = stack.pop() {
                 for node_index in [left_node_index as usize, left_node_index as usize + 1] {
                     let node = &bvh.nodes[node_index];
-                    let flag = check_flag(node_index);
-
-                    if node.is_leaf() {
+                    if !check_flag(node_index) || node.is_leaf() {
                         self.current_nodes.push(*node);
                     } else {
-                        if flag {
-                            stack.push(node.first_index);
-                        } else {
-                            // Unflagged sub tree. Make leaf node out of subtree root.
-                            let mut node = *node;
-                            node.prim_count = SUBTREE_ROOT;
-                            self.current_nodes.push(node);
-                        }
+                        stack.push(node.first_index);
                     }
                 }
-                temp_bvh.primitive_indices.push(left_node_index);
+                bvh.parents.push(left_node_index);
             }
         });
 
@@ -100,119 +89,29 @@ impl PlocBuilder {
         let sdt = search_depth_threshold;
         match search_distance {
             PlocSearchDistance::Minimum => {
-                self.build_ploc_from_leaves::<1>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<1, true>(bvh, total_aabb, sort_precision, sdt)
             }
             PlocSearchDistance::VeryLow => {
-                self.build_ploc_from_leaves::<2>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<2, true>(bvh, total_aabb, sort_precision, sdt)
             }
             PlocSearchDistance::Low => {
-                self.build_ploc_from_leaves::<6>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<6, true>(bvh, total_aabb, sort_precision, sdt)
             }
             PlocSearchDistance::Medium => {
-                self.build_ploc_from_leaves::<14>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<14, true>(bvh, total_aabb, sort_precision, sdt)
             }
             PlocSearchDistance::High => {
-                self.build_ploc_from_leaves::<24>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<24, true>(bvh, total_aabb, sort_precision, sdt)
             }
             PlocSearchDistance::VeryHigh => {
-                self.build_ploc_from_leaves::<32>(temp_bvh, total_aabb, sort_precision, sdt)
+                self.build_ploc_from_leaves::<32, true>(bvh, total_aabb, sort_precision, sdt)
             }
         }
 
-        let freed_spots = temp_bvh.primitive_indices.len() * 2;
-        if bvh.nodes.len() - freed_spots > temp_bvh.nodes.len() {
-            // Weave new bvh back into old one
-
-            assert!(!temp_bvh.nodes[0].is_leaf());
-            bvh.nodes[0].aabb = temp_bvh.nodes[0].aabb;
-            fast_stack!((u32, u32), (96, 192), temp_bvh.max_depth, stack, {
-                stack.clear();
-                stack.push((temp_bvh.nodes[0].first_index, 0));
-
-                // Traverse new bvh, copying nodes into empty spaces in old bvh
-                while let Some((temp_left_index, parent)) = stack.pop() {
-                    let temp_right_index = temp_left_index + 1;
-
-                    let mut temp_left_node = temp_bvh.nodes[temp_left_index as usize];
-                    let mut temp_right_node = temp_bvh.nodes[temp_right_index as usize];
-
-                    let new_left_slot = temp_bvh.primitive_indices.pop().unwrap() as usize;
-                    let new_right_slot = new_left_slot + 1;
-
-                    bvh.nodes[parent as usize].first_index = new_left_slot as u32;
-
-                    if temp_left_node.prim_count == SUBTREE_ROOT {
-                        temp_left_node.prim_count = 0;
-                    } else if !temp_left_node.is_leaf() {
-                        stack.push((temp_left_node.first_index, new_left_slot as u32));
-                    }
-                    if temp_right_node.prim_count == SUBTREE_ROOT {
-                        temp_right_node.prim_count = 0;
-                    } else if !temp_right_node.is_leaf() {
-                        stack.push((temp_right_node.first_index, new_right_slot as u32));
-                    }
-
-                    bvh.nodes[new_left_slot] = temp_left_node;
-                    bvh.nodes[new_right_slot] = temp_right_node;
-                }
-            });
-
-            temp_bvh.primitive_indices.clear();
-        } else {
-            // Append old subtrees onto new bvh
-
-            fast_stack!((u32, u32), (96, 192), bvh.max_depth, stack, {
-                for i in 0..temp_bvh.nodes.len() {
-                    let node = &mut temp_bvh.nodes[i];
-                    if node.prim_count == SUBTREE_ROOT {
-                        // Convert back to inner node.
-                        node.prim_count = 0;
-
-                        // node.first_index will point to end of node list as we'll put sub tree there but it would be
-                        // overwritten later below so don't bother here: subtree_root.first_index = temp_bvh.nodes.len();
-
-                        stack.clear();
-                        stack.push((node.first_index, i as u32));
-
-                        while let Some((old_left_index, new_parent)) = stack.pop() {
-                            let old_right_index = old_left_index + 1;
-
-                            let current_left_idx = temp_bvh.nodes.len() as u32;
-
-                            // Update parent with location of children in new bvh
-                            temp_bvh.nodes[new_parent as usize].first_index = current_left_idx;
-
-                            let old_left_node = &bvh.nodes[old_left_index as usize];
-                            let old_right_node = &bvh.nodes[old_right_index as usize];
-                            if !old_left_node.is_leaf() {
-                                stack.push((old_left_node.first_index, current_left_idx));
-                            }
-                            if !old_right_node.is_leaf() {
-                                stack.push((old_right_node.first_index, current_left_idx + 1));
-                            }
-                            temp_bvh.nodes.push(*old_left_node);
-                            temp_bvh.nodes.push(*old_right_node);
-                        }
-                    }
-                }
-            });
-
-            temp_bvh.max_depth = bvh.max_depth; //TODO should this be recalculated?
-
-            mem::swap(&mut temp_bvh.primitive_indices, &mut bvh.primitive_indices);
-            mem::swap(
-                &mut temp_bvh.primitive_indices_freelist,
-                &mut bvh.primitive_indices_freelist,
-            );
-            mem::swap(bvh, temp_bvh);
-        }
-
-        bvh.children_are_ordered_after_parents = false;
-
-        if !bvh.parents.is_empty() {
+        if had_parents {
             bvh.update_parents();
         }
-        if !bvh.primitives_to_nodes.is_empty() {
+        if had_primitives_to_nodes {
             bvh.update_primitives_to_nodes();
         }
     }
@@ -231,7 +130,6 @@ mod tests {
         let sm = demoscene(5, 0);
         for tris in [&demoscene(31, 0), &sm, &sm[..1], &sm[..2], &sm[..3], &[]] {
             let mut builder = PlocBuilder::with_capacity(tris.len());
-            let mut temp_bvh = Bvh2::zeroed(tris.len());
 
             let mut bvh = builder.build(
                 PlocSearchDistance::Minimum,
@@ -257,7 +155,6 @@ mod tests {
 
             builder.partial_rebuild(
                 &mut bvh,
-                &mut temp_bvh,
                 |node_id| flags[node_id],
                 PlocSearchDistance::Minimum,
                 SortPrecision::U64,
@@ -273,7 +170,6 @@ mod tests {
         let tris = demoscene(8, 0);
 
         let mut builder = PlocBuilder::with_capacity(tris.len());
-        let mut temp_bvh = Bvh2::zeroed(tris.len());
 
         let mut bvh = builder.build(
             PlocSearchDistance::Minimum,
@@ -300,7 +196,6 @@ mod tests {
 
         builder.partial_rebuild(
             &mut bvh,
-            &mut temp_bvh,
             |node_id| flags[node_id],
             PlocSearchDistance::Minimum,
             SortPrecision::U64,
@@ -315,7 +210,6 @@ mod tests {
         let sm = demoscene(5, 0);
         for tris in [&demoscene(31, 0), &sm, &sm[..1], &sm[..2], &sm[..3], &[]] {
             let mut builder = PlocBuilder::with_capacity(tris.len());
-            let mut temp_bvh = Bvh2::zeroed(tris.len());
 
             let mut bvh = builder.build(
                 PlocSearchDistance::Minimum,
@@ -342,7 +236,6 @@ mod tests {
 
             builder.partial_rebuild(
                 &mut bvh,
-                &mut temp_bvh,
                 |node_id| flags[node_id],
                 PlocSearchDistance::Minimum,
                 SortPrecision::U64,

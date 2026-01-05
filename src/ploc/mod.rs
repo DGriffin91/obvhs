@@ -243,7 +243,7 @@ impl PlocBuilder {
             total_aabb = Some(total);
         }
 
-        self.build_ploc_from_leaves::<SEARCH_DISTANCE>(
+        self.build_ploc_from_leaves::<SEARCH_DISTANCE, false>(
             bvh,
             total_aabb.unwrap(),
             sort_precision,
@@ -251,7 +251,7 @@ impl PlocBuilder {
         );
     }
 
-    pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize>(
+    pub fn build_ploc_from_leaves<const SEARCH_DISTANCE: usize, const REBUILD: bool>(
         &mut self,
         bvh: &mut Bvh2,
         total_aabb: Aabb,
@@ -264,7 +264,11 @@ impl PlocBuilder {
 
         // Merge nodes until there is only one left
         let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
-        bvh.nodes.resize(nodes_count, Bvh2Node::default());
+        if REBUILD {
+            assert!(bvh.nodes.len() >= nodes_count);
+        } else {
+            bvh.nodes.resize(nodes_count, Bvh2Node::default());
+        }
 
         let scale = 1.0 / total_aabb.diagonal().as_dvec3();
         let offset = -total_aabb.min.as_dvec3() * scale;
@@ -427,8 +431,12 @@ impl PlocBuilder {
                 let right = self.current_nodes[best_index];
 
                 // Reserve space in the target array for the two children
-                debug_assert!(insert_index >= 2);
-                insert_index -= 2;
+                if REBUILD {
+                    insert_index = bvh.parents.pop().unwrap() as usize;
+                } else {
+                    debug_assert!(insert_index >= 2);
+                    insert_index -= 2;
+                }
 
                 // Create the parent node and place it in the array for the next iteration
                 self.next_nodes[next_nodes_idx] =
@@ -457,11 +465,16 @@ impl PlocBuilder {
             depth += 1;
         }
 
-        insert_index = insert_index.saturating_sub(1);
-        bvh.nodes[insert_index] = self.current_nodes[0];
+        if REBUILD {
+            debug_assert!(bvh.parents.is_empty());
+        } else {
+            debug_assert_eq!(insert_index, 1);
+        }
+
+        bvh.nodes[0] = self.current_nodes[0];
 
         bvh.max_depth = DEFAULT_MAX_STACK_DEPTH.max(depth + 1);
-        bvh.children_are_ordered_after_parents = true;
+        bvh.children_are_ordered_after_parents = !REBUILD;
     }
 }
 
