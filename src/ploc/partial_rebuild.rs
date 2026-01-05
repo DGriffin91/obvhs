@@ -67,6 +67,9 @@ impl PlocBuilder {
         self.next_nodes.clear();
         self.mortons.clear();
 
+        // We'll temporarily use this allocation for a node slot freelist
+        temp_bvh.primitive_indices.clear();
+
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
             stack.push(bvh.nodes[0].first_index);
@@ -88,6 +91,7 @@ impl PlocBuilder {
                         }
                     }
                 }
+                temp_bvh.primitive_indices.push(left_node_index);
             }
         });
 
@@ -115,59 +119,104 @@ impl PlocBuilder {
             }
         }
 
-        // Append subtrees onto new bvh
-        fast_stack!((u32, u32), (96, 192), bvh.max_depth, stack, {
-            for i in 0..temp_bvh.nodes.len() {
-                let node = &mut temp_bvh.nodes[i];
-                if node.prim_count == SUBTREE_ROOT {
-                    // Convert back to inner node.
-                    node.prim_count = 0;
+        let freed_spots = temp_bvh.primitive_indices.len() * 2;
+        if bvh.nodes.len() - freed_spots > temp_bvh.nodes.len() {
+            // Weave new bvh back into old one
 
-                    // node.first_index will point to end of node list as we'll put sub tree there but it would be
-                    // overwritten later below so don't bother here: subtree_root.first_index = temp_bvh.nodes.len();
+            assert!(!temp_bvh.nodes[0].is_leaf());
+            bvh.nodes[0].aabb = temp_bvh.nodes[0].aabb;
+            fast_stack!((u32, u32), (96, 192), temp_bvh.max_depth, stack, {
+                stack.clear();
+                stack.push((temp_bvh.nodes[0].first_index, 0));
 
-                    stack.clear();
-                    stack.push((node.first_index, i as u32));
+                // Traverse new bvh, copying nodes into empty spaces in old bvh
+                while let Some((temp_left_index, parent)) = stack.pop() {
+                    let temp_right_index = temp_left_index + 1;
 
-                    while let Some((old_left_index, new_parent)) = stack.pop() {
-                        let old_right_index = old_left_index + 1;
+                    let mut temp_left_node = temp_bvh.nodes[temp_left_index as usize];
+                    let mut temp_right_node = temp_bvh.nodes[temp_right_index as usize];
 
-                        let current_left_idx = temp_bvh.nodes.len() as u32;
+                    let new_left_slot = temp_bvh.primitive_indices.pop().unwrap() as usize;
+                    let new_right_slot = new_left_slot + 1;
 
-                        // Update parent with location of children in new bvh
-                        temp_bvh.nodes[new_parent as usize].first_index = current_left_idx;
+                    bvh.nodes[parent as usize].first_index = new_left_slot as u32;
 
-                        let old_left_node = &bvh.nodes[old_left_index as usize];
-                        let old_right_node = &bvh.nodes[old_right_index as usize];
-                        if !old_left_node.is_leaf() {
-                            stack.push((old_left_node.first_index, current_left_idx));
+                    if !temp_left_node.is_leaf() {
+                        stack.push((temp_left_node.first_index, new_left_slot as u32));
+                    }
+                    if !temp_right_node.is_leaf() {
+                        stack.push((temp_right_node.first_index, new_right_slot as u32));
+                    }
+                    if temp_left_node.prim_count == SUBTREE_ROOT {
+                        temp_left_node.prim_count = 0;
+                    }
+                    if temp_right_node.prim_count == SUBTREE_ROOT {
+                        temp_right_node.prim_count = 0;
+                    }
+
+                    bvh.nodes[new_left_slot] = temp_left_node;
+                    bvh.nodes[new_right_slot] = temp_right_node;
+                }
+            });
+
+            temp_bvh.primitive_indices.clear();
+        } else {
+            // Append old subtrees onto new bvh
+
+            fast_stack!((u32, u32), (96, 192), bvh.max_depth, stack, {
+                for i in 0..temp_bvh.nodes.len() {
+                    let node = &mut temp_bvh.nodes[i];
+                    if node.prim_count == SUBTREE_ROOT {
+                        // Convert back to inner node.
+                        node.prim_count = 0;
+
+                        // node.first_index will point to end of node list as we'll put sub tree there but it would be
+                        // overwritten later below so don't bother here: subtree_root.first_index = temp_bvh.nodes.len();
+
+                        stack.clear();
+                        stack.push((node.first_index, i as u32));
+
+                        while let Some((old_left_index, new_parent)) = stack.pop() {
+                            let old_right_index = old_left_index + 1;
+
+                            let current_left_idx = temp_bvh.nodes.len() as u32;
+
+                            // Update parent with location of children in new bvh
+                            temp_bvh.nodes[new_parent as usize].first_index = current_left_idx;
+
+                            let old_left_node = &bvh.nodes[old_left_index as usize];
+                            let old_right_node = &bvh.nodes[old_right_index as usize];
+                            if !old_left_node.is_leaf() {
+                                stack.push((old_left_node.first_index, current_left_idx));
+                            }
+                            if !old_right_node.is_leaf() {
+                                stack.push((old_right_node.first_index, current_left_idx + 1));
+                            }
+                            temp_bvh.nodes.push(*old_left_node);
+                            temp_bvh.nodes.push(*old_right_node);
                         }
-                        if !old_right_node.is_leaf() {
-                            stack.push((old_right_node.first_index, current_left_idx + 1));
-                        }
-                        temp_bvh.nodes.push(*old_left_node);
-                        temp_bvh.nodes.push(*old_right_node);
                     }
                 }
-            }
-        });
+            });
 
-        temp_bvh.max_depth = bvh.max_depth; //TODO should this be recalculated?
+            temp_bvh.max_depth = bvh.max_depth; //TODO should this be recalculated?
 
-        mem::swap(&mut temp_bvh.primitive_indices, &mut bvh.primitive_indices);
-        mem::swap(
-            &mut temp_bvh.primitive_indices_freelist,
-            &mut bvh.primitive_indices_freelist,
-        );
+            mem::swap(&mut temp_bvh.primitive_indices, &mut bvh.primitive_indices);
+            mem::swap(
+                &mut temp_bvh.primitive_indices_freelist,
+                &mut bvh.primitive_indices_freelist,
+            );
+            mem::swap(bvh, temp_bvh);
+        }
+
+        bvh.children_are_ordered_after_parents = false;
 
         if !bvh.parents.is_empty() {
-            temp_bvh.update_parents();
+            bvh.update_parents();
         }
         if !bvh.primitives_to_nodes.is_empty() {
-            temp_bvh.update_primitives_to_nodes();
+            bvh.update_primitives_to_nodes();
         }
-
-        mem::swap(bvh, temp_bvh);
     }
 }
 
