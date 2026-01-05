@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, mem, u32};
 
 use crate::{
-    bvh2::{Bvh2, node::Bvh2Node},
+    bvh2::Bvh2,
     fast_stack,
     faststack::FastStack,
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
@@ -81,12 +81,10 @@ impl PlocBuilder {
                         if flag {
                             stack.push(node.first_index);
                         } else {
-                            // Unflagged sub tree. Make leaf node out of subtree root with index into old bvh.
-                            self.current_nodes.push(Bvh2Node::new(
-                                node.aabb,
-                                SUBTREE_ROOT,
-                                node_index as u32,
-                            ));
+                            // Unflagged sub tree. Make leaf node out of subtree root.
+                            let mut node = *node;
+                            node.prim_count = SUBTREE_ROOT;
+                            self.current_nodes.push(node);
                         }
                     }
                 }
@@ -122,8 +120,6 @@ impl PlocBuilder {
             for i in 0..temp_bvh.nodes.len() {
                 let node = &mut temp_bvh.nodes[i];
                 if node.prim_count == SUBTREE_ROOT {
-                    let old_bvh_subtree_root = &bvh.nodes[node.first_index as usize];
-
                     // Convert back to inner node.
                     node.prim_count = 0;
 
@@ -131,7 +127,7 @@ impl PlocBuilder {
                     // overwritten later below so don't bother here: subtree_root.first_index = temp_bvh.nodes.len();
 
                     stack.clear();
-                    stack.push((old_bvh_subtree_root.first_index, i as u32));
+                    stack.push((node.first_index, i as u32));
 
                     while let Some((old_left_index, new_parent)) = stack.pop() {
                         let old_right_index = old_left_index + 1;
