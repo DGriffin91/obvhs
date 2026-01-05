@@ -1,7 +1,7 @@
 [package]
 name = "obvhs"
-version = "0.2.2"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
 description = "BVH Construction and Traversal Library"
 homepage = "https://github.com/DGriffin91/obvhs"
 repository = "https://github.com/DGriffin91/obvhs"
@@ -13,21 +13,35 @@ keywords = ["bvh", "sah", "aabb", "cwbvh", "ploc"]
 
 [dependencies]
 glam = { version = ">=0.29, <0.31", features = ["bytemuck"] }
-half = "2.3.1"
-bytemuck = { version = "1.23", features = ["derive", "extern_crate_alloc"] }
-rdst = { version = "0.20.14", default-features = false }
-rayon = { version = "1.9.0", optional = true }
+half = "2"
+bytemuck = { version = "1", features = ["derive", "extern_crate_alloc"] }
+rdst = { version = "0.20", default-features = false }
+rayon = { version = "1", optional = true }
+thread_local = { version = "1", optional = true }
+log = "0.4"
+static_assertions = "1"
 
 # Noop unless one of the profile-with features below is also used
-profiling = { version = "1.0", optional = true }
+profiling = { version = "1", optional = true }
 
 [dev-dependencies]
-image = "0.24"
+image = "0.25"
+minifb = "0.28"
+argh = "0.1"
+obj = { version = "0.10", features = ["genmesh"] }
+ruzstd = "0.8"
+rayon = "1"
 
 [features]
-default = []
-parallel = ["dep:rayon", "rdst/multi-threaded"]
+#default = ["parallel"]
+parallel = ["dep:rayon", "dep:thread_local", "rdst/multi-threaded"]
 timeit = []
+
+# Enable small_bvh2_node to pack Bvh2Node into 32 bytes. In this mode the user meta1 & meta2 fields are unavailable.
+# With small_bvh2_node traversal tends to be slightly faster, multi-threaded building tends to be faster, but
+# single-threaded building tends to be slower.
+# (particularly: single-threaded reinsertion is slower, but collapse is faster, ploc slightly faster)
+small_bvh2_node = []
 
 profile = ["dep:profiling"]
 profile-with-puffin = ["profiling/profile-with-puffin"]
@@ -35,3 +49,19 @@ profile-with-optick = ["profiling/profile-with-optick"]
 profile-with-superluminal = ["profiling/profile-with-superluminal"]
 profile-with-tracing = ["profiling/profile-with-tracing"]
 profile-with-tracy = ["profiling/profile-with-tracy"]
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+
+# Enable optimization in debug mode
+[profile.dev]
+opt-level = 3
+
+# Enable high optimizations for dependencies
+[profile.dev.package."*"]
+opt-level = 3
+
+[[example]]
+name = "obj_cwbvh"
+test = true

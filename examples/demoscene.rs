@@ -1,9 +1,11 @@
+use argh::FromArgs;
 // For fun, not pbr
 // Run with `--release --features parallel` unless you like waiting around for a very long time.
 use glam::*;
 use image::{ImageBuffer, Rgba};
 use obvhs::{
-    cwbvh::builder::build_cwbvh_from_tris,
+    BvhBuildParams,
+    bvh2::builder::build_bvh2_from_tris,
     ray::{Ray, RayHit},
     rt_triangle::RtTriangle,
     test_util::{
@@ -13,9 +15,39 @@ use obvhs::{
             somewhat_boring_display_transform, uniform_sample_cone, uniform_sample_sphere,
         },
     },
-    timeit, BvhBuildParams,
+    timeit,
 };
-use std::{io::Write, time::Duration};
+use std::{io::Write, thread, time::Duration};
+
+#[path = "./helpers/debug.rs"]
+mod debug;
+use debug::{
+    debug_window, {AtomicColorBuffer, color_to_minifb_pixel},
+};
+
+#[derive(FromArgs)]
+/// `demoscene` example
+struct Args {
+    /// if set, no window is created to show render progress.
+    #[argh(switch)]
+    no_window: bool,
+    /// just generates the mesh and BVH then returns.
+    #[argh(switch)]
+    no_render: bool,
+    /// image resolution width (image height and mesh resolutions are also derived from this).
+    #[argh(option, default = "1280")]
+    width: usize,
+    /// AA sample count.
+    #[argh(option, default = "64")]
+    samples: usize,
+    /// mesh rng seed.
+    #[argh(option, default = "570")]
+    seed: usize,
+    /// save output render to file as png
+    #[argh(option, short = 'o')]
+    output: Option<String>,
+}
+
 pub const SUN_ANGULAR_DIAMETER: f32 = 0.00933;
 
 #[cfg(feature = "parallel")]
@@ -23,17 +55,20 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use sky::Sky;
 
 fn main() {
-    let total_aa_samples = 64;
-    let resolution = 2560;
-    let seed = 57;
+    let args: Args = argh::from_env();
 
     timeit!["generate height map",
-    let tris = demoscene(resolution as usize, seed * 10);
+    let tris = demoscene(args.width as usize, args.seed as u32);
     ];
-    println!("{} triangles, {} AA samples", tris.len(), total_aa_samples);
+    let tris_count = tris.len();
+    println!("{tris_count} triangles, {} AA samples", args.samples);
     timeit!["generate bvh",
-    let bvh = build_cwbvh_from_tris(&tris, BvhBuildParams::very_fast_build(), &mut Duration::default());
+    let bvh = build_bvh2_from_tris(&tris, BvhBuildParams::medium_build(), &mut Duration::default());
     ];
+
+    if args.no_render {
+        return;
+    }
 
     let bvh_tris = bvh
         .primitive_indices
@@ -41,11 +76,12 @@ fn main() {
         .map(|i| (&tris[*i as usize]).into())
         .collect::<Vec<RtTriangle>>();
 
-    let intersection_fn = |ray: &Ray, id: usize| bvh_tris[id].intersect(ray);
-
     // Setup render target and camera
-    let width = resolution;
-    let height = ((resolution as f32) * 0.3711) as u32;
+    let width = args.width;
+    let height = ((width as f32) * 0.3711) as usize;
+    let exposure = -3.6;
+
+    let (width, height) = (width as u32, height as u32);
     let target_size = Vec2::new(width as f32, height as f32);
     let fov = 17.0f32;
     let eye = vec3a(0.0, 0.0, 1.35);
@@ -55,7 +91,6 @@ fn main() {
     let sky_bg = Sky::red_sunset(-vec3a(0.35, -0.1, 0.5).normalize()); // To extend the sun glow a bit in the BG
     let nee = 1.0 - SUN_ANGULAR_DIAMETER.cos();
     let material_color = vec3a(0.61, 0.59, 0.52).powf(2.2);
-    let exposure = -3.6;
 
     // Compute camera projection & view matrices
     let aspect_ratio = target_size.x / target_size.y;
@@ -64,178 +99,216 @@ fn main() {
     let view = Mat4::look_at_rh(eye.into(), look_at.into(), Vec3::Y);
     let view_inv = view.inverse();
 
-    let mut fragments = vec![Vec3A::ZERO; (width * height) as usize];
-
-    println!("|{}|", " ".repeat(total_aa_samples as usize));
+    println!("|{}|", " ".repeat(args.samples as usize));
     print!(" ");
-    timeit![
-        "render",
-        for aa_sample in 0..total_aa_samples {
-            print!("."); // Print progress
-            std::io::stdout().flush().unwrap();
-            
-            #[cfg(feature = "parallel")]
-            let iter = (0..width * height).into_par_iter();
-            #[cfg(not(feature = "parallel"))]
-            let iter = 0..width * height;
-            let new_fragments: Vec<Vec3A> = iter
-                .map(|i| {
-                    let frag_coord = uvec2(i % width, i / width);
-                    let misc_grain_noise = hash_noise(frag_coord, aa_sample + 12345);
-                    let aa = vec2(
-                        hash_noise(frag_coord, aa_sample),
-                        hash_noise(frag_coord, aa_sample + 512),
-                    ) * 0.5
-                        - 0.25;
-                    let mut screen_uv = (frag_coord.as_vec2() + aa) / target_size;
-                    screen_uv.y = 1.0 - screen_uv.y;
-                    let ndc = screen_uv * 2.0 - Vec2::ONE;
-                    let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
 
-                    let mut vs = proj_inv * clip_pos;
-                    vs /= vs.w;
-                    let direction = (Vec3A::from((view_inv * vs).xyz()) - eye).normalize();
+    // Optionally create a window to show render progress
+    let shared_buffer =
+        (!args.no_window).then(|| AtomicColorBuffer::new(width as usize, height as usize));
+    let shared_buffer_clone = shared_buffer.clone();
 
-                    let fuzz = vec3a(
-                        hash_noise(frag_coord, aa_sample),
-                        hash_noise(frag_coord, aa_sample + 512),
-                        hash_noise(frag_coord, aa_sample + 1024),
-                    );
-                    let fuzzy_cube_of_sensor = eye + (fuzz * 2.0 - 1.0) * 0.002;
+    let render_thread = thread::spawn(move || {
+        let intersection_fn = |ray: &Ray, id: usize| bvh_tris[id].intersect(ray);
 
-                    let focal_distance = 2.4;
-                    let focal_point = eye + direction * focal_distance;
-                    let cam_dir = (focal_point - fuzzy_cube_of_sensor).normalize_or_zero();
-                    let ray = Ray::new_inf(fuzzy_cube_of_sensor, cam_dir);
+        let mut fragments = vec![Vec3A::ZERO; (width * height) as usize];
+        timeit![
+            "render",
+            for aa_sample in 0..args.samples as u32 {
+                print!("."); // Print progress
+                std::io::stdout().flush().unwrap();
 
-                    let mut color = Vec3A::ZERO;
-
-                    let fog_dir = uniform_sample_sphere(vec2(
-                        hash_noise(frag_coord, aa_sample + 2048),
-                        hash_noise(frag_coord, aa_sample + 3840),
-                    ));
-                    let mut hit = RayHit::none();
-                    let fogc = sky.render(fog_dir).min(Vec3A::splat(100.0));
-                    let skyc = sky.render(ray.direction);
-                    let sunc = sky.render(-sun_direction);
-                    let mut state = bvh.new_ray_traversal(ray);
-                    while bvh.ray_traverse_dynamic(&mut state, &mut hit, intersection_fn) {}
-                    if hit.t < f32::MAX {
-                        let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
-                        normal *= normal.dot(-ray.direction).signum(); // Double sided
-
-                        let hit_p = ray.origin + ray.direction * hit.t - ray.direction * 0.01;
-
-                        let tangent_to_world = build_orthonormal_basis(normal);
-                        let mut ao_ray_dir = cosine_sample_hemisphere(vec2(
+                #[cfg(feature = "parallel")]
+                let iter = (0..width * height).into_par_iter();
+                #[cfg(not(feature = "parallel"))]
+                let iter = (0..width * height).into_iter();
+                let new_fragments: Vec<Vec3A> = iter
+                    .map(|i| {
+                        let frag_coord = uvec2(i % width, i / width);
+                        let misc_grain_noise = hash_noise(frag_coord, aa_sample + 12345);
+                        let aa = vec2(
                             hash_noise(frag_coord, aa_sample),
+                            hash_noise(frag_coord, aa_sample + 512),
+                        ) * 0.5
+                            - 0.25;
+                        let mut screen_uv = (frag_coord.as_vec2() + aa) / target_size;
+                        screen_uv.y = 1.0 - screen_uv.y;
+                        let ndc = screen_uv * 2.0 - Vec2::ONE;
+                        let clip_pos = vec4(ndc.x, ndc.y, 1.0, 1.0);
+
+                        let mut vs = proj_inv * clip_pos;
+                        vs /= vs.w;
+                        let direction = (Vec3A::from((view_inv * vs).xyz()) - eye).normalize();
+
+                        let fuzz = vec3a(
+                            hash_noise(frag_coord, aa_sample),
+                            hash_noise(frag_coord, aa_sample + 512),
                             hash_noise(frag_coord, aa_sample + 1024),
+                        );
+                        let fuzzy_cube_of_sensor = eye + (fuzz * 2.0 - 1.0) * 0.002;
+
+                        let focal_distance = 2.4;
+                        let focal_point = eye + direction * focal_distance;
+                        let cam_dir = (focal_point - fuzzy_cube_of_sensor).normalize_or_zero();
+                        let ray = Ray::new_inf(fuzzy_cube_of_sensor, cam_dir);
+
+                        let mut color = Vec3A::ZERO;
+
+                        let fog_dir = uniform_sample_sphere(vec2(
+                            hash_noise(frag_coord, aa_sample + 2048),
+                            hash_noise(frag_coord, aa_sample + 3840),
                         ));
-                        ao_ray_dir = (tangent_to_world * ao_ray_dir).normalize();
+                        let mut hit = RayHit::none();
+                        let fogc = sky.render(fog_dir).min(Vec3A::splat(100.0));
+                        let skyc = sky.render(ray.direction);
+                        let sunc = sky.render(-sun_direction);
+                        bvh.ray_traverse(ray, &mut hit, intersection_fn);
+                        if hit.t < f32::MAX {
+                            let mut normal = bvh_tris[hit.primitive_id as usize].compute_normal();
+                            normal *= normal.dot(-ray.direction).signum(); // Double sided
 
-                        let diff_ray = Ray::new_inf(hit_p, ao_ray_dir);
-                        let mut diff_hit = RayHit::none();
-                        state.reinit(diff_ray);
-                        while bvh.ray_traverse_dynamic(&mut state, &mut diff_hit, intersection_fn) {}
-                        if diff_hit.t < f32::MAX {
-                            let mut diff_hit_normal =
-                                bvh_tris[diff_hit.primitive_id as usize].compute_normal();
-                            diff_hit_normal *= diff_hit_normal.dot(-ray.direction).signum(); // Double sided
+                            let hit_p = ray.origin + ray.direction * hit.t - ray.direction * 0.01;
 
-                            // Silly 1st bounce sun shadow ray
-                            let ao_hit_p = hit_p + diff_ray.direction * diff_hit.t - diff_ray.direction * 0.01;
-                            let sun_ray = Ray::new_inf(ao_hit_p, -sun_direction);
-                            let mut sun_hit = RayHit::none();
-                            // anyhit
+                            let tangent_to_world = build_orthonormal_basis(normal);
+                            let mut ao_ray_dir = cosine_sample_hemisphere(vec2(
+                                hash_noise(frag_coord, aa_sample),
+                                hash_noise(frag_coord, aa_sample + 1024),
+                            ));
+                            ao_ray_dir = (tangent_to_world * ao_ray_dir).normalize();
 
-                            state.reinit(sun_ray);
-                            if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
-                                // xD
-                                color += material_color * material_color * nee * sunc * 4.0;
+                            let diff_ray = Ray::new_inf(hit_p, ao_ray_dir);
+                            let mut diff_hit = RayHit::none();
+                            bvh.ray_traverse(diff_ray, &mut diff_hit, intersection_fn);
+                            if diff_hit.t < f32::MAX {
+                                let mut diff_hit_normal =
+                                    bvh_tris[diff_hit.primitive_id as usize].compute_normal();
+                                diff_hit_normal *= diff_hit_normal.dot(-ray.direction).signum(); // Double sided
+
+                                // Silly 1st bounce sun shadow ray
+                                let ao_hit_p = hit_p + diff_ray.direction * diff_hit.t
+                                    - diff_ray.direction * 0.01;
+                                let sun_ray = Ray::new_inf(ao_hit_p, -sun_direction);
+                                if bvh.ray_traverse_miss(sun_ray, intersection_fn) {
+                                    // xD
+                                    color += material_color * material_color * nee * sunc * 4.0;
+                                }
+                            } else {
+                                let fresnel = (1.0 - normal.dot(-cam_dir)).powf(8.0).max(0.0);
+                                let skyc = sky
+                                    .render(diff_ray.direction)
+                                    // Sun results in fireflies. Clamp to avoid randomly sampling super high values.
+                                    .min(Vec3A::splat(100.0));
+                                color += material_color * (fresnel * skyc * 0.5 + skyc);
+                            }
+
+                            // Sun shadow ray
+                            let sun_rnd = vec2(
+                                hash_noise(frag_coord, aa_sample + 10000),
+                                hash_noise(frag_coord, aa_sample + 20000),
+                            );
+                            let sun_basis = build_orthonormal_basis(sun_direction);
+                            let sun_dir = (sun_basis
+                                * uniform_sample_cone(sun_rnd, (SUN_ANGULAR_DIAMETER * 0.5).cos()))
+                            .normalize_or_zero();
+
+                            let sun_ray = Ray::new_inf(hit_p, -sun_dir);
+
+                            if bvh.ray_traverse_miss(sun_ray, intersection_fn) {
+                                color += material_color
+                                    * nee
+                                    * normal.dot(-sun_dir).max(0.00001)
+                                    * sunc
+                                    * 10.0
+                                    * misc_grain_noise;
+                            }
+
+                            // Fog shadow ray
+                            let fog_t = hit.t * hash_noise(frag_coord, aa_sample + 54321);
+                            let fog_p = ray.origin + ray.direction * fog_t;
+                            let sun_ray = Ray::new_inf(fog_p, -sun_direction);
+
+                            if bvh.ray_traverse_miss(sun_ray, intersection_fn) {
+                                color += nee * sunc * fog_t * 0.2;
+                            }
+                            if bvh.ray_traverse_miss(Ray::new_inf(fog_p, fog_dir), intersection_fn)
+                            {
+                                color += fog_t * 0.2 * fogc;
                             }
                         } else {
-                            let fresnel = (1.0 - normal.dot(-cam_dir)).powf(8.0).max(0.0);
-                            let skyc = sky
-                                .render(diff_ray.direction)
-                                // Sun results in fireflies. Clamp to avoid randomly sampling super high values.
-                                .min(Vec3A::splat(100.0));
-                            color += material_color * (fresnel * skyc * 0.5 + skyc);
+                            let sky_bgc = sky_bg.render(ray.direction) * 0.4 + skyc * 0.6;
+                            color += sky_bgc * 0.4 + sky_bgc * misc_grain_noise * 0.6;
+                            color += 0.2 * fogc;
                         }
 
-                        // Sun shadow ray
-                        let sun_rnd = vec2(
-                            hash_noise(frag_coord, aa_sample + 10000),
-                            hash_noise(frag_coord, aa_sample + 20000),
-                        );
-                        let sun_basis = build_orthonormal_basis(sun_direction);
-                        let sun_dir = (sun_basis
-                            * uniform_sample_cone(sun_rnd, (SUN_ANGULAR_DIAMETER * 0.5).cos()))
-                        .normalize_or_zero();
-
-                        let mut sun_hit = RayHit::none();
-                        let sun_ray = Ray::new_inf(hit_p, -sun_dir);
-
-                        state.reinit(sun_ray); // anyhit
-                        if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
-                            color += material_color
-                                * nee
-                                * normal.dot(-sun_dir).max(0.00001)
-                                * sunc
-                                * 10.0
-                                * misc_grain_noise;
+                        if let Some(shared_buffer) = &shared_buffer_clone {
+                            let accum_color = shared_buffer.get(i as usize) + color.extend(1.0);
+                            shared_buffer.set(i as usize, accum_color);
                         }
 
-                        // Fog shadow ray
-                        let fog_t = hit.t * hash_noise(frag_coord, aa_sample + 54321);
-                        let fog_p = ray.origin + ray.direction * fog_t;
-                        let sun_ray = Ray::new_inf(fog_p, -sun_direction);
-                        let mut sun_hit = RayHit::none();
+                        color
+                    })
+                    .collect::<Vec<_>>();
+                new_fragments
+                    .iter()
+                    .zip(fragments.iter_mut())
+                    .for_each(|(new, col)| *col += *new);
+            }
+            println!();
+        ];
+        fragments
+    });
+    println!();
 
-                        state.reinit(sun_ray); // anyhit
-                        if !bvh.ray_traverse_dynamic(&mut state, &mut sun_hit, intersection_fn) {
-                            color += nee * sunc * fog_t * 0.2;
-                        }
-                        state.reinit(Ray::new_inf(fog_p, fog_dir)); // anyhit
-                        if !bvh.ray_traverse_dynamic(&mut state, &mut RayHit::none(), intersection_fn) {
-                            color += fog_t * 0.2 * fogc;
-                        }
-                    } else {
-                        let sky_bgc = sky_bg.render(ray.direction) * 0.4 + skyc * 0.6;
-                        color += sky_bgc * 0.4 + sky_bgc * misc_grain_noise * 0.6;
-                        color += 0.2 * fogc;
-                    }
-                    color
-                })
-                .collect::<Vec<_>>();
-            new_fragments
-                .iter()
-                .zip(fragments.iter_mut())
-                .for_each(|(new, col)| *col += *new);
-        }
-        println!();
-    ];
+    // Optionally create a window to show render progress
+    if let Some(shared_buffer) = shared_buffer {
+        debug_window(
+            width as usize,
+            height as usize,
+            Default::default(),
+            move |window, buffer| {
+                let mut sample = 0;
+                for (i, pixel) in buffer.iter_mut().enumerate() {
+                    let mut color = shared_buffer.get(i);
+                    sample = color.w as u32;
+                    color /= color.w; // Normalize by sample count stored in w
+                    color = post_process(exposure, &Vec3A::from_vec4(color)).extend(1.0);
+                    *pixel = color_to_minifb_pixel(color);
+                }
+                window.set_title(&format!(
+                    "{tris_count} tris, {sample}/{} AA samples",
+                    args.samples
+                ));
+            },
+        );
+    }
+
+    let fragments = render_thread.join().unwrap();
 
     let mut img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::new(width, height);
     let pixels = img.as_mut();
     pixels.chunks_mut(4).enumerate().for_each(|(i, chunk)| {
-        let mut col = (fragments[i] / total_aa_samples as f32).max(Vec3A::ZERO);
-        col *= Vec3A::splat(2.0).powf(exposure);
-        col = somewhat_boring_display_transform(col);
-        col = col.powf(1.7); // contrast
-        let luma = Vec3A::splat(col.dot(vec3a(0.2126, 0.7152, 0.0722)));
-        col = luma * -0.1 + col * 1.1; // saturation
-        let c = (col.clamp(Vec3A::ZERO, Vec3A::ONE) * 255.0).as_uvec3();
+        let mut color = (fragments[i] / args.samples as f32).max(Vec3A::ZERO);
+        color = post_process(exposure, &color);
+        let c = (color.clamp(Vec3A::ZERO, Vec3A::ONE) * 255.0).as_uvec3();
         chunk.copy_from_slice(&[c.x as u8, c.y as u8, c.z as u8, 255]);
     });
 
-    img.save(format!("demoscene_{seed}_rend.png"))
-        .expect("Failed to save image");
+    if let Some(output) = args.output {
+        img.save(output).expect("Failed to save image");
+    }
+}
+
+fn post_process(exposure: f32, color: &Vec3A) -> Vec3A {
+    let mut color = color * Vec3A::splat(2.0).powf(exposure);
+    color = somewhat_boring_display_transform(color);
+    color = color.powf(1.7); // contrast
+    let luma = Vec3A::splat(color.dot(vec3a(0.2126, 0.7152, 0.0722)));
+    luma * -0.1 + color * 1.1 // saturation
 }
 
 mod sky {
     use std::f32::consts::PI;
 
-    use glam::{vec3a, Vec3A};
+    use glam::{Vec3A, vec3a};
 
     use obvhs::test_util::sampling::smoothstep;
 

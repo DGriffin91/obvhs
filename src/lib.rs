@@ -1,3 +1,6 @@
+// TODO re-enable needless_range_loop lint and evaluate performance / clarity
+#![allow(clippy::needless_range_loop)]
+
 //! # BVH Construction and Traversal Library
 //!
 //! - [PLOC](https://meistdan.github.io/publications/ploc/paper.pdf) BVH2 builder with [Parallel Reinsertion](https://meistdan.github.io/publications/prbvh/paper.pdf) and spatial pre-splits.
@@ -62,9 +65,6 @@
 //!
 //! ```
 
-// TODO re-enable needless_range_loop lint and evaluate performance / clarity
-#![allow(clippy::needless_range_loop)]
-
 use std::time::Duration;
 
 use aabb::Aabb;
@@ -75,7 +75,7 @@ use triangle::Triangle;
 pub mod aabb;
 pub mod bvh2;
 pub mod cwbvh;
-pub mod heapstack;
+pub mod faststack;
 pub mod ploc;
 pub mod ray;
 pub mod rt_triangle;
@@ -83,7 +83,16 @@ pub mod splits;
 pub mod test_util;
 pub mod triangle;
 
+pub const INVALID: u32 = u32::MAX;
+
 /// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
+#[cfg(feature = "parallel")]
+pub trait Boundable: Send + Sync {
+    fn aabb(&self) -> Aabb;
+}
+
+/// A trait for types that can be bounded by an axis-aligned bounding box (AABB). Used in Bvh2/CwBvh validation.
+#[cfg(not(feature = "parallel"))]
 pub trait Boundable {
     fn aabb(&self) -> Aabb;
 }
@@ -143,6 +152,19 @@ impl VecExt for glam::Vec3A {
     }
 }
 
+#[allow(unused)]
+fn as_slice_of_atomic_u32(slice: &mut [u32]) -> &mut [core::sync::atomic::AtomicU32] {
+    assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
+    assert_eq!(align_of::<AtomicU32>(), align_of::<u32>());
+    use core::sync::atomic::AtomicU32;
+    let parents: &mut [AtomicU32] = unsafe {
+        core::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut AtomicU32, slice.len())
+    };
+    // Alternatively:
+    //let slice: &mut [AtomicU32] = unsafe { &mut *((slice.as_mut_slice() as *mut [u32]) as *mut [AtomicU32]) };
+    parents
+}
+
 /// A macro to measure and print the execution time of a block of code.
 ///
 /// # Arguments
@@ -180,10 +202,10 @@ pub struct PrettyDuration(pub Duration);
 
 impl std::fmt::Display for PrettyDuration {
     /// Durations are formatted as follows:
-    ///   - If the duration is greater than or equal to 1 second, it is formatted in seconds (s).
-    ///   - If the duration is greater than or equal to 1 millisecond but less than 1 second, it is formatted in milliseconds (ms).
-    ///   - If the duration is less than 1 millisecond, it is formatted in microseconds (µs).
-    ///     In the case of seconds & milliseconds, the duration is always printed with a precision of two decimal places.
+    /// - If the duration is greater than or equal to 1 second, it is formatted in seconds (s).
+    /// - If the duration is greater than or equal to 1 millisecond but less than 1 second, it is formatted in milliseconds (ms).
+    /// - If the duration is less than 1 millisecond, it is formatted in microseconds (µs).
+    ///   In the case of seconds & milliseconds, the duration is always printed with a precision of two decimal places.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let duration = self.0;
         if duration.as_secs() > 0 {
@@ -212,6 +234,7 @@ macro_rules! scope {
 }
 
 /// General build parameters for Bvh2 & CwBvh
+#[derive(Clone, Copy, Debug)]
 pub struct BvhBuildParams {
     /// Split large tris into multiple AABBs
     pub pre_split: bool,
@@ -228,7 +251,7 @@ pub struct BvhBuildParams {
     pub post_collapse_reinsertion_batch_ratio_multiplier: f32,
     /// Bits used for ploc radix sort.
     pub sort_precision: SortPrecision,
-    /// Min 1 (CwBvh will clamp to max 3)
+    /// Min 1 (CwBvh will clamp to max 3, Bvh2 will clamp to max 255)
     pub max_prims_per_leaf: u32,
     /// Multiplier for traversal cost calculation during Bvh2 collapse (Does not affect CwBvh). A higher value will
     /// result in more primitives per leaf.
@@ -236,7 +259,7 @@ pub struct BvhBuildParams {
 }
 
 impl BvhBuildParams {
-    pub fn fastest_build() -> Self {
+    pub const fn fastest_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Minimum,
@@ -248,7 +271,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 1.0,
         }
     }
-    pub fn very_fast_build() -> Self {
+    pub const fn very_fast_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Minimum,
@@ -260,7 +283,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn fast_build() -> Self {
+    pub const fn fast_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Low,
@@ -273,7 +296,7 @@ impl BvhBuildParams {
         }
     }
     /// Tries to be around the same build time as embree but with faster traversal
-    pub fn medium_build() -> Self {
+    pub const fn medium_build() -> Self {
         BvhBuildParams {
             pre_split: false,
             ploc_search_distance: PlocSearchDistance::Medium,
@@ -285,7 +308,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn slow_build() -> Self {
+    pub const fn slow_build() -> Self {
         BvhBuildParams {
             pre_split: true,
             ploc_search_distance: PlocSearchDistance::High,
@@ -297,7 +320,7 @@ impl BvhBuildParams {
             collapse_traversal_cost: 3.0,
         }
     }
-    pub fn very_slow_build() -> Self {
+    pub const fn very_slow_build() -> Self {
         BvhBuildParams {
             pre_split: true,
             ploc_search_distance: PlocSearchDistance::Medium,

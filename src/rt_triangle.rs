@@ -5,7 +5,7 @@ use glam::*;
 
 use half::f16;
 
-use crate::{aabb::Aabb, ray::Ray, triangle::Triangle, Boundable};
+use crate::{Boundable, aabb::Aabb, ray::Ray, triangle::Triangle};
 
 #[derive(Clone, Copy, Default, PartialEq)]
 #[repr(C)]
@@ -136,6 +136,7 @@ impl RtCompressedTriangle {
 }
 
 impl Boundable for RtCompressedTriangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }
@@ -320,6 +321,7 @@ impl RtTriangle {
 }
 
 impl Boundable for RtTriangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }

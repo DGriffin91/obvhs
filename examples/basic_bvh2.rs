@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use glam::*;
 use obvhs::{
+    BvhBuildParams,
     bvh2::builder::build_bvh2_from_tris,
     ray::{Ray, RayHit},
-    test_util::geometry::{icosphere, PLANE},
+    test_util::geometry::{PLANE, icosphere},
     triangle::Triangle,
-    BvhBuildParams,
 };
 
 fn main() {
