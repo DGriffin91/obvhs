@@ -61,7 +61,6 @@ impl PlocBuilder {
         let had_primitives_to_nodes = !bvh.primitives_to_nodes.is_empty();
 
         self.current_nodes.clear();
-        self.current_nodes.reserve(bvh.primitive_indices.len());
         self.next_nodes.clear();
         self.mortons.clear();
 
