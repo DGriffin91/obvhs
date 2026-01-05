@@ -7,6 +7,8 @@ use crate::{
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
 };
 
+pub const FREE_NODE_MARKER: u32 = u32::MAX;
+
 pub fn compute_rebuild_path_flags<I, L>(bvh: &Bvh2, leaves: I, flags: &mut Vec<bool>)
 where
     I: IntoIterator<Item = L>,
@@ -64,22 +66,19 @@ impl PlocBuilder {
         self.next_nodes.clear();
         self.mortons.clear();
 
-        // Temporarily reuse this parents allocation for a node slot freelist, we are already invalidating it.
-        bvh.parents.clear();
-
         // Top down traverse to collect leaves and unflagged subtrees.
         fast_stack!(u32, (96, 192), bvh.max_depth, stack, {
             stack.push(bvh.nodes[0].first_index);
             while let Some(left_node_index) = stack.pop() {
                 for node_index in [left_node_index as usize, left_node_index as usize + 1] {
-                    let node = &bvh.nodes[node_index];
+                    let node = &mut bvh.nodes[node_index];
                     if !check_flag(node_index) || node.is_leaf() {
                         self.current_nodes.push(*node);
                     } else {
                         stack.push(node.first_index);
                     }
+                    node.prim_count = FREE_NODE_MARKER;
                 }
-                bvh.parents.push(left_node_index);
             }
         });
 

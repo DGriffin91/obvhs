@@ -26,10 +26,10 @@ use rayon::{
 #[cfg(not(feature = "parallel"))]
 use rdst::RadixSort;
 
-use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
 use crate::ploc::morton::{morton_encode_u64_unorm, morton_encode_u128_unorm};
 use crate::{Boundable, bvh2::node::Bvh2Node};
 use crate::{aabb::Aabb, bvh2::Bvh2};
+use crate::{bvh2::DEFAULT_MAX_STACK_DEPTH, ploc::partial_rebuild::FREE_NODE_MARKER};
 
 #[derive(Clone)]
 pub struct PlocBuilder {
@@ -264,11 +264,14 @@ impl PlocBuilder {
 
         // Merge nodes until there is only one left
         let nodes_count = (2 * prim_count as i64 - 1).max(0) as usize;
-        if REBUILD {
+
+        let mut insert_index = if REBUILD {
             assert!(bvh.nodes.len() >= nodes_count);
+            1 // Would it be better if this went down?
         } else {
             bvh.nodes.resize(nodes_count, Bvh2Node::default());
-        }
+            nodes_count
+        };
 
         let scale = 1.0 / total_aabb.diagonal().as_dvec3();
         let offset = -total_aabb.min.as_dvec3() * scale;
@@ -290,7 +293,6 @@ impl PlocBuilder {
         );
         mem::swap(&mut self.current_nodes, &mut self.next_nodes);
 
-        let mut insert_index = nodes_count;
         assert!(i8::MAX as usize > SEARCH_DISTANCE);
 
         let merge_buffer: &mut [i8] = &mut cast_slice_mut(&mut self.mortons)[..prim_count];
@@ -430,22 +432,38 @@ impl PlocBuilder {
                 let left = self.current_nodes[index];
                 let right = self.current_nodes[best_index];
 
+                let first_child;
+
                 // Reserve space in the target array for the two children
                 if REBUILD {
-                    insert_index = bvh.parents.pop().unwrap() as usize;
+                    loop {
+                        // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
+                        let left_slot = &mut bvh.nodes[insert_index];
+                        if left_slot.prim_count == FREE_NODE_MARKER {
+                            *left_slot = left;
+                            debug_assert!(
+                                bvh.nodes[insert_index + 1].prim_count == FREE_NODE_MARKER
+                            );
+                            bvh.nodes[insert_index + 1] = right;
+                            first_child = insert_index;
+                            insert_index += 2;
+                            break;
+                        }
+                        insert_index += 2;
+                    }
                 } else {
                     debug_assert!(insert_index >= 2);
                     insert_index -= 2;
+                    // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
+                    bvh.nodes[insert_index] = left;
+                    bvh.nodes[insert_index + 1] = right;
+                    first_child = insert_index;
                 }
 
                 // Create the parent node and place it in the array for the next iteration
                 self.next_nodes[next_nodes_idx] =
-                    Bvh2Node::new(left.aabb().union(right.aabb()), 0, insert_index as u32);
+                    Bvh2Node::new(left.aabb().union(right.aabb()), 0, first_child as u32);
                 next_nodes_idx += 1;
-
-                // Out of bounds here error here could indicate NaN present in input aabb. Try running in debug mode.
-                bvh.nodes[insert_index] = left;
-                bvh.nodes[insert_index + 1] = right;
 
                 if SEARCH_DISTANCE == 1 && index_offset == 1 {
                     // If the search distance is only 1, and the next index was merged with this one,
@@ -465,9 +483,7 @@ impl PlocBuilder {
             depth += 1;
         }
 
-        if REBUILD {
-            debug_assert!(bvh.parents.is_empty());
-        } else {
+        if !REBUILD {
             debug_assert_eq!(insert_index, 1);
         }
 
