@@ -598,7 +598,8 @@ impl Bvh2 {
         primitive_indices: &[u32],
         primitives_to_nodes: &mut Vec<u32>,
     ) {
-        primitives_to_nodes.resize(primitive_indices.len(), 0);
+        primitives_to_nodes.clear();
+        primitives_to_nodes.resize(primitive_indices.len(), INVALID);
         for (node_id, node) in nodes.iter().enumerate() {
             if node.is_leaf() {
                 let start = node.first_index;

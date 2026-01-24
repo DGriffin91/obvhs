@@ -528,4 +528,32 @@ mod tests {
             bvh.validate(&tris, false, false);
         }
     }
+
+    #[test]
+    fn remove_and_insert_all_primitives() {
+        let tris = demoscene(16, 0);
+
+        let mut bvh = build_bvh2(
+            &tris,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
+        bvh.init_primitives_to_nodes_if_uninit();
+        bvh.init_parents_if_uninit();
+        bvh.validate(&tris, false, false);
+
+        let mut stack = HeapStack::new_with_capacity(1000);
+
+        for primitive_id in 0..tris.len() as u32 {
+            bvh.remove_primitive(primitive_id);
+            bvh.validate(&tris, false, false);
+        }
+
+        for primitive_id in 0..tris.len() as u32 {
+            bvh.insert_primitive(tris[primitive_id as usize].aabb(), primitive_id, &mut stack);
+            bvh.validate_primitives_to_nodes();
+        }
+
+        bvh.validate(&tris, false, false);
+    }
 }
