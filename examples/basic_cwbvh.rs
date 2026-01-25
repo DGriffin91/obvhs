@@ -1,10 +1,10 @@
 use glam::*;
 use obvhs::{
+    BvhBuildParams,
     cwbvh::builder::build_cwbvh_from_tris,
     ray::{Ray, RayHit},
-    test_util::geometry::{icosphere, PLANE},
+    test_util::geometry::{PLANE, icosphere},
     triangle::Triangle,
-    BvhBuildParams,
 };
 use std::time::Duration;
 

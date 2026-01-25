@@ -6,8 +6,8 @@ use std::arch::x86_64::*;
 
 use crate::{
     cwbvh::{
-        node::{extract_byte64, EPSILON},
         CwBvhNode,
+        node::{EPSILON, extract_byte64},
     },
     ray::Ray,
 };

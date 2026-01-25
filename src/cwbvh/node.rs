@@ -2,14 +2,14 @@ use std::fmt::{self, Formatter};
 
 use crate::{aabb::Aabb, ray::Ray};
 use bytemuck::{Pod, Zeroable};
-use glam::{vec3a, Vec3, Vec3A};
+use glam::{Vec3, Vec3A, vec3a};
 use std::fmt::Debug;
 
 use super::NQ_SCALE;
 
 /// A Compressed Wide BVH8 Node. repr(C), Pod, 80 bytes.
 // https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, Default, PartialEq, Pod, Zeroable)]
 #[repr(C)]
 pub struct CwBvhNode {
     /// Min point of node AABB
@@ -31,7 +31,7 @@ pub struct CwBvhNode {
     /// Meta data for each child
     /// Empty child slot: The field is set to 00000000
     ///
-    /// For leafs nodes: the low 5 bits store the primitive offset [0..24) from primitive_base_idx. And the high
+    /// For leaves nodes: the low 5 bits store the primitive offset [0..24) from primitive_base_idx. And the high
     /// 3 bits store the number of primitives in that leaf in a unary encoding.
     /// A child leaf with 2 primitives with the first primitive starting at primitive_base_idx would be 0b01100000
     /// A child leaf with 3 primitives with the first primitive starting at primitive_base_idx + 2 would be 0b11100010
@@ -78,9 +78,6 @@ impl Debug for CwBvhNode {
             .finish()
     }
 }
-
-unsafe impl Pod for CwBvhNode {}
-unsafe impl Zeroable for CwBvhNode {}
 
 pub(crate) const EPSILON: f32 = 0.0001;
 
@@ -142,8 +139,8 @@ impl CwBvhNode {
             tmin3 = tmin3 * adjusted_ray_dir_inv + adjusted_ray_origin;
             tmax3 = tmax3 * adjusted_ray_dir_inv + adjusted_ray_origin;
 
-            let tmin = tmin3.x.max(tmin3.y).max(tmin3.z).max(EPSILON); //ray.tmin?
-            let tmax = tmax3.x.min(tmax3.y).min(tmax3.z).min(ray.tmax);
+            let tmin = tmin3.max_element().max(EPSILON); //ray.tmin?
+            let tmax = tmax3.min_element().min(ray.tmax);
 
             let intersected = tmin <= tmax;
             if intersected {

@@ -1,5 +1,6 @@
-// Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/leaf_collapser.hpp
 use bytemuck::zeroed_vec;
+
+// Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/leaf_collapser.hpp
 #[cfg(feature = "parallel")]
 use rayon::{
     iter::{
@@ -19,8 +20,13 @@ use crate::bvh2::{Bvh2, Bvh2Node};
 /// cost does not improve.
 pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
     crate::scope!("collapse");
+    let nodes_qty = bvh.nodes.len();
 
-    if max_prims <= 1 {
+    if max_prims <= 1 || nodes_qty as u32 <= max_prims * 2 + 1 {
+        return;
+    }
+
+    if !bvh.primitive_indices.is_empty() && bvh.primitive_indices.len() as u32 <= max_prims {
         return;
     }
 
@@ -28,9 +34,9 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
         return;
     }
 
-    let nodes_qty = bvh.nodes.len();
+    let previously_had_parents = !bvh.parents.is_empty();
 
-    let parents = bvh.compute_parents();
+    bvh.init_parents_if_uninit();
 
     let mut node_counts = vec![1u32; nodes_qty];
     let mut prim_counts = vec![0u32; nodes_qty];
@@ -41,7 +47,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
         let prim_counts = as_slice_of_sometimes_atomic_u32(&mut prim_counts);
 
         // Bottom-up traversal to collapse leaves
-        bottom_up_traverse(bvh, &parents, |leaf, i| {
+        bottom_up_traverse(bvh, |leaf, i| {
             if leaf {
                 prim_counts[i].set(bvh.nodes[i].prim_count);
             } else {
@@ -58,9 +64,9 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
                     let left = bvh.nodes[first_child];
                     let right = bvh.nodes[first_child + 1];
                     let collapse_cost =
-                        node.aabb.half_area() * (total_count as f32 - traversal_cost);
-                    let base_cost = left.aabb.half_area() * left_count as f32
-                        + right.aabb.half_area() * right_count as f32;
+                        node.aabb().half_area() * (total_count as f32 - traversal_cost);
+                    let base_cost = left.aabb().half_area() * left_count as f32
+                        + right.aabb().half_area() * right_count as f32;
                     let both_have_same_prim =
                         (left.first_index == right.first_index) && total_count == 2;
 
@@ -131,7 +137,7 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
                     first_prim += node.prim_count;
                     while !Bvh2Node::is_left_sibling(j) && j != i {
-                        j = parents[j] as usize;
+                        j = bvh.parents[j] as usize;
                     }
                     if j == i {
                         break;
@@ -169,13 +175,27 @@ pub fn collapse(bvh: &mut Bvh2, max_prims: u32, traversal_cost: f32) {
 
     std::mem::swap(&mut bvh.nodes, &mut nodes_copy);
     std::mem::swap(&mut bvh.primitive_indices, &mut indices_copy);
+
+    if previously_had_parents {
+        // If we had parents already computed before collapse we need to recompute them now
+        // TODO perf there might be a way to update this during collapse
+        bvh.update_parents();
+    } else {
+        // If not, skip the extra computation
+        bvh.parents.clear();
+    }
+    if !bvh.primitives_to_nodes.is_empty() {
+        // If primitives_to_nodes already existed we need to make sure it remains valid.
+        // TODO perf there might be a way to update this during collapse
+        bvh.update_primitives_to_nodes();
+    }
 }
 
 // Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
 #[cfg(not(feature = "parallel"))]
+/// Caller must make sure Bvh2::parents is initialized
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
-    parents: &[u32],
     mut process_node: F, // True is for leaf
 ) where
     F: FnMut(bool, usize),
@@ -186,26 +206,28 @@ fn bottom_up_traverse<F>(
         return;
     }
 
-    let mut flags: Vec<u32> = zeroed_vec(bvh.nodes.len());
+    let mut flags: Vec<u8> = zeroed_vec(bvh.nodes.len());
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
     (1..bvh.nodes.len()).for_each(|i| {
-        // Only process leaves
+        // Always start at leaf
         if bvh.nodes[i].is_leaf() {
             process_node(true, i);
 
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i;
             while j != 0 {
-                j = parents[j] as usize;
+                j = bvh.parents[j] as usize;
+
+                let flag = &mut flags[j];
 
                 // Make sure that the children of this inner node have been processed
-                let previous_flag = flags[j];
-                flags[j] += 1;
+                let previous_flag = *flag;
+                *flag = previous_flag.saturating_add(1);
                 if previous_flag != 1 {
                     break;
                 }
-                flags[j] = 0;
+                *flag = 0;
 
                 process_node(false, j);
             }
@@ -213,15 +235,22 @@ fn bottom_up_traverse<F>(
     });
 }
 
+// Based on https://github.com/madmann91/bvh/blob/2fd0db62022993963a7343669275647cb073e19a/include/bvh/bottom_up_algorithm.hpp
+// https://research.nvidia.com/sites/default/files/pubs/2012-06_Maximizing-Parallelism-in/karras2012hpg_paper.pdf
+// Paths from leaf nodes to the root are processed in parallel. Each thread starts from one leaf node and walks up the
+// tree using parent pointers. We track how many threads have visited each internal node using atomic counters—the first
+// thread terminates immediately while the second one gets to process the node. This way, each node is processed by
+// exactly one thread, which leads to O(n) time complexity.
 #[cfg(feature = "parallel")]
+/// Caller must make sure Bvh2::parents is initialized
 fn bottom_up_traverse<F>(
     bvh: &Bvh2,
-    parents: &[u32],
     process_node: F, // True is for leaf
 ) where
     F: Fn(bool, usize) + Sync + Send,
 {
     // Special case if the BVH is just a leaf
+
     if bvh.nodes.len() == 1 {
         process_node(true, 0);
         return;
@@ -235,20 +264,22 @@ fn bottom_up_traverse<F>(
 
     // Iterate through all nodes starting from 1, since node 0 is assumed to be the root
     (1..bvh.nodes.len()).into_par_iter().for_each(|i| {
-        // Only process leaves
+        // Always start at leaf
         if bvh.nodes[i].is_leaf() {
             process_node(true, i);
 
             // Process inner nodes on the path from that leaf up to the root
             let mut j = i;
             while j != 0 {
-                j = parents[j] as usize;
+                j = bvh.parents[j] as usize;
+
+                let flag = &flags[j];
 
                 // Make sure that the children of this inner node have been processed
-                if flags[j].fetch_add(1, Ordering::SeqCst) != 1 {
+                if flag.fetch_add(1, Ordering::SeqCst) != 1 {
                     break;
                 }
-                flags[j].store(0, Ordering::SeqCst);
+                flag.store(0, Ordering::SeqCst);
 
                 process_node(false, j);
             }
@@ -361,7 +392,7 @@ fn as_slice_of_sometimes_atomic_u32(slice: &mut [u32]) -> &mut [SometimesAtomicU
 mod tests {
 
     use crate::{
-        ploc::{PlocSearchDistance, SortPrecision},
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         test_util::geometry::demoscene,
     };
 
@@ -376,10 +407,34 @@ mod tests {
             indices.push(i as u32);
             aabbs.push(primitive.aabb());
         }
-        let mut bvh =
-            PlocSearchDistance::VeryLow.build(&aabbs, indices.clone(), SortPrecision::U64, 1);
-        bvh.validate(&tris, false, false);
-        collapse(&mut bvh, 8, 1.0);
-        bvh.validate(&tris, false, false);
+        {
+            // Test without init_primitives_to_nodes & init_parents
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices.clone(),
+                SortPrecision::U64,
+                1,
+            );
+            bvh.validate(&tris, false, false);
+            collapse(&mut bvh, 8, 1.0);
+            bvh.validate(&tris, false, false);
+        }
+        {
+            // Test with init_primitives_to_nodes & init_parents
+            let mut bvh = PlocBuilder::new().build(
+                PlocSearchDistance::VeryLow,
+                &aabbs,
+                indices,
+                SortPrecision::U64,
+                1,
+            );
+            bvh.validate(&tris, false, false);
+            bvh.init_primitives_to_nodes_if_uninit();
+            bvh.init_parents_if_uninit();
+            bvh.validate(&tris, false, false);
+            collapse(&mut bvh, 8, 1.0);
+            bvh.validate(&tris, false, false);
+        }
     }
 }

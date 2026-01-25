@@ -1,12 +1,12 @@
 // Uses cost / merging from cwbvh paper
 
-use glam::{vec3a, UVec3, Vec3A};
+use glam::{UVec3, Vec3A, vec3a};
 
 use crate::{
+    PerComponent, VecExt,
     aabb::Aabb,
     bvh2::Bvh2,
-    cwbvh::{CwBvh, CwBvhNode, BRANCHING, DENOM},
-    PerComponent, VecExt,
+    cwbvh::{BRANCHING, CwBvh, CwBvhNode, DENOM},
 };
 
 use super::DIRECTIONS;
@@ -74,9 +74,9 @@ impl<'a> Bvh2Converter<'a> {
 
     pub fn convert_to_cwbvh_impl(&mut self, node_index_bvh8: usize, node_index_bvh2: usize) {
         let mut node = self.nodes[node_index_bvh8];
-        let aabb = self.bvh2.nodes[node_index_bvh2].aabb;
+        let aabb = self.bvh2.nodes[node_index_bvh2].aabb();
         if let Some(exact_node_aabbs) = &mut self.exact_node_aabbs {
-            exact_node_aabbs[node_index_bvh8] = aabb;
+            exact_node_aabbs[node_index_bvh8] = *aabb;
         }
 
         let node_p = aabb.min;
@@ -119,7 +119,7 @@ impl<'a> Bvh2Converter<'a> {
                 continue; // Empty slot
             };
 
-            let child_aabb = self.bvh2.nodes[*child_index as usize].aabb;
+            let child_aabb = self.bvh2.nodes[*child_index as usize].aabb();
 
             // const PAD: f32 = 1e-20;
             // Use to force non-zero volumes.
@@ -224,7 +224,7 @@ impl<'a> Bvh2Converter<'a> {
         _current_depth: i32,
     ) -> u32 {
         let node = &self.bvh2.nodes[node_index];
-        let half_area = node.aabb.half_area();
+        let half_area = node.aabb().half_area();
         let first_index = node.first_index;
         let prim_count = node.prim_count;
 
@@ -396,6 +396,8 @@ impl<'a> Bvh2Converter<'a> {
         }
     }
 
+    /// Arrange child nodes in Morton order according to their centroids so that the order in which the intersected
+    /// children are traversed can be determined by the ray octant.
     // Based on https://github.com/jan-van-bergen/GPU-Raytracer/blob/6559ae2241c8fdea0ddaec959fe1a47ec9b3ab0d/Src/BVH/Converters/BVH8Converter.cpp#L148
     pub fn order_children(
         &mut self,
@@ -404,18 +406,17 @@ impl<'a> Bvh2Converter<'a> {
         child_count: usize,
     ) {
         let node = &self.bvh2.nodes[node_index];
-        let p = node.aabb.center();
+        let p = node.aabb().center();
 
         let mut cost = [[f32::MAX; DIRECTIONS]; BRANCHING];
 
         assert!(child_count <= BRANCHING);
         assert!(cost.len() >= child_count);
         // Fill cost table
-        // TODO parallel: check to see if this is faster w/ par_iter
         for s in 0..DIRECTIONS {
             let d = self.direction_lut[s];
             for c in 0..child_count {
-                let v = self.bvh2.nodes[children[c] as usize].aabb.center() - p;
+                let v = self.bvh2.nodes[children[c] as usize].aabb().center() - p;
                 let cost_slot = unsafe { cost.get_unchecked_mut(c).get_unchecked_mut(s) };
                 *cost_slot = d.dot(v); // No benefit from normalizing
             }
@@ -502,7 +503,8 @@ pub fn bvh2_to_cwbvh(
     CwBvh {
         nodes: converter.nodes,
         primitive_indices: converter.primitive_indices,
-        total_aabb: bvh2.nodes[0].aabb,
+        total_aabb: *bvh2.nodes[0].aabb(),
         exact_node_aabbs: converter.exact_node_aabbs,
+        uses_spatial_splits: bvh2.uses_spatial_splits,
     }
 }

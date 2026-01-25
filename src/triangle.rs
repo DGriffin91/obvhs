@@ -1,11 +1,11 @@
 //! Triangle representation in 3D space.
 
 use bytemuck::{Pod, Zeroable};
-use glam::{vec2, Mat4, Vec2, Vec3A};
+use glam::{Mat4, Vec2, Vec3A, vec2};
 
-use crate::{aabb::Aabb, ray::Ray, Boundable, Transformable};
+use crate::{Boundable, Transformable, aabb::Aabb, ray::Ray};
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, Zeroable)]
 pub struct Triangle {
     pub v0: Vec3A,
     pub v1: Vec3A,
@@ -13,7 +13,6 @@ pub struct Triangle {
 }
 
 unsafe impl Pod for Triangle {}
-unsafe impl Zeroable for Triangle {}
 
 impl Triangle {
     /// Compute the normal of the triangle geometry.
@@ -166,6 +165,7 @@ impl Triangle {
 }
 
 impl Boundable for Triangle {
+    #[inline(always)]
     fn aabb(&self) -> Aabb {
         self.aabb()
     }

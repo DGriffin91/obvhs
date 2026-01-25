@@ -5,12 +5,14 @@ mod tests {
 
     use glam::*;
     use obvhs::{
+        BvhBuildParams,
         aabb::Aabb,
         bvh2::builder::{build_bvh2, build_bvh2_from_tris},
         cwbvh::{
             builder::{build_cwbvh, build_cwbvh_from_tris},
             bvh2_to_cwbvh::bvh2_to_cwbvh,
         },
+        ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
         ray::{Ray, RayHit},
         test_util::{
             geometry::{demoscene, height_to_triangles, icosphere},
@@ -18,75 +20,85 @@ mod tests {
         },
         traverse,
         triangle::Triangle,
-        BvhBuildParams,
     };
+
+    const BUILD_PARAM_SET: [BvhBuildParams; 6] = [
+        BvhBuildParams::fastest_build(),
+        BvhBuildParams::very_fast_build(),
+        BvhBuildParams::fast_build(),
+        BvhBuildParams::medium_build(),
+        BvhBuildParams::slow_build(),
+        BvhBuildParams::very_slow_build(),
+    ];
 
     #[test]
     pub fn build_bvh2_with_empty_aabb() {
-        let bvh = build_bvh2(
-            &[Aabb::empty()],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_bvh2(&[Aabb::empty()], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_bvh2_with_many_inf() {
-        let bvh = build_bvh2(
-            &[Aabb::INFINITY; 10],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_bvh2(&[Aabb::INFINITY; 10], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_bvh2_with_many_max() {
-        let bvh = build_bvh2(
-            &[Aabb::LARGEST; 10],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_bvh2(&[Aabb::LARGEST; 10], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_cwbvh_with_empty_aabb() {
-        let bvh = build_cwbvh(
-            &[Aabb::empty()],
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let bvh = build_cwbvh(&[Aabb::empty()], build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_bvh2_with_nothing() {
-        let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_bvh2(
-            &aabbs,
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let aabbs: Vec<Aabb> = Vec::new();
+            let bvh = build_bvh2(&aabbs, build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
     }
 
     #[test]
     pub fn build_cwbvh_with_nothing() {
-        let aabbs: Vec<Aabb> = Vec::new();
-        let bvh = build_cwbvh(
-            &aabbs,
-            BvhBuildParams::medium_build(),
-            &mut Duration::default(),
-        );
-        let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
-        assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        for build_param in BUILD_PARAM_SET {
+            let aabbs: Vec<Aabb> = Vec::new();
+            let bvh = build_cwbvh(&aabbs, build_param, &mut Duration::default());
+            let ray = Ray::new_inf(Vec3A::Z, -Vec3A::Z);
+            assert!(!bvh.ray_traverse(ray, &mut RayHit::none(), |_ray, _id| f32::INFINITY));
+        }
+    }
+
+    #[test]
+    pub fn build_bvh_with_varying_prim_counts() {
+        let mut tris = height_to_triangles(|_x: usize, _y: usize| -> f32 { 0.0 }, 4, 4);
+        while tris.len() > 0 {
+            tris.pop();
+            for build_param in BUILD_PARAM_SET {
+                let bvh = build_bvh2_from_tris(&tris, build_param, &mut Duration::default());
+                bvh.validate(&tris, false, !build_param.pre_split);
+                let bvh = build_cwbvh_from_tris(&tris, build_param, &mut Duration::default());
+                bvh.validate(&tris, false);
+            }
+        }
     }
 
     #[test]
@@ -111,6 +123,7 @@ mod tests {
         assert_eq!(hit_count, 256 * 256)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn eval_render<F>(
         mut eval: F,
         tris: &[Triangle],
@@ -209,7 +222,7 @@ mod tests {
         );
         let mut cw_intersect_count = 0;
         let mut cw_intersect_sum = 0usize;
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
 
         let mut state = cwbvh.new_traversal(Vec3A::ZERO);
         let mut node;
@@ -244,7 +257,7 @@ mod tests {
             BvhBuildParams::fast_build(),
             &mut Duration::default(),
         );
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
 
         for i in 0..512 {
             let point =
@@ -292,7 +305,7 @@ mod tests {
             BvhBuildParams::fast_build(),
             &mut Duration::default(),
         );
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         let parents = cwbvh.compute_parents();
         for (child, parent) in parents.iter().enumerate().skip(1) {
             let node = cwbvh.nodes[*parent as usize];
@@ -328,7 +341,8 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2 = PlocBuilder::new().build(
+            config.ploc_search_distance,
             &aabbs,
             indices,
             config.sort_precision,
@@ -336,13 +350,13 @@ mod tests {
         );
         let mut cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         for node in 0..cwbvh.nodes.len() {
             cwbvh.order_node_children(&aabbs, node, false);
         }
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
     }
 
     #[test]
@@ -363,7 +377,8 @@ mod tests {
             indices.push(i as u32);
         }
 
-        let bvh2 = config.ploc_search_distance.build(
+        let bvh2 = PlocBuilder::new().build(
+            config.ploc_search_distance,
             &aabbs,
             indices,
             config.sort_precision,
@@ -382,22 +397,77 @@ mod tests {
 
                         assert!(exact_aabb.min.cmpge(compressed_aabb.min).all());
                         assert!(exact_aabb.max.cmple(compressed_aabb.max).all());
-                        assert!(exact_aabb
-                            .min
-                            .cmpge(child_node_self_compressed_aabb.min)
-                            .all());
-                        assert!(exact_aabb
-                            .max
-                            .cmple(child_node_self_compressed_aabb.max)
-                            .all());
+                        assert!(
+                            exact_aabb
+                                .min
+                                .cmpge(child_node_self_compressed_aabb.min)
+                                .all()
+                        );
+                        assert!(
+                            exact_aabb
+                                .max
+                                .cmple(child_node_self_compressed_aabb.max)
+                                .all()
+                        );
                     }
                 }
             }
         }
 
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
         cwbvh.order_children(&aabbs, false);
-        cwbvh.validate(&tris, false, false);
+        cwbvh.validate(&tris, false);
+    }
+
+    #[test]
+    pub fn reuse_allocs() {
+        fn aabbs_and_indices(tris: &Vec<Triangle>) -> (Vec<Aabb>, Vec<u32>) {
+            let mut aabbs = Vec::with_capacity(tris.len());
+            let mut indices = Vec::with_capacity(tris.len());
+            let mut largest_half_area = 0.0;
+
+            for (i, tri) in tris.iter().enumerate() {
+                let a = tri.v0;
+                let b = tri.v1;
+                let c = tri.v2;
+                let mut aabb = Aabb::empty();
+                aabb.extend(a).extend(b).extend(c);
+                let half_area = aabb.half_area();
+                largest_half_area = half_area.max(largest_half_area);
+                aabbs.push(aabb);
+                indices.push(i as u32);
+            }
+            (aabbs, indices)
+        }
+
+        let tris = demoscene(99, 0);
+        let (aabbs, indices) = aabbs_and_indices(&tris);
+
+        let mut builder = PlocBuilder::with_capacity(aabbs.len());
+
+        let mut bvh2 = builder.build(
+            PlocSearchDistance::default(),
+            &aabbs,
+            indices,
+            SortPrecision::U64,
+            0,
+        );
+
+        bvh2.validate(&tris, false, true);
+
+        let tris = demoscene(98, 0);
+        let (aabbs, indices) = aabbs_and_indices(&tris);
+
+        builder.build_with_bvh(
+            &mut bvh2,
+            PlocSearchDistance::default(),
+            &aabbs,
+            indices,
+            SortPrecision::U64,
+            0,
+        );
+
+        bvh2.validate(&tris, false, true);
     }
 }

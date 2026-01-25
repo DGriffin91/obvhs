@@ -1,12 +1,12 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    aabb::Aabb,
+    Boundable, BvhBuildParams,
     bvh2::reinsertion::ReinsertionOptimizer,
-    cwbvh::{bvh2_to_cwbvh::bvh2_to_cwbvh, CwBvh},
+    cwbvh::{CwBvh, bvh2_to_cwbvh::bvh2_to_cwbvh},
+    ploc::PlocBuilder,
     splits::split_aabbs_preset,
     triangle::Triangle,
-    Boundable, BvhBuildParams,
 };
 
 /// Build a cwbvh from the given list of Triangles.
@@ -22,44 +22,55 @@ pub fn build_cwbvh_from_tris(
     config: BvhBuildParams,
     core_build_time: &mut Duration,
 ) -> CwBvh {
-    let mut aabbs = Vec::with_capacity(triangles.len());
-    let mut indices = Vec::with_capacity(triangles.len());
-    let mut largest_half_area = 0.0;
-    let mut avg_half_area = 0.0;
-
-    for (i, tri) in triangles.iter().enumerate() {
-        let a = tri.v0;
-        let b = tri.v1;
-        let c = tri.v2;
-        let mut aabb = Aabb::empty();
-        aabb.extend(a).extend(b).extend(c);
-        let half_area = aabb.half_area();
-        largest_half_area = half_area.max(largest_half_area);
-        avg_half_area += half_area;
-        aabbs.push(aabb);
-        indices.push(i as u32);
-    }
-    avg_half_area /= triangles.len() as f32;
-
-    let start_time = Instant::now();
-
+    let mut bvh2;
+    let start_time;
     if config.pre_split {
+        let mut largest_half_area = 0.0;
+        let mut avg_area = 0.0;
+
+        let mut aabbs = triangles
+            .iter()
+            .map(|tri| {
+                let aabb = tri.aabb();
+                let half_area = aabb.half_area();
+                largest_half_area = half_area.max(largest_half_area);
+                avg_area += half_area;
+                aabb
+            })
+            .collect::<Vec<_>>();
+        let mut indices = (0..triangles.len() as u32).collect::<Vec<_>>();
+
+        avg_area /= triangles.len() as f32;
+
+        start_time = Instant::now();
+
         split_aabbs_preset(
             &mut aabbs,
             &mut indices,
             triangles,
-            avg_half_area,
+            avg_area,
             largest_half_area,
+        );
+        bvh2 = PlocBuilder::with_capacity(aabbs.len()).build(
+            config.ploc_search_distance,
+            &aabbs,
+            indices,
+            config.sort_precision,
+            config.search_depth_threshold,
+        );
+    } else {
+        start_time = Instant::now();
+        bvh2 = PlocBuilder::with_capacity(triangles.len()).build(
+            config.ploc_search_distance,
+            triangles,
+            (0..triangles.len() as u32).collect::<Vec<_>>(),
+            config.sort_precision,
+            config.search_depth_threshold,
         );
     }
 
-    let mut bvh2 = config.ploc_search_distance.build(
-        &aabbs,
-        indices,
-        config.sort_precision,
-        config.search_depth_threshold,
-    );
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    bvh2.uses_spatial_splits = config.pre_split;
+    ReinsertionOptimizer::default().run(&mut bvh2, config.reinsertion_batch_ratio, None);
     let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
     *core_build_time += start_time.elapsed();
@@ -67,7 +78,7 @@ pub fn build_cwbvh_from_tris(
     #[cfg(debug_assertions)]
     {
         bvh2.validate(triangles, false, config.pre_split);
-        cwbvh.validate(triangles, config.pre_split, false);
+        cwbvh.validate(triangles, false);
     }
 
     cwbvh
@@ -88,29 +99,22 @@ pub fn build_cwbvh<T: Boundable>(
     config: BvhBuildParams,
     core_build_time: &mut Duration,
 ) -> CwBvh {
-    let mut aabbs = Vec::with_capacity(primitives.len());
-    let mut indices = Vec::with_capacity(primitives.len());
-
-    for (i, primitive) in primitives.iter().enumerate() {
-        indices.push(i as u32);
-        aabbs.push(primitive.aabb());
-    }
-
     let start_time = Instant::now();
 
-    let mut bvh2 = config.ploc_search_distance.build(
-        &aabbs,
-        indices,
+    let mut bvh2 = PlocBuilder::with_capacity(primitives.len()).build(
+        config.ploc_search_distance,
+        primitives,
+        (0..primitives.len() as u32).collect::<Vec<_>>(),
         config.sort_precision,
         config.search_depth_threshold,
     );
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    ReinsertionOptimizer::default().run(&mut bvh2, config.reinsertion_batch_ratio, None);
     let cwbvh = bvh2_to_cwbvh(&bvh2, config.max_prims_per_leaf.clamp(1, 3), true, false);
 
     #[cfg(debug_assertions)]
     {
-        bvh2.validate(&aabbs, false, config.pre_split);
-        cwbvh.validate(&aabbs, config.pre_split, false);
+        bvh2.validate(primitives, false, config.pre_split);
+        cwbvh.validate(primitives, false);
     }
 
     *core_build_time += start_time.elapsed();
