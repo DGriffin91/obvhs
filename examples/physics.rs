@@ -12,9 +12,7 @@ use obvhs::{
     aabb::Aabb,
     bvh2::{Bvh2, insertion_removal::SiblingInsertionCandidate, reinsertion::ReinsertionOptimizer},
     faststack::HeapStack,
-    ploc::{
-        PlocBuilder, PlocSearchDistance, SortPrecision, partial_rebuild::compute_rebuild_path_flags,
-    },
+    ploc::{PlocBuilder, PlocSearchDistance, SortPrecision, rebuild::compute_rebuild_path_flags},
     ray::{Ray, RayHit},
 };
 
