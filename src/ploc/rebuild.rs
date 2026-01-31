@@ -7,7 +7,7 @@ use crate::{
     ploc::{PlocBuilder, PlocSearchDistance, SortPrecision},
 };
 
-/// Provide a set of leaves that need to be rebuilt. After calling flags will be true for any node index up the tree
+/// Provide a set of leaves that need to be rebuilt. After calling, flags will be true for any node index up the tree
 /// that needs to be included in the partial rebuild.
 pub fn compute_rebuild_path_flags<I, L>(bvh: &Bvh2, leaves: I, flags: &mut Vec<bool>)
 where
@@ -45,7 +45,7 @@ impl PlocBuilder {
     /// Fully rebuild the bvh from its current leaves.
     ///
     /// # Arguments
-    /// * `bvh` - An existing bvh with valid layout (AABBs in the tree)
+    /// * `bvh` - An existing bvh with valid leaves. Inner nodes are ignored.
     /// * `search_distance` - Which search distance should be used when building the ploc.
     /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
     /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and
