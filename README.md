@@ -24,3 +24,4 @@ See [Tray Racing](https://github.com/DGriffin91/tray_racing).
 - H. Ylitie et al. for [Efficient Incoherent Ray Traversal on GPUs Through
 Compressed Wide BVHs](https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf).
 - D. Meister et al. for [Parallel Locally-Ordered Clustering for Bounding Volume Hierarchy Construction](https://meistdan.github.io/publications/ploc/paper.pdf), [Parallel Reinsertion for Bounding Volume Hierarchy Optimization](https://meistdan.github.io/publications/prbvh/paper.pdf), and [Performance Comparison of Bounding Volume Hierarchies for GPU Ray Tracing](https://jcgt.org/published/0011/04/01/paper.pdf).
+- Erin Catto for [Dynamic Bounding Volume Hierarchies](https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf).
