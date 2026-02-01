@@ -65,8 +65,8 @@ struct Args {
     /// render resolution (width:height are 1:1)
     #[argh(option, default = "512")]
     render_res: usize,
+    /// render on a single thread (control building parallelism with `--features parallel`)
     #[argh(switch)]
-    /// for rendering to use a single thread (control building parallelism with `--features parallel`)
     single_threaded_render: bool,
 }
 
