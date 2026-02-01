@@ -3,7 +3,7 @@
 use glam::{UVec3, Vec3A, vec3a};
 
 use crate::{
-    PerComponent, VecExt,
+    PerComponent,
     aabb::Aabb,
     bvh2::Bvh2,
     cwbvh::{BRANCHING, CwBvh, CwBvhNode, DENOM},

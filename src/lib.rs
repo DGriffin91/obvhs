@@ -120,38 +120,6 @@ where
     }
 }
 
-#[doc(hidden)]
-pub trait VecExt {
-    /// Computes the base 2 logarithm of each component of the vector.
-    fn log2(self) -> Self;
-    /// Computes the base 2 exponential of each component of the vector.
-    fn exp2(self) -> Self;
-}
-
-impl VecExt for glam::Vec3 {
-    /// Computes the base 2 logarithm of each component of the `Vec3` vector.
-    fn log2(self) -> Self {
-        self.per_comp(f32::log2)
-    }
-
-    /// Computes the base 2 exponential of each component of the `Vec3` vector.
-    fn exp2(self) -> Self {
-        self.per_comp(f32::exp2)
-    }
-}
-
-impl VecExt for glam::Vec3A {
-    /// Computes the base 2 logarithm of each component of the `Vec3A` vector.
-    fn log2(self) -> Self {
-        self.per_comp(f32::log2)
-    }
-
-    /// Computes the base 2 exponential of each component of the `Vec3A` vector.
-    fn exp2(self) -> Self {
-        self.per_comp(f32::exp2)
-    }
-}
-
 #[allow(unused)]
 fn as_slice_of_atomic_u32(slice: &mut [u32]) -> &mut [core::sync::atomic::AtomicU32] {
     assert_eq!(size_of::<AtomicU32>(), size_of::<u32>());
