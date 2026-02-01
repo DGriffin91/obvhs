@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
 use crate::{
-    aabb::Aabb, splits::split_aabbs_preset, triangle::Triangle, Boundable, BvhBuildParams,
+    Boundable, BvhBuildParams, ploc::PlocBuilder, splits::split_aabbs_preset, triangle::Triangle,
 };
 
-use super::{leaf_collapser::collapse, reinsertion::ReinsertionOptimizer, Bvh2};
+use super::{Bvh2, leaf_collapser::collapse, reinsertion::ReinsertionOptimizer};
 
 /// Build a bvh2 from the given list of Triangles.
 /// Just a helper function / example, feel free to reimplement for your specific use case.
@@ -19,28 +19,28 @@ pub fn build_bvh2_from_tris(
     config: BvhBuildParams,
     core_build_time: &mut Duration,
 ) -> Bvh2 {
-    let mut aabbs = Vec::with_capacity(triangles.len());
-    let mut indices = Vec::with_capacity(triangles.len());
-    let mut largest_half_area = 0.0;
-    let mut avg_area = 0.0;
-
-    for (i, tri) in triangles.iter().enumerate() {
-        let a = tri.v0;
-        let b = tri.v1;
-        let c = tri.v2;
-        let mut aabb = Aabb::empty();
-        aabb.extend(a).extend(b).extend(c);
-        let half_area = aabb.half_area();
-        largest_half_area = half_area.max(largest_half_area);
-        avg_area += half_area;
-        aabbs.push(aabb);
-        indices.push(i as u32);
-    }
-    avg_area /= triangles.len() as f32;
-
-    let start_time = Instant::now();
-
+    let mut bvh2;
+    let start_time;
     if config.pre_split {
+        let mut largest_half_area = 0.0;
+        let mut avg_area = 0.0;
+
+        let mut aabbs = triangles
+            .iter()
+            .map(|tri| {
+                let aabb = tri.aabb();
+                let half_area = aabb.half_area();
+                largest_half_area = half_area.max(largest_half_area);
+                avg_area += half_area;
+                aabb
+            })
+            .collect::<Vec<_>>();
+        let mut indices = (0..triangles.len() as u32).collect::<Vec<_>>();
+
+        avg_area /= triangles.len() as f32;
+
+        start_time = Instant::now();
+
         split_aabbs_preset(
             &mut aabbs,
             &mut indices,
@@ -48,21 +48,33 @@ pub fn build_bvh2_from_tris(
             avg_area,
             largest_half_area,
         );
+        bvh2 = PlocBuilder::with_capacity(aabbs.len()).build(
+            config.ploc_search_distance,
+            &aabbs,
+            indices,
+            config.sort_precision,
+            config.search_depth_threshold,
+        );
+    } else {
+        start_time = Instant::now();
+        bvh2 = PlocBuilder::with_capacity(triangles.len()).build(
+            config.ploc_search_distance,
+            triangles,
+            (0..triangles.len() as u32).collect::<Vec<_>>(),
+            config.sort_precision,
+            config.search_depth_threshold,
+        );
     }
 
-    let mut bvh2 = config.ploc_search_distance.build(
-        &aabbs,
-        indices,
-        config.sort_precision,
-        config.search_depth_threshold,
-    );
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    bvh2.uses_spatial_splits = config.pre_split;
+    let mut reinsertion_optimizer = ReinsertionOptimizer::default();
+    reinsertion_optimizer.run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
-        config.max_prims_per_leaf,
+        config.max_prims_per_leaf.clamp(1, 255),
         config.collapse_traversal_cost,
     );
-    ReinsertionOptimizer::run(
+    reinsertion_optimizer.run(
         &mut bvh2,
         config.reinsertion_batch_ratio * config.post_collapse_reinsertion_batch_ratio_multiplier,
         None,
@@ -93,29 +105,23 @@ pub fn build_bvh2<T: Boundable>(
     config: BvhBuildParams,
     core_build_time: &mut Duration,
 ) -> Bvh2 {
-    let mut aabbs = Vec::with_capacity(primitives.len());
-    let mut indices = Vec::with_capacity(primitives.len());
-
-    for (i, primitive) in primitives.iter().enumerate() {
-        indices.push(i as u32);
-        aabbs.push(primitive.aabb());
-    }
-
     let start_time = Instant::now();
 
-    let mut bvh2 = config.ploc_search_distance.build(
-        &aabbs,
-        indices,
+    let mut bvh2 = PlocBuilder::with_capacity(primitives.len()).build(
+        config.ploc_search_distance,
+        primitives,
+        (0..primitives.len() as u32).collect::<Vec<_>>(),
         config.sort_precision,
         config.search_depth_threshold,
     );
-    ReinsertionOptimizer::run(&mut bvh2, config.reinsertion_batch_ratio, None);
+    let mut reinsertion_optimizer = ReinsertionOptimizer::default();
+    reinsertion_optimizer.run(&mut bvh2, config.reinsertion_batch_ratio, None);
     collapse(
         &mut bvh2,
-        config.max_prims_per_leaf,
+        config.max_prims_per_leaf.clamp(1, 255),
         config.collapse_traversal_cost,
     );
-    ReinsertionOptimizer::run(
+    reinsertion_optimizer.run(
         &mut bvh2,
         config.reinsertion_batch_ratio * config.post_collapse_reinsertion_batch_ratio_multiplier,
         None,

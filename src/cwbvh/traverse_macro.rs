@@ -58,6 +58,7 @@
 #[macro_export]
 macro_rules! traverse {
     ($cwbvh:expr, $node:expr, $state:expr, $node_intersection:expr, $primitive_intersection:expr) => {{
+        use $crate::faststack::FastStack;
         loop {
             // While the primitive group is not empty
             while $state.primitive_group.y != 0 {
@@ -102,7 +103,7 @@ macro_rules! traverse {
                 $state.primitive_group.y = &$state.hitmask & 0x00ffffffu32;
             } else {
                 // Below is only needed when using triangle postponing, which would only be helpful on the
-                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yeilding.
+                // GPU (it helps reduce thread divergence). Also, this isn't compatible with traversal yielding.
                 // $state.primitive_group = $state.current_group;
                 $state.current_group = UVec2::ZERO;
             }
@@ -111,7 +112,10 @@ macro_rules! traverse {
             if $state.primitive_group.y == 0 && ($state.current_group.y & 0xff000000) == 0 {
                 // If the stack is empty, end traversal.
                 if $state.stack.is_empty() {
-                    $state.current_group.y = 0;
+                    #[allow(unused)]
+                    {
+                        $state.current_group.y = 0;
+                    }
                     break;
                 }
 
