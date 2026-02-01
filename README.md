@@ -5,6 +5,7 @@
 
 - [PLOC](https://meistdan.github.io/publications/ploc/paper.pdf) BVH2 builder with [Parallel Reinsertion](https://meistdan.github.io/publications/prbvh/paper.pdf) and spatial pre-splits.
 - [CWBVH](https://research.nvidia.com/sites/default/files/publications/ylitie2017hpg-paper.pdf) An eight-way compressed wide BVH8 builder. Each BVH Node is compressed so that it takes up only 80 bytes per node.
+- Tools for dynamically updating and optimizing the Bvh2. ([Added in 0.3.0](https://github.com/DGriffin91/obvhs/pull/8))
 - CPU traversal for both BVH2 and CWBVH (SIMD traversal, intersecting 4 nodes at a time)
 - For GPU traversal example, see the [Tray Racing](https://github.com/DGriffin91/tray_racing) benchmark
 
