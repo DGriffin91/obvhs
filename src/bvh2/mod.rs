@@ -237,7 +237,8 @@ impl Bvh2 {
     }
 
     /// Traverse the BVH
-    /// Returns false when no hit is found.
+    /// Returns false when no hit is found. Consider using or referencing: Bvh2::ray_traverse(),
+    /// Bvh2::ray_traverse_miss(), or Bvh2::ray_traverse_anyhit().
     ///
     /// # Arguments
     /// * `state` - Holds the current traversal state. Allows traverse_dynamic to yield.
