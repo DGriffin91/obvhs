@@ -8,6 +8,7 @@ pub mod node;
 pub mod reinsertion;
 
 use bytemuck::zeroed_vec;
+use glam::Vec3A;
 use node::Bvh2Node;
 
 use std::{
@@ -392,6 +393,55 @@ impl Bvh2 {
                 let node_index = node_index + 1;
                 let node = &self.nodes[node_index as usize];
                 if node.aabb().intersect_aabb(&aabb) {
+                    if node.is_leaf() {
+                        if !eval(self, node_index) {
+                            return;
+                        }
+                    } else {
+                        stack.push(node.first_index);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Traverse the BVH with a point. fn `eval` is called for nodes that intersect `point`
+    /// The bvh (self) and the current node index is passed into fn `eval`
+    /// Note each node may have multiple primitives. `node.first_index` is the index of the first primitive.
+    /// `node.prim_count` is the quantity of primitives contained in the given node.
+    /// Return false from eval to halt traversal
+    pub fn point_traverse<F: FnMut(&Self, u32) -> bool>(&self, point: Vec3A, mut eval: F) {
+        if self.nodes.is_empty() {
+            return;
+        }
+
+        let root_node = &self.nodes[0];
+        if root_node.is_leaf() {
+            if root_node.aabb().contains_point(point) {
+                eval(self, 0);
+            }
+            return;
+        }
+
+        fast_stack!(u32, (96, 192), self.max_depth, stack, {
+            stack.push(root_node.first_index);
+            while let Some(node_index) = stack.pop() {
+                // Left
+                let node = &self.nodes[node_index as usize];
+                if node.aabb().contains_point(point) {
+                    if node.is_leaf() {
+                        if !eval(self, node_index) {
+                            return;
+                        }
+                    } else {
+                        stack.push(node.first_index);
+                    }
+                }
+
+                // Right
+                let node_index = node_index + 1;
+                let node = &self.nodes[node_index as usize];
+                if node.aabb().contains_point(point) {
                     if node.is_leaf() {
                         if !eval(self, node_index) {
                             return;

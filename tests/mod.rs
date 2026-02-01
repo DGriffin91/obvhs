@@ -249,8 +249,6 @@ mod tests {
     pub fn traverse_point() {
         let tris = icosphere(0);
 
-        // TODO Bvh2
-
         // CwBvh
         let cwbvh = build_cwbvh_from_tris(
             &tris,
@@ -258,6 +256,14 @@ mod tests {
             &mut Duration::default(),
         );
         cwbvh.validate(&tris, false);
+
+        // Bvh2
+        let bvh2 = build_bvh2_from_tris(
+            &tris,
+            BvhBuildParams::fast_build(),
+            &mut Duration::default(),
+        );
+        bvh2.validate(&tris, false, true);
 
         for i in 0..512 {
             let point =
@@ -294,6 +300,25 @@ mod tests {
 
             assert_eq!(refrence_count, cw_intersect_count);
             assert_eq!(refrence_intersect_sum, cw_intersect_sum);
+
+            let mut intersect_count = 0;
+            let mut intersect_sum = 0usize;
+            bvh2.point_traverse(point, |bvh, id| {
+                let node = &bvh.nodes[id as usize];
+                for i in 0..node.prim_count {
+                    let primitive_id =
+                        bvh.primitive_indices[(node.first_index + i) as usize] as usize;
+                    let tri = tris[primitive_id];
+                    if tri.aabb().contains_point(point) {
+                        intersect_count += 1;
+                        intersect_sum = intersect_sum.wrapping_add(primitive_id);
+                    }
+                }
+                true
+            });
+
+            assert_eq!(refrence_count, intersect_count);
+            assert_eq!(refrence_intersect_sum, intersect_sum);
         }
     }
 
