@@ -88,8 +88,9 @@ impl PlocBuilder {
     /// * `bvh` - An existing bvh with valid layout (AABBs in the tree above nodes that are to be rebuilt does not need
     ///   to be correct)
     /// * `should_remove()` - should return true for any node that should be include in the rebuild. This includes the
-    ///   entire chain up from any leaves that need to be updated. The leaves should have their new AABB before calling
-    ///   partial_rebuild() but the BVH does not need to be refit to accommodate them.
+    ///   entire chain up from any leaves that need to be updated. Use PlocBuilder::compute_rebuild_path_flags() or
+    ///   similar to compute. The leaves should have their new AABB before calling partial_rebuild() but the BVH does
+    ///   not need to be refit to accommodate them.
     /// * `search_distance` - Which search distance should be used when building the ploc.
     /// * `sort_precision` - Bits used for ploc radix sort. More bits results in a more accurate but slower sort.
     /// * `search_depth_threshold` - Below this depth a search distance of 1 will be used. Set to 0 to bypass and

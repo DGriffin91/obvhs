@@ -10,6 +10,7 @@ use crate::{
 use super::DEFAULT_MAX_STACK_DEPTH;
 
 // The index and inherited_cost of a given candidate sibling used for insertion.
+#[doc(hidden)]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SiblingInsertionCandidate {
     inherited_cost: f32,
@@ -162,7 +163,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
     /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
     /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
-    /// See "Branch and Bound" https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf
+    /// See "Branch and Bound" <https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf>
     /// Jiˇrí Bittner et al. 2012 Fast Insertion-Based Optimization of Bounding Volume Hierarchies
     ///
     /// # Returns
@@ -403,6 +404,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 /// Dramatically slower than ploc at both building and traversal. Easily 10x or 100x slower at building.
 /// (goes up by something like n^3 after a certain threshold).
 /// (BVH quality still improved afterward lot by reinsertion/collapse).
+#[doc(hidden)]
 pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     let mut bvh = Bvh2::default();
 
@@ -426,6 +428,7 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 /// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
 /// optimize a BVH2. This currently actually tends to make a good bvh slower since doing a lot of insert_leaf_node tends
 /// to result in very deep BVHs.
+#[doc(hidden)]
 pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
     let mut stack = HeapStack::new_with_capacity(1000);
     for node_id in 1..bvh.nodes.len() {

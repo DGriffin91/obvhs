@@ -139,11 +139,13 @@ impl Bvh2Node {
     }
 
     #[inline(always)]
+    /// Used internally for partial BVH rebuilds.
     pub fn set_invalid(&mut self) {
         self.prim_count |= 0b10000000000000000000000000000000
     }
 
     #[inline(always)]
+    /// Used internally for partial BVH rebuilds.
     pub fn set_valid(&mut self) {
         self.prim_count &= 0b01111111111111111111111111111111
     }

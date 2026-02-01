@@ -48,7 +48,7 @@ pub struct Bvh2 {
     pub primitive_indices_freelist: Vec<u32>,
 
     /// An optional mapping from primitives back to nodes.
-    /// Ex. let node_id = primitives_to_nodes[primitive_id];
+    /// Ex. `let node_id = primitives_to_nodes[primitive_id];`
     /// Where primitive_id is the original index of the primitive used when making the BVH and node_id is the index
     /// into Bvh2::nodes for the node of that primitive. Always use with the direct primitive id, not the one in the
     /// bvh node.
@@ -68,8 +68,8 @@ pub struct Bvh2 {
     /// that might disturb that order. Some operations require this ordering and will reorder if this is not true.
     pub children_are_ordered_after_parents: bool,
 
-    /// Stack defaults to 96 or the max depth during initial ploc building, whichever is larger. This may be larger than
-    /// needed depending on what post processing steps (like collapse, reinsertion, etc...), but the cost of
+    /// Stack defaults to 96 or the max depth found during initial ploc building, whichever is larger. This may be
+    /// larger than needed depending on what post processing steps (like collapse, reinsertion, etc...), but the cost of
     /// recalculating it may not be worth it so it is not done automatically.
     pub max_depth: usize,
 

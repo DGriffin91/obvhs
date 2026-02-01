@@ -79,8 +79,8 @@ impl PlocBuilder {
     }
 
     /// # Arguments
-    /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
     /// * `search_distance` - Which search distance should be used when building the ploc.
+    /// * `aabbs` - A list of bounding boxes. Should correspond to the number and order of primitives.
     /// * `indices` - The list indices used to index into the list of primitives. This allows for
     ///   flexibility in which primitives are included in the bvh and in what order they are referenced.
     ///   Often this would just be equivalent to: (0..aabbs.len() as u32).collect::<Vec<_>>()
@@ -250,6 +250,8 @@ impl PlocBuilder {
         );
     }
 
+    /// Prefer using Bvh2::build(), Bvh2::build_with_bvh(), Bvh2::build_ploc(), Bvh2::partial_rebuild(),
+    /// or Bvh2::full_rebuild(). This is only public for non-typical usages.
     /// REBUILD is for partial BVH rebuilds. In that case inner nodes should be freed by setting them to invalid
     /// (with Bvh2Node::set_invalid()) and both respective inner and leaf nodes moved on to PlocBuilder::current_nodes.
     /// They must always be removed in pairs with the starting on an odd number. See PlocBuilder::partial_rebuild()
