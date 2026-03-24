@@ -26,10 +26,13 @@ use rayon::{
 #[cfg(not(feature = "parallel"))]
 use rdst::RadixSort;
 
-use crate::bvh2::DEFAULT_MAX_STACK_DEPTH;
-use crate::ploc::morton::{morton_encode_u64_unorm, morton_encode_u128_unorm};
 use crate::{Boundable, bvh2::node::Bvh2Node};
 use crate::{aabb::Aabb, bvh2::Bvh2};
+use crate::{bvh2::DEFAULT_MAX_STACK_DEPTH, sort::RadixBin};
+use crate::{
+    ploc::morton::{morton_encode_u64_unorm, morton_encode_u128_unorm},
+    sort::radix_sort,
+};
 
 #[derive(Clone)]
 pub struct PlocBuilder {
@@ -39,6 +42,7 @@ pub struct PlocBuilder {
     // Enough space/align for Morton64 or Morton128. If this is updated make sure to also update anything that uses it.
     // As things depend on it being exactly Vec<[u128; 2]>
     pub mortons: Vec<[u128; 2]>,
+    pub temp_mortons: Vec<[u128; 2]>,
 
     #[cfg(feature = "parallel")]
     pub local_aabbs: Vec<Aabb>,
@@ -58,6 +62,7 @@ impl PlocBuilder {
             current_nodes: Vec::new(),
             next_nodes: Vec::new(),
             mortons: Vec::new(),
+            temp_mortons: Vec::new(),
 
             #[cfg(feature = "parallel")]
             local_aabbs: Vec::new(),
@@ -72,6 +77,7 @@ impl PlocBuilder {
             current_nodes: zeroed_vec(prim_count),
             next_nodes: zeroed_vec(prim_count),
             mortons: zeroed_vec(prim_count),
+            temp_mortons: zeroed_vec(prim_count),
 
             #[cfg(feature = "parallel")]
             local_aabbs: zeroed_vec(128),
@@ -292,6 +298,7 @@ impl PlocBuilder {
             SortPrecision::U64 => prim_count.div_ceil(2),
         };
         self.mortons.resize(mortons_size, Default::default());
+        self.temp_mortons.resize(mortons_size, Default::default());
         self.next_nodes.resize(prim_count, Default::default());
 
         // Sort primitives according to their morton code
@@ -299,6 +306,7 @@ impl PlocBuilder {
             &mut self.current_nodes,
             &mut self.next_nodes,
             &mut self.mortons,
+            &mut self.temp_mortons,
             scale,
             offset,
         );
@@ -666,18 +674,38 @@ impl SortPrecision {
         nodes: &mut [Bvh2Node],
         sorted: &mut [Bvh2Node],
         mortons_allocation: &mut [[u128; 2]],
+        temp_mortons_allocation: &mut [[u128; 2]],
         scale: DVec3,
         offset: DVec3,
     ) {
         match self {
             SortPrecision::U128 => {
                 let mortons = cast_slice_mut(mortons_allocation);
-                sort_nodes_by_morton::<Morton128>(*self, nodes, sorted, mortons, scale, offset)
+                let temp_mortons = cast_slice_mut(temp_mortons_allocation);
+                sort_nodes_by_morton::<Morton128>(
+                    *self,
+                    nodes,
+                    sorted,
+                    mortons,
+                    temp_mortons,
+                    scale,
+                    offset,
+                )
             }
             SortPrecision::U64 => {
                 let smaller: &mut [u128] = cast_slice_mut(mortons_allocation);
                 let mortons = cast_slice_mut(&mut smaller[..nodes.len()]);
-                sort_nodes_by_morton::<Morton64>(*self, nodes, sorted, mortons, scale, offset)
+                let smaller: &mut [u128] = cast_slice_mut(temp_mortons_allocation);
+                let temp_mortons = cast_slice_mut(&mut smaller[..nodes.len()]);
+                sort_nodes_by_morton::<Morton64>(
+                    *self,
+                    nodes,
+                    sorted,
+                    mortons,
+                    temp_mortons,
+                    scale,
+                    offset,
+                )
             }
         }
     }
@@ -700,6 +728,13 @@ impl RadixKey for Morton128 {
     }
 }
 
+impl RadixBin for Morton128 {
+    #[inline(always)]
+    fn bin(&self, shift: usize, mask: usize) -> usize {
+        ((self.code >> shift as u128) & mask as u128) as usize
+    }
+}
+
 #[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C)]
 struct Morton64 {
@@ -713,6 +748,13 @@ impl RadixKey for Morton64 {
     #[inline(always)]
     fn get_level(&self, level: usize) -> u8 {
         self.code.get_level(level)
+    }
+}
+
+impl RadixBin for Morton64 {
+    #[inline(always)]
+    fn bin(&self, shift: usize, mask: usize) -> usize {
+        ((self.code as usize >> shift) & mask) as usize
     }
 }
 
@@ -768,11 +810,12 @@ impl MortonCode for Morton64 {
     }
 }
 
-fn sort_nodes_by_morton<M: MortonCode>(
+fn sort_nodes_by_morton<M: MortonCode + RadixBin>(
     precision: SortPrecision,
     nodes: &mut [Bvh2Node],
     sorted_nodes: &mut [Bvh2Node],
     mortons: &mut [M],
+    temp_mortons: &mut [M],
     scale: DVec3,
     offset: DVec3,
 ) {
@@ -808,23 +851,37 @@ fn sort_nodes_by_morton<M: MortonCode>(
         .enumerate()
         .for_each(gen_mort);
 
-    #[cfg(feature = "parallel")]
-    {
+    radix_sort::<1024, _>(
+        mortons,
+        temp_mortons,
         match precision {
-            SortPrecision::U128 => mortons.par_sort_unstable_by_key(|m| m.code128()),
-            SortPrecision::U64 => mortons.par_sort_unstable_by_key(|m| m.code64()),
-        }
-    }
-    #[cfg(not(feature = "parallel"))]
-    {
-        match nodes_count {
-            0..=250_000 => match precision {
-                SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
-                SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
-            },
-            _ => mortons.radix_sort_unstable(),
-        };
-    }
+            SortPrecision::U128 => 128,
+            SortPrecision::U64 => 64,
+        },
+    );
+    //mortons.radix_sort_unstable();
+    //match precision {
+    //    SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
+    //    SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
+    //}
+
+    //#[cfg(feature = "parallel")]
+    //{
+    //    match precision {
+    //        SortPrecision::U128 => mortons.par_sort_unstable_by_key(|m| m.code128()),
+    //        SortPrecision::U64 => mortons.par_sort_unstable_by_key(|m| m.code64()),
+    //    }
+    //}
+    //#[cfg(not(feature = "parallel"))]
+    //{
+    //    match nodes_count {
+    //        0..=250_000 => match precision {
+    //            SortPrecision::U128 => mortons.sort_unstable_by_key(|m| m.code128()),
+    //            SortPrecision::U64 => mortons.sort_unstable_by_key(|m| m.code64()),
+    //        },
+    //        _ => mortons.radix_sort_unstable(),
+    //    };
+    //}
 
     let remap = |(n, m): (&mut Bvh2Node, &M)| *n = nodes[m.index()];
 

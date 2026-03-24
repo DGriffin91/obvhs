@@ -149,6 +149,7 @@ impl PlocBuilder {
 
         self.next_nodes.clear();
         self.mortons.clear();
+        self.temp_mortons.clear();
 
         // Rebuild BVH from leaves
         let total_aabb = *bvh.nodes[0].aabb();
