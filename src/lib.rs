@@ -80,6 +80,7 @@ pub mod faststack;
 pub mod ploc;
 pub mod ray;
 pub mod rt_triangle;
+pub mod sort;
 pub mod splits;
 pub mod test_util;
 pub mod triangle;
