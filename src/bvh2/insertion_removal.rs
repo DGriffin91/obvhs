@@ -270,6 +270,10 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             // that node point to the new location that it's being moved to.
             self.parents[best_sibling_candidate.first_index as usize] = new_sibling_id;
             self.parents[best_sibling_candidate.first_index as usize + 1] = new_sibling_id;
+
+            // The sibling was moved to the end of the node list, but its children stayed where they were,
+            // so they now come before their parent.
+            self.children_are_ordered_after_parents = false;
         }
         self.nodes.push(best_sibling_candidate);
         let new_node_id = self.nodes.len();
@@ -558,5 +562,72 @@ mod tests {
         }
 
         bvh.validate(&tris, false, false);
+    }
+
+    #[test]
+    fn insert_leaf_clears_children_are_ordered_after_parents() {
+        // Regression test
+        //
+        // If `Bvh2::children_are_ordered_after_parents` isn't cleared when inserting primitives,
+        // `Bvh2::refit_all()` takes the fast path, and computes some parents from children
+        // it hasn't updated yet, leaving nodes that don't fit their children.
+
+        let tris = demoscene(16, 0);
+
+        let mut bvh = build_bvh2(
+            &tris,
+            BvhBuildParams::medium_build(),
+            &mut Duration::default(),
+        );
+        bvh.init_primitives_to_nodes_if_uninit();
+        bvh.init_parents_if_uninit();
+
+        // Remove and re-insert some primitives.
+        let mut stack = HeapStack::new_with_capacity(1000);
+        let primitive_ids = (0..tris.len() as u32).step_by(32).collect::<Vec<_>>();
+
+        for &primitive_id in &primitive_ids {
+            bvh.remove_primitive(primitive_id);
+        }
+
+        // Removal clears `children_are_ordered_after_parents`, so we restore the ordering
+        // here so that we can test that insertion clears it again.
+        bvh.reorder_in_stack_traversal_order();
+        assert!(bvh.children_are_ordered_after_parents);
+
+        for &primitive_id in &primitive_ids {
+            let mut aabb = tris[primitive_id as usize].aabb();
+            aabb.min -= 0.05;
+            aabb.max += 0.05;
+            bvh.insert_primitive(aabb, primitive_id, &mut stack);
+        }
+
+        bvh.max_depth = (bvh.depth(0) + 1).max(DEFAULT_MAX_STACK_DEPTH);
+
+        bvh.validate(&tris, false, false);
+
+        // Grow every leaf, then refit the whole bvh.
+        for node in &mut bvh.nodes {
+            if node.is_leaf() {
+                let mut aabb = *node.aabb();
+                aabb.max += 0.1;
+                node.set_aabb(aabb);
+            }
+        }
+        bvh.refit_all();
+
+        // Every inner node should tightly fit its children.
+        for (node_id, node) in bvh.nodes.iter().enumerate() {
+            if !node.is_leaf() {
+                let children_aabb = bvh.nodes[node.first_index as usize]
+                    .aabb()
+                    .union(bvh.nodes[node.first_index as usize + 1].aabb());
+                assert_eq!(
+                    *node.aabb(),
+                    children_aabb,
+                    "node {node_id} does not fit its children after refit_all()"
+                );
+            }
+        }
     }
 }
