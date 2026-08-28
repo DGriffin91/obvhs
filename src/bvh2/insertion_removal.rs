@@ -647,8 +647,24 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             .max(sibling_depth + 2 + should_rotate as usize);
     }
 
-    /// Considers swapping one of the children of the node at `node_id` with one of the other child's children,
-    /// applying the cheapest of the four such rotations if it improves the total cost of the two inner nodes below `node_id`.
+    /// Computes the cost of a potential rotation around the node at `node_id`,
+    /// and applies it if it improves the total cost of the two inner nodes below `node_id`.
+    ///
+    /// This is a local restructuring of the tree that swaps one of the two children of `node_id`
+    /// with a child of the other (a grandchild of `node_id`). Given a tree of the form:
+    ///
+    /// ```text
+    ///     node
+    ///    /    \
+    ///   b      c
+    ///  / \    / \
+    /// d   e  f   g
+    ///
+    /// ```
+    ///
+    /// where `node_id` refers to `node`, four rotations are considered: swapping `b` with `f`,
+    /// `b` with `g`, `c` with `d`, and `c` with `e`. The minimum cost of the four is computed,
+    /// and if it is less than the current cost of `b` and `c`, the rotation is applied.
     ///
     /// This incrementally recovers the quality of the BVH as leaves are inserted or the tree is refit,
     /// and helps avoid degenerating depth.
@@ -668,13 +684,6 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             return None;
         }
 
-        // Initial subtree:
-        //
-        //     node
-        //    /    \
-        //   b      c
-        //  / \    / \
-        // d   e  f   g
         let b_id = node.first_index as usize;
         let c_id = b_id + 1;
         let b = self.nodes[b_id];
@@ -684,14 +693,21 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let c_area = c.aabb().half_area();
         let mut best_cost = b_area + c_area;
 
+        struct RotationCandidate {
+            from: usize,
+            to: usize,
+            refit_id: usize,
+            refit_aabb: Aabb,
+        }
+
         // The two slots to swap, the node that ends up with a different pair of children, and the aabb it ends up with.
-        let mut best_rotation: Option<(usize, usize, usize, Aabb)> = None;
+        let mut best_rotation: Option<RotationCandidate> = None;
 
         if !c.is_leaf() {
             let f_id = c.first_index as usize;
             let g_id = f_id + 1;
-            let f_aabb = *self.nodes[f_id].aabb();
-            let g_aabb = *self.nodes[g_id].aabb();
+            let f_aabb = self.nodes[f_id].aabb();
+            let g_aabb = self.nodes[g_id].aabb();
 
             // Cost of swapping b and f, which leaves c covering b and g.
             //
@@ -702,11 +718,16 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             //          b   g
             //         / \
             //        d   e
-            let aabb_bg = b.aabb().union(&g_aabb);
+            let aabb_bg = b.aabb().union(g_aabb);
             let cost_bf = b_area + aabb_bg.half_area();
             if cost_bf < best_cost {
                 best_cost = cost_bf;
-                best_rotation = Some((b_id, f_id, c_id, aabb_bg));
+                best_rotation = Some(RotationCandidate {
+                    from: b_id,
+                    to: f_id,
+                    refit_id: c_id,
+                    refit_aabb: aabb_bg,
+                });
             }
 
             // Cost of swapping b and g, which leaves c covering b and f.
@@ -718,19 +739,24 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             //          f   b
             //             / \
             //            d   e
-            let aabb_bf = b.aabb().union(&f_aabb);
+            let aabb_bf = b.aabb().union(f_aabb);
             let cost_bg = b_area + aabb_bf.half_area();
             if cost_bg < best_cost {
                 best_cost = cost_bg;
-                best_rotation = Some((b_id, g_id, c_id, aabb_bf));
+                best_rotation = Some(RotationCandidate {
+                    from: b_id,
+                    to: g_id,
+                    refit_id: c_id,
+                    refit_aabb: aabb_bf,
+                });
             }
         }
 
         if !b.is_leaf() {
             let d_id = b.first_index as usize;
             let e_id = d_id + 1;
-            let d_aabb = *self.nodes[d_id].aabb();
-            let e_aabb = *self.nodes[e_id].aabb();
+            let d_aabb = self.nodes[d_id].aabb();
+            let e_aabb = self.nodes[e_id].aabb();
 
             // Cost of swapping c and d, which leaves b covering c and e.
             //
@@ -741,11 +767,16 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             //   c   e
             //  / \
             // f   g
-            let aabb_ce = c.aabb().union(&e_aabb);
+            let aabb_ce = c.aabb().union(e_aabb);
             let cost_cd = c_area + aabb_ce.half_area();
             if cost_cd < best_cost {
                 best_cost = cost_cd;
-                best_rotation = Some((c_id, d_id, b_id, aabb_ce));
+                best_rotation = Some(RotationCandidate {
+                    from: c_id,
+                    to: d_id,
+                    refit_id: b_id,
+                    refit_aabb: aabb_ce,
+                });
             }
 
             // Cost of swapping c and e, which leaves b covering c and d.
@@ -757,15 +788,26 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             //   d   c
             //      / \
             //     f   g
-            let aabb_cd = c.aabb().union(&d_aabb);
+            let aabb_cd = c.aabb().union(d_aabb);
             let cost_ce = c_area + aabb_cd.half_area();
             if cost_ce < best_cost {
                 // Last candidate, so best_cost doesn't need to be updated.
-                best_rotation = Some((c_id, e_id, b_id, aabb_cd));
+                best_rotation = Some(RotationCandidate {
+                    from: c_id,
+                    to: e_id,
+                    refit_id: b_id,
+                    refit_aabb: aabb_cd,
+                });
             }
         }
 
-        let Some((from, to, refit_id, refit_aabb)) = best_rotation else {
+        let Some(RotationCandidate {
+            from,
+            to,
+            refit_id,
+            refit_aabb,
+        }) = best_rotation
+        else {
             // No rotation improves the cost.
             return None;
         };
