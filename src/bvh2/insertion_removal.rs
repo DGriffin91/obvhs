@@ -437,6 +437,103 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         new_node_id
     }
 
+    /// Detaches the leaf at `node_id` without compacting `Bvh2::nodes`.
+    ///
+    /// The sibling takes the parent's slot, and the slots at `node_id` and its sibling then fall free.
+    /// They are unreachable from the root, so nothing can select one of them as an insertion sibling.
+    ///
+    /// Doesn't update the `primitive_indices` mapping, and leaves the `primitives_to_nodes` entries of the detached leaf
+    /// pointing at `node_id`. Both are still valid if the leaf is immediately reattached, see [`Bvh2::move_leaf()`].
+    ///
+    /// # Returns
+    /// The index of the left slot of the freed pair.
+    fn detach_leaf(&mut self, node_id: usize) -> usize {
+        let sibling_id = Bvh2Node::get_sibling_id(node_id);
+        debug_assert_eq!(
+            self.parents[node_id], self.parents[sibling_id],
+            "Both children should already have the same parent."
+        );
+        let parent_id = self.parents[node_id] as usize;
+
+        // Put sibling in parent's place (parent doesn't exist anymore)
+        self.nodes[parent_id] = self.nodes[sibling_id];
+        self.relink(parent_id);
+
+        // Need to work up the tree updating the aabbs since we just removed a node.
+        self.refit_from_fast(parent_id);
+
+        self.children_are_ordered_after_parents = false;
+
+        Bvh2Node::get_left_sibling_id(node_id)
+    }
+
+    /// Moves the leaf specified by `node_id` to a new position in the BVH, resizing it to `aabb`.
+    /// This is the fused equivalent of [`Bvh2::remove_leaf()`] followed by [`Bvh2::insert_leaf_greedy()`].
+    ///
+    /// `Bvh2::nodes.len()` is unchanged across the call and `Bvh2::primitive_indices` is untouched.
+    /// Uses the greedy sibling search ([`Bvh2::find_sibling_greedy()`]) and rotates on the refit walk ([`Bvh2::refit_and_rotate_from()`]).
+    ///
+    /// # Returns
+    /// The index of the moved node.
+    ///
+    /// # Arguments
+    /// * `node_id` - The index into `self.nodes` of the leaf being moved.
+    /// * `aabb` - The new aabb of the leaf.
+    pub fn move_leaf(&mut self, node_id: usize, aabb: Aabb) -> usize {
+        assert!(
+            !self.uses_spatial_splits,
+            "Moving leaves while using spatial splits is currently unsupported as it would require a mapping \
+from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
+        );
+
+        let mut node = self.nodes[node_id];
+        assert!(node.is_leaf());
+        node.set_aabb(aabb);
+
+        if self.nodes.len() == 1 {
+            self.nodes[0] = node;
+            return 0;
+        }
+        debug_assert_ne!(node_id, 0);
+
+        self.init_parents_if_uninit();
+
+        let left_id = self.detach_leaf(node_id);
+        let (sibling_id, sibling_depth) = self.find_sibling_greedy(node.aabb());
+        let new_node_id = self.attach_leaf(node, sibling_id, left_id);
+        self.update_max_depth_for_greedy_insertion(sibling_depth);
+
+        // Need to work up the tree updating the aabbs since we just added a node.
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking(sibling_id, new_node_id)
+    }
+
+    /// Moves the leaf that contains the given primitive to a new position in the BVH, resizing it to `aabb`.
+    /// This is the fused equivalent of [`Bvh2::remove_primitive()`] followed by [`Bvh2::insert_primitive_greedy()`].
+    /// The whole leaf is moved, so this requires that the leaf contains only this primitive.
+    ///
+    /// # Returns
+    /// The new index of the node of this primitive.
+    ///
+    /// # Arguments
+    /// * `aabb` - The new aabb of the primitive.
+    /// * `primitive_id` - The index of the primitive being moved.
+    pub fn move_primitive(&mut self, aabb: Aabb, primitive_id: u32) -> usize {
+        self.init_primitives_to_nodes_if_uninit();
+        self.init_parents_if_uninit();
+        let node_id = self.primitives_to_nodes[primitive_id as usize] as usize;
+        assert_eq!(
+            self.nodes[node_id].prim_count, 1,
+            "Bvh2::move_primitive() would move the other primitives in this leaf along with it."
+        );
+        let new_node_id = self.move_leaf(node_id, aabb);
+        debug_assert_eq!(
+            self.primitives_to_nodes[primitive_id as usize],
+            new_node_id as u32
+        );
+        new_node_id
+    }
+
     /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
     /// for the node being inserted, then attaches it there and rotates on the refit walk back up to the root.
     ///
@@ -1148,5 +1245,59 @@ mod tests {
             );
             bvh.validate(&tris, false, true);
         }
+    }
+
+    #[test]
+    fn move_all_primitives() {
+        let tris = demoscene(16, 0);
+
+        let mut bvh = build_bvh2(
+            &tris,
+            BvhBuildParams::fastest_build(),
+            &mut Duration::default(),
+        );
+        bvh.init_primitives_to_nodes_if_uninit();
+        bvh.init_parents_if_uninit();
+        bvh.validate(&tris, false, false);
+
+        let node_count = bvh.nodes.len();
+        let primitive_indices = bvh.primitive_indices.clone();
+
+        // Move every primitive to a grown aabb, then back to its original one.
+        for primitive_id in 0..tris.len() as u32 {
+            let mut aabb = tris[primitive_id as usize].aabb();
+            aabb.min -= 0.05;
+            aabb.max += 0.05;
+            bvh.move_primitive(aabb, primitive_id);
+            assert_eq!(bvh.nodes.len(), node_count);
+            bvh.validate_parents();
+            bvh.validate_primitives_to_nodes();
+        }
+        for primitive_id in 0..tris.len() as u32 {
+            bvh.move_primitive(tris[primitive_id as usize].aabb(), primitive_id);
+            assert_eq!(bvh.nodes.len(), node_count);
+        }
+
+        assert_eq!(bvh.primitive_indices, primitive_indices);
+        bvh.validate(&tris, false, true);
+    }
+
+    #[test]
+    fn move_leaf_with_single_node_bvh() {
+        let tris = demoscene(16, 0);
+
+        let mut bvh = Bvh2::default();
+        bvh.insert_primitive_greedy(tris[0].aabb(), 0);
+        assert_eq!(bvh.nodes.len(), 1);
+
+        let mut aabb = tris[0].aabb();
+        aabb.max += 1.0;
+        assert_eq!(bvh.move_leaf(0, aabb), 0);
+        assert_eq!(bvh.nodes.len(), 1);
+        assert_eq!(*bvh.nodes[0].aabb(), aabb);
+
+        bvh.insert_primitive_greedy(tris[1].aabb(), 1);
+        bvh.move_primitive(tris[0].aabb(), 0);
+        bvh.validate(&tris[0..2], false, true);
     }
 }
