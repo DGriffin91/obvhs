@@ -693,6 +693,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let c_area = c.aabb().half_area();
         let mut best_cost = b_area + c_area;
 
+        /// The two slots to swap, the node that ends up with a different pair of children,
+        /// and the aabb it ends up with.
         struct RotationCandidate {
             from: usize,
             to: usize,
@@ -700,7 +702,6 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             refit_aabb: Aabb,
         }
 
-        // The two slots to swap, the node that ends up with a different pair of children, and the aabb it ends up with.
         let mut best_rotation: Option<RotationCandidate> = None;
 
         if !c.is_leaf() {
