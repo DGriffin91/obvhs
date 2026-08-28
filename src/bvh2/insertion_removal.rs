@@ -1325,7 +1325,7 @@ mod tests {
         let unrotated_depth = without_rotations.depth(0);
 
         // This is 11 vs 513 at the time of writing, but for the test,
-        // pinning exact numbers probably isn't worthwile.
+        // pinning exact numbers probably isn't worthwhile.
         assert!(
             rotated_depth * 45 < unrotated_depth,
             "rotations should keep the bvh far shallower: {rotated_depth} vs {unrotated_depth}"
