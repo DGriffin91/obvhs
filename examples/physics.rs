@@ -64,7 +64,7 @@ struct Args {
     #[argh(option, default = "120")]
     fps_limit: usize,
     /// render resolution (width:height are 1:1)
-    #[argh(option, default = "1024")]
+    #[argh(option, default = "512")]
     render_res: usize,
     /// render on a single thread (control building parallelism with `--features parallel`)
     #[argh(switch)]
