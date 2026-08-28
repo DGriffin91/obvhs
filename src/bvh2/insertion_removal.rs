@@ -62,22 +62,10 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let mut parent_id = self.parents[node_id] as usize;
 
         // Put sibling in parent's place (parent doesn't exist anymore)
-        self.nodes[parent_id] = self.nodes[sibling_id];
-        let sibling = &mut self.nodes[parent_id];
-        if sibling.is_leaf() {
-            // Tell primitives where their node went.
-            update_primitives_to_nodes_for_node(
-                sibling,
-                parent_id,
-                &self.primitive_indices,
-                &mut self.primitives_to_nodes,
-            )
-        } else {
-            // Tell children of sibling where their parent went.
-            let left_sibling_child = sibling.first_index as usize;
-            self.parents[left_sibling_child] = parent_id as u32;
-            self.parents[left_sibling_child + 1] = parent_id as u32;
-        }
+        let sibling = self.nodes[sibling_id];
+        self.nodes[parent_id] = sibling;
+        // Tell the children (or primitives) of the moved sibling where it went.
+        self.relink_node(&sibling, parent_id);
         // Don't need to update other parents here since the parent that was for this `parent_id` slot is now the direct
         // parent of the moved sibling, and the parents of `node_id` and `sibling_id` are updated below.
 
@@ -111,36 +99,14 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.nodes[src_left_parent as usize].first_index = dst_left_id as u32;
 
             let right_src_sibling = self.nodes.pop().unwrap(); // Last node is right src sibling
-            if right_src_sibling.is_leaf() {
-                // Tell primitives where their node went.
-                update_primitives_to_nodes_for_node(
-                    &right_src_sibling,
-                    dst_right_id,
-                    &self.primitive_indices,
-                    &mut self.primitives_to_nodes,
-                );
-            } else {
-                // Go to children of right_src_sibling and tell them where their parent went
-                self.parents[right_src_sibling.first_index as usize] = dst_right_id as u32;
-                self.parents[right_src_sibling.first_index as usize + 1] = dst_right_id as u32;
-            }
             self.nodes[dst_right_id] = right_src_sibling;
+            // Tell the children (or primitives) of the moved right_src_sibling where it went.
+            self.relink_node(&right_src_sibling, dst_right_id);
 
             let left_src_sibling = self.nodes.pop().unwrap(); // Last node is left src sibling
-            if left_src_sibling.is_leaf() {
-                // Tell primitives where their node went.
-                update_primitives_to_nodes_for_node(
-                    &left_src_sibling,
-                    dst_left_id,
-                    &self.primitive_indices,
-                    &mut self.primitives_to_nodes,
-                );
-            } else {
-                // Go to children of left_src_sibling and tell them where their parent went
-                self.parents[left_src_sibling.first_index as usize] = dst_left_id as u32;
-                self.parents[left_src_sibling.first_index as usize + 1] = dst_left_id as u32;
-            }
             self.nodes[dst_left_id] = left_src_sibling;
+            // Tell the children (or primitives) of the moved left_src_sibling where it went.
+            self.relink_node(&left_src_sibling, dst_left_id);
 
             // If the to be removed node's parent was at the end of the array and has now moved update parent_id:
             if parent_id as u32 == src_left_id {
@@ -257,29 +223,20 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let new_parent_id = best_sibling_candidate_id;
         self.nodes[new_parent_id] = new_parent;
 
-        if best_sibling_candidate.is_leaf() {
-            // Tell primitives where their node went.
-            update_primitives_to_nodes_for_node(
-                &best_sibling_candidate,
-                new_sibling_id as usize,
-                &self.primitive_indices,
-                &mut self.primitives_to_nodes,
-            )
-        } else {
-            // If the best selected sibling was an inner node, we need to update the parents mapping so that the children of
-            // that node point to the new location that it's being moved to.
-            self.parents[best_sibling_candidate.first_index as usize] = new_sibling_id;
-            self.parents[best_sibling_candidate.first_index as usize + 1] = new_sibling_id;
-
-            // The sibling was moved to the end of the node list, but its children stayed where they were,
-            // so they now come before their parent.
-            self.children_are_ordered_after_parents = false;
-        }
         self.nodes.push(best_sibling_candidate);
         let new_node_id = self.nodes.len();
         self.nodes.push(new_node); // Put the new node at the very end.
         self.parents.push(new_parent_id as u32);
         self.parents.push(new_parent_id as u32);
+
+        // Tell the children (or primitives) of the moved sibling where it went.
+        self.relink_node(&best_sibling_candidate, new_sibling_id as usize);
+
+        if !best_sibling_candidate.is_leaf() {
+            // The sibling was moved to the end of the node list, but its children stayed where they were,
+            // so they now come before their parent.
+            self.children_are_ordered_after_parents = false;
+        }
 
         // if primitives_to_nodes has already been initialized
         if !self.primitives_to_nodes.is_empty() {

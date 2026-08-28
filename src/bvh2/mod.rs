@@ -750,6 +750,39 @@ impl Bvh2 {
         }
     }
 
+    /// Tell the children of the node at `node_id`, or the primitives it contains if it is a leaf,
+    /// that it is now at `node_id`. Needed after moving a node into a different slot in `Bvh2::nodes`.
+    ///
+    /// If the node is already available, prefer [`Bvh2::relink_node()`].
+    #[inline]
+    pub fn relink(&mut self, node_id: usize) {
+        let node = self.nodes[node_id];
+        self.relink_node(&node, node_id);
+    }
+
+    /// Tell the children of `node`, or the primitives it contains if it is a leaf,
+    /// that it is now at `node_id`. Needed after moving a node into a different slot in `Bvh2::nodes`.
+    ///
+    /// `node` must be the node that now occupies the `node_id` slot of `Bvh2::nodes`.
+    #[inline]
+    pub fn relink_node(&mut self, node: &Bvh2Node, node_id: usize) {
+        debug_assert_eq!(node.first_index, self.nodes[node_id].first_index);
+        debug_assert_eq!(node.prim_count, self.nodes[node_id].prim_count);
+        if node.is_leaf() {
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                node,
+                node_id,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
+        } else {
+            // Tell children where their parent went.
+            self.parents[node.first_index as usize] = node_id as u32;
+            self.parents[node.first_index as usize + 1] = node_id as u32;
+        }
+    }
+
     /// Update node aabb and refit the BVH working up the tree from this node.
     #[inline]
     pub fn resize_node(&mut self, node_id: usize, aabb: Aabb) {
