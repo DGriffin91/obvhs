@@ -504,7 +504,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let new_node_id = self.attach_leaf(node, sibling_id, left_id);
         self.update_max_depth_for_greedy_insertion(sibling_depth, should_rotate);
 
-        // Need to work up the tree updating the aabbs since we just added a node.
+        // Need to work up the tree updating the aabbs since we just attached a node.
         if should_rotate {
             // A rotation along the way can move the node we just attached, so we track it.
             self.refit_and_rotate_from_tracking(sibling_id, new_node_id)
