@@ -478,9 +478,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// # Arguments
     /// * `node_id` - The index into `self.nodes` of the leaf being moved.
     /// * `aabb` - The new aabb of the leaf.
-    /// * `should_rotate` - Rotate on the refit walk, which keeps the BVH more balanced
-    ///   and can improve traversal speed at the cost of a slightly more expensive refit.
-    pub fn move_leaf(&mut self, node_id: usize, aabb: Aabb, should_rotate: bool) -> usize {
+    pub fn move_leaf(&mut self, node_id: usize, aabb: Aabb) -> usize {
         assert!(
             !self.uses_spatial_splits,
             "Moving leaves while using spatial splits is currently unsupported as it would require a mapping \
@@ -502,16 +500,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         let left_id = self.detach_leaf(node_id);
         let (sibling_id, sibling_depth) = self.find_sibling_greedy(node.aabb());
         let new_node_id = self.attach_leaf(node, sibling_id, left_id);
-        self.update_max_depth_for_greedy_insertion(sibling_depth, should_rotate);
+        self.update_max_depth_for_greedy_insertion(sibling_depth);
 
         // Need to work up the tree updating the aabbs since we just attached a node.
-        if should_rotate {
-            // A rotation along the way can move the node we just attached, so we track it.
-            self.refit_and_rotate_from_tracking(sibling_id, new_node_id)
-        } else {
-            self.refit_from_fast(sibling_id);
-            new_node_id
-        }
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking_fast(sibling_id, new_node_id)
     }
 
     /// Moves the leaf that contains the given primitive to a new position in the BVH, resizing it to `aabb`.
@@ -524,9 +517,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// # Arguments
     /// * `aabb` - The new aabb of the primitive.
     /// * `primitive_id` - The index of the primitive being moved.
-    /// * `should_rotate` - Rotate on the refit walk, which keeps the BVH more balanced
-    ///   and can improve traversal speed at the cost of a slightly more expensive refit.
-    pub fn move_primitive(&mut self, aabb: Aabb, primitive_id: u32, should_rotate: bool) -> usize {
+    pub fn move_primitive(&mut self, aabb: Aabb, primitive_id: u32) -> usize {
         self.init_primitives_to_nodes_if_uninit();
         self.init_parents_if_uninit();
         let node_id = self.primitives_to_nodes[primitive_id as usize] as usize;
@@ -534,7 +525,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.nodes[node_id].prim_count, 1,
             "Bvh2::move_primitive() would move the other primitives in this leaf along with it."
         );
-        let new_node_id = self.move_leaf(node_id, aabb, should_rotate);
+        let new_node_id = self.move_leaf(node_id, aabb);
         debug_assert_eq!(
             self.primitives_to_nodes[primitive_id as usize],
             new_node_id as u32
@@ -543,20 +534,19 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     }
 
     /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
-    /// for the node being inserted, then attaches it there and refits back up to the root.
+    /// for the node being inserted, then attaches it there and refits back up to the root,
+    /// performing rotations along the way to keep the BVH from degenerating.
     ///
     /// This is the greedy counterpart of [`Bvh2::insert_leaf()`]. It doesn't need a traversal stack
     /// and it keeps [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
     ///
     /// # Returns
-    /// The index of the newly added node. Note that with `should_rotate` this is generally not
-    /// `self.nodes.len() - 1`, since a rotation can move the node that was just attached.
+    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
+    /// since a rotation on the refit walk can move the node that was just attached.
     ///
     /// # Arguments
     /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
-    /// * `should_rotate` - Rotate on the refit walk, which keeps the BVH more balanced
-    ///   and can improve traversal speed at the cost of a slightly more expensive refit.
-    pub fn insert_leaf_greedy(&mut self, new_node: Bvh2Node, should_rotate: bool) -> usize {
+    pub fn insert_leaf_greedy(&mut self, new_node: Bvh2Node) -> usize {
         assert!(new_node.is_leaf());
 
         if self.nodes.is_empty() {
@@ -579,20 +569,16 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         self.parents.push(0);
 
         let new_node_id = self.attach_leaf(new_node, sibling_id, left_id);
-        self.update_max_depth_for_greedy_insertion(sibling_depth, should_rotate);
+        self.update_max_depth_for_greedy_insertion(sibling_depth);
 
         // Need to work up the tree updating the aabbs since we just added a node.
-        if should_rotate {
-            // A rotation along the way can move the node we just attached, so we track it.
-            self.refit_and_rotate_from_tracking(sibling_id, new_node_id)
-        } else {
-            self.refit_from_fast(sibling_id);
-            new_node_id
-        }
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking_fast(sibling_id, new_node_id)
     }
 
     /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
-    /// for the primitive being inserted, then attaches it there and refits back up to the root.
+    /// for the primitive being inserted, then attaches it there and refits back up to the root,
+    /// performing rotations along the way to keep the BVH from degenerating.
     /// Updates [`Bvh2::primitive_indices`] and [`Bvh2::primitive_indices_freelist`].
     ///
     /// This is the greedy counterpart of [`Bvh2::insert_primitive()`]. It doesn't need a traversal stack
@@ -604,14 +590,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// # Arguments
     /// * `aabb` - The aabb of the primitive being inserted.
     /// * `primitive_id` - The index of the primitive being inserted.
-    /// * `should_rotate` - Rotate on the refit walk, which keeps the BVH more balanced
-    ///   and can improve traversal speed at the cost of a slightly more expensive refit.
-    pub fn insert_primitive_greedy(
-        &mut self,
-        aabb: Aabb,
-        primitive_id: u32,
-        should_rotate: bool,
-    ) -> usize {
+    pub fn insert_primitive_greedy(&mut self, aabb: Aabb, primitive_id: u32) -> usize {
         self.init_primitives_to_nodes_if_uninit();
         self.init_parents_if_uninit();
         if self.primitives_to_nodes.len() <= primitive_id as usize {
@@ -625,8 +604,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.primitive_indices.push(primitive_id);
             self.primitive_indices.len() as u32 - 1
         };
-        let new_node_id =
-            self.insert_leaf_greedy(Bvh2Node::new(aabb, 1, first_index), should_rotate);
+        let new_node_id = self.insert_leaf_greedy(Bvh2Node::new(aabb, 1, first_index));
         self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
         new_node_id
     }
@@ -638,13 +616,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// its whole subtree is pushed one level deeper too, and the greedy descent never visits that subtree,
     /// so its height isn't known here.
     #[inline]
-    fn update_max_depth_for_greedy_insertion(&mut self, sibling_depth: usize, should_rotate: bool) {
+    fn update_max_depth_for_greedy_insertion(&mut self, sibling_depth: usize) {
         // + 1 for the new leaf below the sibling
         // + 1 because `max_depth` is a traversal stack size rather than a node depth
         // + 1 more for a rotation that may push the new leaf one level deeper
-        self.max_depth = self
-            .max_depth
-            .max(sibling_depth + 2 + should_rotate as usize);
+        self.max_depth = self.max_depth.max(sibling_depth + 3);
     }
 
     /// Computes the cost of a potential rotation around the node at `node_id`,
@@ -830,38 +806,84 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// Refit the BVH working up the tree from this node, ignoring leaves,
     /// performing rotations at each node along the way where beneficial.
     ///
+    /// Halts once two consecutive levels needed neither a resize nor a rotation.
+    /// Panics in debug if some parent still needed to be resized.
+    ///
     /// This can only be used to refit when a single node has changed or moved.
     ///
     /// See [`Bvh2::rotate_node()`] and [`Bvh2::refit_from()`].
-    pub fn refit_and_rotate_from(&mut self, index: usize) {
-        self.refit_and_rotate_from_tracking(index, INVALID as usize);
+    pub fn refit_and_rotate_from_fast(&mut self, index: usize) {
+        self.refit_and_rotate_from_tracking_fast(index, INVALID as usize);
     }
 
-    /// Same as [`Bvh2::refit_and_rotate_from()`], but follows the node at `tracked_node_id`
+    /// Same as [`Bvh2::refit_and_rotate_from_fast()`], but follows the node at `tracked_node_id`
     /// through any rotations applied along the way.
     ///
     /// # Returns
     /// The index that the tracked node ended up at.
-    fn refit_and_rotate_from_tracking(
+    fn refit_and_rotate_from_tracking_fast(
         &mut self,
         mut index: usize,
         mut tracked_node_id: usize,
     ) -> usize {
         self.init_parents_if_uninit();
+        let mut unchanged_count = 0;
+        #[cfg(debug_assertions)]
+        let mut stopped = false;
         loop {
             let node = self.nodes[index];
             if !node.is_leaf() {
                 let first_child_bbox = *self.nodes[node.first_index as usize].aabb();
                 let second_child_bbox = *self.nodes[node.first_index as usize + 1].aabb();
-                self.nodes[index].set_aabb(first_child_bbox.union(&second_child_bbox));
+                let new_aabb = first_child_bbox.union(&second_child_bbox);
+
+                let aabb_unchanged = self.nodes[index].aabb() == &new_aabb;
+
+                self.nodes[index].set_aabb(new_aabb);
+
+                #[cfg(debug_assertions)]
+                if stopped {
+                    // Debug builds keep going to check that nothing above actually needed refitting,
+                    // but it can't perform any more rotations so that `tracked_node_id` is stable.
+                    debug_assert!(
+                        aabb_unchanged,
+                        "Some parents still needed refitting. Unideal fitting is occurring somewhere."
+                    );
+                    if index == 0 {
+                        break;
+                    }
+                    index = self.parents[index] as usize;
+                    continue;
+                }
 
                 // A rotation only swaps nodes below `index`, so the computed aabb stays valid.
-                if let Some((from, to)) = self.rotate_node(index) {
+                let rotation = self.rotate_node(index);
+                if let Some((from, to)) = rotation {
                     if tracked_node_id == from {
                         tracked_node_id = to;
                     } else if tracked_node_id == to {
                         tracked_node_id = from;
                     }
+                }
+
+                // Two consecutive levels that didn't need a resize or a rotation mean that
+                // the ancestors above see no change in their children's or grandchildren's aabbs,
+                // which is what rotation candidates are based on, so we can stop early.
+                //
+                // Note that they could still have rotations that have not been evaluated,
+                // so this is a trade-off.
+                if aabb_unchanged && rotation.is_none() {
+                    unchanged_count += 1;
+                    if unchanged_count == 2 {
+                        #[cfg(not(debug_assertions))]
+                        return tracked_node_id;
+                        #[cfg(debug_assertions)]
+                        {
+                            stopped = true;
+                        }
+                    }
+                } else {
+                    unchanged_count = 0;
                 }
             }
             if index == 0 {
@@ -1003,14 +1025,14 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 /// Same as [`build_bvh2_by_insertion()`],  but with the greedy sibling search and rotations,
 /// just for testing insertion.
 ///
-/// Still slow at building compared to ploc, but uses a faster sibling search, and if `should_rotate` is true,
-/// doesn't degenerate into a deep BVH the way [`build_bvh2_by_insertion()`] can.
+/// Still slow at building compared to ploc, but uses a faster sibling search,
+/// and doesn't degenerate into a deep BVH the way [`build_bvh2_by_insertion()`] can.
 #[doc(hidden)]
-pub fn build_bvh2_by_greedy_insertion<T: Boundable>(primitives: &[T], should_rotate: bool) -> Bvh2 {
+pub fn build_bvh2_by_greedy_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     let mut bvh = Bvh2::default();
 
     for prim_id in 0..primitives.len() {
-        bvh.insert_primitive_greedy(primitives[prim_id].aabb(), prim_id as u32, should_rotate);
+        bvh.insert_primitive_greedy(primitives[prim_id].aabb(), prim_id as u32);
     }
 
     #[cfg(debug_assertions)]
@@ -1079,7 +1101,7 @@ mod tests {
     fn build_by_greedy_insertion() {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
-            let bvh = build_bvh2_by_greedy_insertion(&tris, true);
+            let bvh = build_bvh2_by_greedy_insertion(&tris);
             bvh.validate(&tris, false, true);
         }
     }
@@ -1250,7 +1272,7 @@ mod tests {
         // The greedy descent knows the depth of the sibling it picked, so insertion can keep `max_depth` up to date.
         // Bvh2::validate() requires it to be a valid stack size, so a stale `max_depth` would fail the validation below.
         let tris = demoscene(32, 0);
-        let bvh = build_bvh2_by_greedy_insertion(&tris, true);
+        let bvh = build_bvh2_by_greedy_insertion(&tris);
 
         assert!(
             bvh.depth(0) <= bvh.max_depth,
@@ -1262,48 +1284,6 @@ mod tests {
     }
 
     #[test]
-    fn greedy_insertion_without_rotations() {
-        let tris = demoscene(24, 0);
-
-        let mut bvh = Bvh2::default();
-        for (prim_id, tri) in tris.iter().enumerate() {
-            let node_id = bvh.insert_primitive_greedy(tri.aabb(), prim_id as u32, false);
-            if prim_id > 0 {
-                assert_eq!(node_id, bvh.nodes.len() - 1);
-            }
-            assert_eq!(bvh.primitives_to_nodes[prim_id], node_id as u32);
-        }
-        bvh.validate(&tris, false, true);
-
-        // Moving without rotations reuses the freed pair, so the node count still doesn't change.
-        let node_count = bvh.nodes.len();
-        for (prim_id, tri) in tris.iter().enumerate() {
-            let mut aabb = tri.aabb();
-            aabb.min -= 0.05;
-            aabb.max += 0.05;
-            let node_id = bvh.move_primitive(aabb, prim_id as u32, false);
-            assert_eq!(bvh.nodes.len(), node_count);
-            assert_eq!(bvh.primitives_to_nodes[prim_id], node_id as u32);
-        }
-        bvh.validate_parents();
-        bvh.validate_primitives_to_nodes();
-
-        // The rotation-free tree should be deeper than the rotated one for the same input.
-        let rotated = build_bvh2_by_greedy_insertion(&tris, true);
-        let unrotated = build_bvh2_by_greedy_insertion(&tris, false);
-        assert!(
-            rotated.depth(0) < unrotated.depth(0),
-            "rotations should produce a shallower bvh: {} vs {}",
-            rotated.depth(0),
-            unrotated.depth(0)
-        );
-
-        // `max_depth` should stay a valid stack size either way.
-        assert!(rotated.depth(0) <= rotated.max_depth);
-        assert!(unrotated.depth(0) <= unrotated.max_depth);
-    }
-
-    #[test]
     fn rotations_prevent_degenerate_bvh() {
         // With plain insertion, sorted input degenerates the BVH into a list.
         // Greedy insertion rotates on the refit walk, which recovers the quality incrementally.
@@ -1311,7 +1291,7 @@ mod tests {
 
         let mut with_rotations = Bvh2::default();
         for (prim_id, aabb) in boxes.iter().enumerate() {
-            with_rotations.insert_primitive_greedy(*aabb, prim_id as u32, true);
+            with_rotations.insert_primitive_greedy(*aabb, prim_id as u32);
         }
         with_rotations.validate(&boxes, false, true);
 
@@ -1377,13 +1357,13 @@ mod tests {
             let mut aabb = tris[primitive_id as usize].aabb();
             aabb.min -= 0.05;
             aabb.max += 0.05;
-            bvh.move_primitive(aabb, primitive_id, true);
+            bvh.move_primitive(aabb, primitive_id);
             assert_eq!(bvh.nodes.len(), node_count);
             bvh.validate_parents();
             bvh.validate_primitives_to_nodes();
         }
         for primitive_id in 0..tris.len() as u32 {
-            bvh.move_primitive(tris[primitive_id as usize].aabb(), primitive_id, true);
+            bvh.move_primitive(tris[primitive_id as usize].aabb(), primitive_id);
             assert_eq!(bvh.nodes.len(), node_count);
         }
 
@@ -1396,17 +1376,17 @@ mod tests {
         let tris = demoscene(16, 0);
 
         let mut bvh = Bvh2::default();
-        bvh.insert_primitive_greedy(tris[0].aabb(), 0, true);
+        bvh.insert_primitive_greedy(tris[0].aabb(), 0);
         assert_eq!(bvh.nodes.len(), 1);
 
         let mut aabb = tris[0].aabb();
         aabb.max += 1.0;
-        assert_eq!(bvh.move_leaf(0, aabb, true), 0);
+        assert_eq!(bvh.move_leaf(0, aabb), 0);
         assert_eq!(bvh.nodes.len(), 1);
         assert_eq!(*bvh.nodes[0].aabb(), aabb);
 
-        bvh.insert_primitive_greedy(tris[1].aabb(), 1, true);
-        bvh.move_primitive(tris[0].aabb(), 0, true);
+        bvh.insert_primitive_greedy(tris[1].aabb(), 1);
+        bvh.move_primitive(tris[0].aabb(), 0);
         bvh.validate(&tris[0..2], false, true);
     }
 }

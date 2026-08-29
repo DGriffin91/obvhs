@@ -69,9 +69,6 @@ struct Args {
     /// render on a single thread (control building parallelism with `--features parallel`)
     #[argh(switch)]
     single_threaded_render: bool,
-    /// disables tree rotations on the greedy insertion and move paths
-    #[argh(switch)]
-    no_rotate: bool,
 }
 
 fn main() {
@@ -441,16 +438,12 @@ impl PhysicsWorld {
     pub fn bvh_partial_rebuild_greedy_remove_insert(&mut self) {
         dbg_scope!("bvh_partial_rebuild_greedy_remove_insert");
         let oversize_factor = self.oversize_factor();
-        let should_rotate = !self.config.no_rotate;
         self.updated_leaves_this_frame = 0;
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 self.bvh.remove_primitive(primitive_id as u32);
-                self.bvh.insert_primitive_greedy(
-                    item.oversized_aabb,
-                    primitive_id as u32,
-                    should_rotate,
-                );
+                self.bvh
+                    .insert_primitive_greedy(item.oversized_aabb, primitive_id as u32);
                 self.updated_leaves_this_frame += 1;
             }
         }
@@ -459,13 +452,12 @@ impl PhysicsWorld {
     pub fn bvh_partial_rebuild_move(&mut self) {
         dbg_scope!("bvh_partial_rebuild_move");
         let oversize_factor = self.oversize_factor();
-        let should_rotate = !self.config.no_rotate;
         self.bvh.init_primitives_to_nodes_if_uninit();
         self.updated_leaves_this_frame = 0;
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 self.bvh
-                    .move_primitive(item.oversized_aabb, primitive_id as u32, should_rotate);
+                    .move_primitive(item.oversized_aabb, primitive_id as u32);
                 self.updated_leaves_this_frame += 1;
             }
         }
