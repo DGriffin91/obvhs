@@ -427,7 +427,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             )
         }
 
-        if !sibling.is_leaf() || left_id < sibling_id {
+        if left_id < sibling_id || (!sibling.is_leaf() && sibling.first_index as usize <= left_id) {
             // The sibling was moved, but its children stayed where they were,
             // so they may now come before their parent. The new pair may also
             // come before the new parent when reusing freed slots.
@@ -461,8 +461,6 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
         // Need to work up the tree updating the aabbs since we just removed a node.
         self.refit_from_fast(parent_id);
-
-        self.children_are_ordered_after_parents = false;
 
         Bvh2Node::get_left_sibling_id(node_id)
     }
