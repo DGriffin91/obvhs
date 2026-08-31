@@ -367,6 +367,9 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
                     inherited_cost + right_direct_cost + (area - right_area).min(0.0);
             }
 
+            // Note: Box2D also has a separate early out if both children are leaves,
+            //       but because the costs for leaves are left as f32::MAX, this check
+            //       handles that too.
             if best_cost <= left_lower_cost && best_cost <= right_lower_cost {
                 // Neither subtree can beat the best candidate already found.
                 break;
