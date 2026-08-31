@@ -317,10 +317,12 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
             inherited_cost += direct_cost - area_base;
 
-            let left_is_leaf = self.nodes[left_id].is_leaf();
-            let right_is_leaf = self.nodes[right_id].is_leaf();
-            let left_aabb = *self.nodes[left_id].aabb();
-            let right_aabb = *self.nodes[right_id].aabb();
+            let left = &self.nodes[left_id];
+            let right = &self.nodes[right_id];
+            let left_is_leaf = left.is_leaf();
+            let right_is_leaf = right.is_leaf();
+            let left_aabb = left.aabb();
+            let right_aabb = right.aabb();
             let left_direct_cost = left_aabb.union(aabb).half_area();
             let right_direct_cost = right_aabb.union(aabb).half_area();
 
