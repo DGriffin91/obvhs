@@ -326,7 +326,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             let left_direct_cost = left_aabb.union(aabb).half_area();
             let right_direct_cost = right_aabb.union(aabb).half_area();
 
-            // Lower bound on the cost of inserting anywhere below each child.
+            // Lower bound on the cost of choosing a sibling from the subtree rooted at each child.
             // Left at f32::MAX for leaves since there is nothing below them to descend into.
             let mut left_lower_cost = f32::MAX;
             let mut right_lower_cost = f32::MAX;
@@ -342,6 +342,13 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
                 }
             } else {
                 left_area = left_aabb.half_area();
+
+                // Lower bound cost of choosing a sibling from the subtree rooted at the left child.
+                //
+                // This is the minimum of:
+                //
+                // 1. Choosing the child itself: inherited_cost + left_direct_cost
+                // 2. Choosing one of its descendants: inherited_cost + (left_direct_cost - left_area) + area
                 left_lower_cost = inherited_cost + left_direct_cost + (area - left_area).min(0.0);
             }
 
@@ -354,6 +361,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
                 }
             } else {
                 right_area = right_aabb.half_area();
+
+                // See above for left_lower_cost.
                 right_lower_cost =
                     inherited_cost + right_direct_cost + (area - right_area).min(0.0);
             }
