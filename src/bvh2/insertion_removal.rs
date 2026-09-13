@@ -1027,12 +1027,14 @@ pub fn build_bvh2_by_precise_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
 
     let mut stack = HeapStack::new_with_capacity(1000);
 
-    for prim_id in 1..primitives.len() {
+    for prim_id in 0..primitives.len() {
         bvh.insert_primitive_precise(primitives[prim_id].aabb(), prim_id as u32, &mut stack);
     }
 
     // Update max depth for validate
+    if !bvh.nodes.is_empty() {
         bvh.max_depth = (bvh.depth(0) + 1).max(DEFAULT_MAX_STACK_DEPTH);
+    }
 
     #[cfg(debug_assertions)]
     {
@@ -1113,6 +1115,9 @@ mod tests {
         for res in 30..=32 {
             let tris = demoscene(res, 0);
             let bvh = build_bvh2_by_precise_insertion(&tris);
+            assert_eq!(bvh.active_primitive_indices_count(), tris.len());
+            assert_eq!(bvh.nodes.len(), tris.len() * 2 - 1);
+            assert_eq!(bvh.primitives_to_nodes.len(), tris.len());
             bvh.validate(&tris, false, false);
         }
     }
