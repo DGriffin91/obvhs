@@ -480,6 +480,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     }
 
     /// Moves the leaf specified by `node_id` to a new position in the BVH, resizing it to `aabb`.
+    /// Refits back up to the root, performing rotations along the way to keep the BVH from degenerating.
+    ///
     /// This is the fused equivalent of [`Bvh2::remove_leaf()`] followed by [`Bvh2::insert_leaf_greedy()`].
     ///
     /// `Bvh2::nodes.len()` is unchanged across the call and `Bvh2::primitive_indices` is untouched.
@@ -520,6 +522,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     }
 
     /// Moves the leaf that contains the given primitive to a new position in the BVH, resizing it to `aabb`.
+    /// Refits back up to the root, performing rotations along the way to keep the BVH from degenerating.
+    ///
     /// This is the fused equivalent of [`Bvh2::remove_primitive()`] followed by [`Bvh2::insert_primitive_greedy()`].
     /// The whole leaf is moved, so this requires that the leaf contains only this primitive.
     ///
