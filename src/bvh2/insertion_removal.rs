@@ -837,7 +837,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     ///
     /// # Returns
     /// The index that the tracked node ended up at.
-    fn refit_and_rotate_from_tracking_fast(
+    pub fn refit_and_rotate_from_tracking_fast(
         &mut self,
         mut index: usize,
         mut tracked_node_id: usize,
