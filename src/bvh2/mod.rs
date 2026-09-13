@@ -44,8 +44,9 @@ pub struct Bvh2 {
     pub primitive_indices: Vec<u32>,
 
     /// A freelist for use when removing primitives from the bvh. These represent slots in Bvh2::primitive_indices
-    /// that are available if a primitive is added to the bvh. Only currently used by Bvh2::remove_primitive() and
-    /// Bvh2::insert_primitive() which are not part of the typical initial bvh generation.
+    /// that are available if a primitive is added to the bvh. Only currently used by Bvh2::remove_primitive(),
+    /// Bvh2::insert_primitive(), and Bvh2::insert_primitive_precise(), which are not part of the typical initial
+    /// BVH generation.
     pub primitive_indices_freelist: Vec<u32>,
 
     /// An optional mapping from primitives back to nodes.
