@@ -128,16 +128,18 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     /// Searches the tree recursively to find the best sibling for the node being inserted. The best sibling is
     /// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
     /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
-    /// the sibling and both the sibling and new node are added to the end of the bvh.nodes.
+    /// the sibling and both the sibling and new node are added to the end of `Bvh2::nodes`.
+    /// Refits back up to the root, performing rotations along the way to help prevent the BVH from degenerating.
     ///
     /// See "Branch and Bound" <https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf> and
     /// Jiˇrí Bittner et al. 2012 Fast Insertion-Based Optimization of Bounding Volume Hierarchies
     ///
-    /// See [`Bvh2::insert_leaf()`] for a faster version that descends a single path,
-    /// and that rotates on the refit walk to keep the BVH from degenerating.
+    /// See [`Bvh2::insert_leaf()`] for a faster version that descends a single path when choosing the sibling.
+    /// Unlike this method, [`Bvh2::insert_leaf()`] also tries to keep [`Bvh2::max_depth`] up to date.
     ///
     /// # Returns
-    /// The index of the newly added node (always `bvh.nodes.len() - 1` since the node it put at the end).
+    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
+    /// since a rotation on the refit walk can move the node that was just attached.
     ///
     /// # Arguments
     /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
@@ -259,9 +261,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         }
 
         // Need to work up the tree updating the aabbs since we just added a node.
-        self.refit_from_fast(new_parent_id);
-
-        new_node_id
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking_fast(new_parent_id, new_node_id)
     }
 
     /// Searches the tree for the best sibling for a leaf with the given `aabb` using a greedy top-down descent.
@@ -480,7 +481,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     }
 
     /// Moves the leaf specified by `node_id` to a new position in the BVH, resizing it to `aabb`.
-    /// Refits back up to the root, performing rotations along the way to keep the BVH from degenerating.
+    /// Refits back up to the root, performing rotations along the way to help prevent the BVH from degenerating.
     ///
     /// This is the fused equivalent of [`Bvh2::remove_leaf()`] followed by [`Bvh2::insert_leaf()`].
     ///
@@ -522,7 +523,7 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
     }
 
     /// Moves the leaf that contains the given primitive to a new position in the BVH, resizing it to `aabb`.
-    /// Refits back up to the root, performing rotations along the way to keep the BVH from degenerating.
+    /// Refits back up to the root, performing rotations along the way to help prevent the BVH from degenerating.
     ///
     /// This is the fused equivalent of [`Bvh2::remove_primitive()`] followed by [`Bvh2::insert_primitive()`].
     /// The whole leaf is moved, so this requires that the leaf contains only this primitive.
@@ -551,10 +552,10 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
     /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
     /// for the node being inserted, then attaches it there and refits back up to the root,
-    /// performing rotations along the way to keep the BVH from degenerating.
+    /// performing rotations along the way to help prevent the BVH from degenerating.
     ///
     /// This is the faster counterpart of [`Bvh2::insert_leaf_precise()`]. It doesn't need a traversal stack
-    /// and it keeps [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
+    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
     ///
     /// # Returns
     /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
@@ -594,11 +595,11 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
     /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
     /// for the primitive being inserted, then attaches it there and refits back up to the root,
-    /// performing rotations along the way to keep the BVH from degenerating.
+    /// performing rotations along the way to help prevent the BVH from degenerating.
     /// Updates [`Bvh2::primitive_indices`] and [`Bvh2::primitive_indices_freelist`].
     ///
     /// This is the faster counterpart of [`Bvh2::insert_primitive_precise()`]. It doesn't need a traversal stack
-    /// and it keeps [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
+    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
     ///
     /// # Returns
     /// The index of the newly added node.
@@ -971,13 +972,15 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 
     /// Searches the tree recursively to find the best sibling for the primitive being inserted
     /// (see [`Bvh2::insert_leaf_precise()`]). Updates [`Bvh2::primitive_indices`] and
-    /// [`Bvh2::primitive_indices_freelist`].
+    /// [`Bvh2::primitive_indices_freelist`]. Refits back up to the root, performing rotations
+    /// along the way to help prevent the BVH from degenerating.
     ///
-    /// See [`Bvh2::insert_primitive()`] for a faster version that descends a single path,
-    /// and that rotates on the refit walk to keep the BVH from degenerating.
+    /// See [`Bvh2::insert_primitive()`] for a faster version that descends a single path when choosing the sibling.
+    /// Unlike this method, [`Bvh2::insert_primitive()`] also tries to keep [`Bvh2::max_depth`] up to date.
     ///
     /// # Returns
-    /// The index of the newly added node.
+    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
+    /// since a rotation on the refit walk can move the node that was just attached.
     ///
     /// # Arguments
     /// * `aabb` - The aabb of the primitive being inserted.
@@ -1016,11 +1019,8 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
 /// Slow at building, makes a slow bvh, just for testing insertion.
 /// Can result in very deep BVHs in some cases.
 ///
-/// Dramatically slower than ploc at both building and traversal. Easily 10x or 100x slower at building.
-/// (goes up by something like n^3 after a certain threshold).
-/// (BVH quality still improved afterward lot by reinsertion/collapse).
-///
-/// See [`build_bvh2_by_insertion()`] which doesn't have either issue.
+/// Dramatically slower at building than ploc. Rotations keep the tree from degenerating
+/// as primitives are inserted.
 #[doc(hidden)]
 pub fn build_bvh2_by_precise_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     let mut bvh = Bvh2::default();
@@ -1032,7 +1032,7 @@ pub fn build_bvh2_by_precise_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     }
 
     // Update max depth for validate
-    bvh.max_depth = (bvh.depth(0) + 1).max(DEFAULT_MAX_STACK_DEPTH);
+        bvh.max_depth = (bvh.depth(0) + 1).max(DEFAULT_MAX_STACK_DEPTH);
 
     #[cfg(debug_assertions)]
     {
@@ -1042,11 +1042,12 @@ pub fn build_bvh2_by_precise_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     bvh
 }
 
-/// Same as [`build_bvh2_by_precise_insertion()`], but with the greedy sibling search and rotations,
+/// Same as [`build_bvh2_by_precise_insertion()`], but with the faster greedy sibling search,
 /// just for testing insertion.
 ///
-/// Still slow at building compared to ploc, but uses a faster sibling search,
-/// and doesn't degenerate into a deep BVH the way [`build_bvh2_by_precise_insertion()`] can.
+/// Still slow at building compared to ploc, and can result in lower quality trees
+/// than [`build_bvh2_by_precise_insertion()`]. Rotations keep the tree from degenerating
+/// as primitives are inserted.
 #[doc(hidden)]
 pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     let mut bvh = Bvh2::default();
@@ -1063,9 +1064,8 @@ pub fn build_bvh2_by_insertion<T: Boundable>(primitives: &[T]) -> Bvh2 {
     bvh
 }
 
-/// Just here to for testing/benchmarking/validating leaf removed and inserting. See reinsertion.rs if you want to
-/// optimize a BVH2. This currently actually tends to make a good bvh slower since doing a lot of insert_leaf_node tends
-/// to result in very deep BVHs.
+/// Just here to for testing/benchmarking/validating leaf removal and insertion. See reinsertion.rs if you want to
+/// optimize a BVH2. This currently tends to make a good BVH slower despite applying rotations during insertion.
 #[doc(hidden)]
 pub fn slow_leaf_reinsertion(bvh: &mut Bvh2) {
     let mut stack = HeapStack::new_with_capacity(1000);
@@ -1308,32 +1308,31 @@ mod tests {
     }
 
     #[test]
-    fn rotations_prevent_degenerate_bvh() {
-        // With precise insertion, sorted input degenerates the BVH into a list.
-        // Default insertion rotates on the refit walk, which recovers the quality incrementally.
+    fn insertion_rotations_prevent_degenerate_bvhs() {
+        // Without rotations, this sorted input degenerates either insertion method into a list.
         let boxes = sorted_boxes(1024);
 
-        let mut with_rotations = Bvh2::default();
+        let mut greedy_bvh = Bvh2::default();
         for (prim_id, aabb) in boxes.iter().enumerate() {
-            with_rotations.insert_primitive(*aabb, prim_id as u32);
+            greedy_bvh.insert_primitive(*aabb, prim_id as u32);
         }
-        with_rotations.validate(&boxes, false, true);
+        greedy_bvh.validate(&boxes, false, true);
 
-        let mut without_rotations = Bvh2::default();
+        let mut precise_bvh = Bvh2::default();
         let mut stack = HeapStack::new_with_capacity(1000);
         for (prim_id, aabb) in boxes.iter().enumerate() {
-            without_rotations.insert_primitive_precise(*aabb, prim_id as u32, &mut stack);
+            let node_id = precise_bvh.insert_primitive_precise(*aabb, prim_id as u32, &mut stack);
+            assert_eq!(precise_bvh.primitives_to_nodes[prim_id], node_id as u32);
         }
+        precise_bvh.validate(&boxes, false, true);
 
-        let rotated_depth = with_rotations.depth(0);
-        let unrotated_depth = without_rotations.depth(0);
-
-        // This is 11 vs 513 at the time of writing, but for the test,
-        // pinning exact numbers probably isn't worthwhile.
-        assert!(
-            rotated_depth * 45 < unrotated_depth,
-            "rotations should keep the bvh far shallower: {rotated_depth} vs {unrotated_depth}"
-        );
+        for bvh in [&greedy_bvh, &precise_bvh] {
+            let depth = bvh.depth(0);
+            assert!(
+                depth * 8 < boxes.len(),
+                "rotations should keep the BVH far shallower than a list, got depth {depth}"
+            );
+        }
     }
 
     #[test]
