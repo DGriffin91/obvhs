@@ -41,7 +41,8 @@ struct Args {
     /// disables using the bvh for physics broad phase (still uses it for rendering)
     #[argh(switch)]
     no_physics_bvh: bool,
-    /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert', 'remove_and_insert', "partial_rebuild"
+    /// bvh update method. Modes: 'rebuild', 'reinsert', 'parallel_reinsert',
+    /// 'precise_remove_and_insert', 'remove_and_insert', 'move', 'partial_rebuild'
     #[argh(option, default = "BvhUpdate::Rebuild")]
     bvh_update: BvhUpdate,
     /// check that we got the same list of pairs from the bvh broad phase as brute force method
@@ -263,7 +264,9 @@ enum BvhUpdate {
     Rebuild,
     Reinsert,
     ParallelReinsert,
+    PreciseRemoveAndInsert,
     RemoveAndInsert,
+    Move,
     PartialRebuild,
 }
 
@@ -275,10 +278,13 @@ impl FromStr for BvhUpdate {
             "rebuild" => Ok(Self::Rebuild),
             "reinsert" => Ok(Self::Reinsert),
             "parallel_reinsert" => Ok(Self::ParallelReinsert),
+            "precise_remove_and_insert" => Ok(Self::PreciseRemoveAndInsert),
             "remove_and_insert" => Ok(Self::RemoveAndInsert),
+            "move" => Ok(Self::Move),
             "partial_rebuild" => Ok(Self::PartialRebuild),
             _ => Err(format!(
-                "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'remove_and_insert', 'partial_rebuild'"
+                "Unknown mode: '{s}', valid modes: 'rebuild', 'reinsert', 'parallel_reinsert', \
+'precise_remove_and_insert', 'remove_and_insert', 'move', 'partial_rebuild'"
             )),
         }
     }
@@ -345,11 +351,13 @@ impl PhysicsWorld {
             BvhUpdate::Rebuild => self.items[id as usize].min_aabb,
             BvhUpdate::Reinsert
             | BvhUpdate::ParallelReinsert
+            | BvhUpdate::PreciseRemoveAndInsert
             | BvhUpdate::RemoveAndInsert
+            | BvhUpdate::Move
             | BvhUpdate::PartialRebuild => self.items[id as usize].oversized_aabb,
         };
         self.bvh
-            .insert_primitive(aabb, id, &mut self.bvh_insertion_stack);
+            .insert_primitive_precise(aabb, id, &mut self.bvh_insertion_stack);
         id
     }
 
@@ -410,6 +418,23 @@ impl PhysicsWorld {
             .run_with_candidates(&mut self.bvh, &self.temp_indices, 1);
     }
 
+    pub fn bvh_partial_rebuild_precise_remove_insert(&mut self) {
+        dbg_scope!("bvh_partial_rebuild_precise_remove_insert");
+        let oversize_factor = self.oversize_factor();
+        self.updated_leaves_this_frame = 0;
+        for (primitive_id, item) in self.items.iter_mut().enumerate() {
+            if item.update_oversized_aabb(oversize_factor) {
+                self.bvh.remove_primitive(primitive_id as u32);
+                self.bvh.insert_primitive_precise(
+                    item.oversized_aabb,
+                    primitive_id as u32,
+                    &mut self.bvh_insertion_stack,
+                );
+                self.updated_leaves_this_frame += 1;
+            }
+        }
+    }
+
     pub fn bvh_partial_rebuild_remove_insert(&mut self) {
         dbg_scope!("bvh_partial_rebuild_remove_insert");
         let oversize_factor = self.oversize_factor();
@@ -417,11 +442,22 @@ impl PhysicsWorld {
         for (primitive_id, item) in self.items.iter_mut().enumerate() {
             if item.update_oversized_aabb(oversize_factor) {
                 self.bvh.remove_primitive(primitive_id as u32);
-                self.bvh.insert_primitive(
-                    item.oversized_aabb,
-                    primitive_id as u32,
-                    &mut self.bvh_insertion_stack,
-                );
+                self.bvh
+                    .insert_primitive(item.oversized_aabb, primitive_id as u32);
+                self.updated_leaves_this_frame += 1;
+            }
+        }
+    }
+
+    pub fn bvh_partial_rebuild_move(&mut self) {
+        dbg_scope!("bvh_partial_rebuild_move");
+        let oversize_factor = self.oversize_factor();
+        self.bvh.init_primitives_to_nodes_if_uninit();
+        self.updated_leaves_this_frame = 0;
+        for (primitive_id, item) in self.items.iter_mut().enumerate() {
+            if item.update_oversized_aabb(oversize_factor) {
+                self.bvh
+                    .move_primitive(item.oversized_aabb, primitive_id as u32);
                 self.updated_leaves_this_frame += 1;
             }
         }
@@ -459,7 +495,9 @@ impl PhysicsWorld {
             BvhUpdate::Rebuild => 0.0,
             BvhUpdate::Reinsert
             | BvhUpdate::ParallelReinsert
+            | BvhUpdate::PreciseRemoveAndInsert
             | BvhUpdate::RemoveAndInsert
+            | BvhUpdate::Move
             | BvhUpdate::PartialRebuild => self.config.aabb_oversize,
         }
     }
@@ -534,7 +572,9 @@ fn physics_update(physics: &mut PhysicsWorld) {
         BvhUpdate::Rebuild => physics.bvh_full_rebuild(),
         BvhUpdate::Reinsert => physics.bvh_partial_rebuild_reinsert(),
         BvhUpdate::ParallelReinsert => physics.bvh_partial_rebuild_parallel_reinsert(),
+        BvhUpdate::PreciseRemoveAndInsert => physics.bvh_partial_rebuild_precise_remove_insert(),
         BvhUpdate::RemoveAndInsert => physics.bvh_partial_rebuild_remove_insert(),
+        BvhUpdate::Move => physics.bvh_partial_rebuild_move(),
         BvhUpdate::PartialRebuild => physics.bvh_partial_rebuild(),
     }
 

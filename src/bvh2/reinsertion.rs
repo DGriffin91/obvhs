@@ -19,8 +19,6 @@ use crate::{
     faststack::FastStack,
 };
 
-use super::update_primitives_to_nodes_for_node;
-
 /// Restructures the BVH, optimizing node locations within the BVH hierarchy per SAH cost.
 #[derive(Default)]
 pub struct ReinsertionOptimizer {
@@ -347,33 +345,9 @@ pub fn reinsert_node(bvh: &mut Bvh2, from: usize, to: usize) {
     bvh.nodes[sibling_id] = dst_node;
     bvh.nodes[parent_id] = sibling_node;
 
-    let sibling_node = &bvh.nodes[sibling_id];
-    if sibling_node.is_leaf() {
-        // Tell primitives where their node went.
-        update_primitives_to_nodes_for_node(
-            sibling_node,
-            sibling_id,
-            &bvh.primitive_indices,
-            &mut bvh.primitives_to_nodes,
-        );
-    } else {
-        bvh.parents[sibling_node.first_index as usize] = sibling_id as u32;
-        bvh.parents[sibling_node.first_index as usize + 1] = sibling_id as u32;
-    }
-
-    let parent_node = &bvh.nodes[parent_id];
-    if bvh.nodes[parent_id].is_leaf() {
-        // Tell primitives where their node went.
-        update_primitives_to_nodes_for_node(
-            parent_node,
-            parent_id,
-            &bvh.primitive_indices,
-            &mut bvh.primitives_to_nodes,
-        );
-    } else {
-        bvh.parents[parent_node.first_index as usize] = parent_id as u32;
-        bvh.parents[parent_node.first_index as usize + 1] = parent_id as u32;
-    }
+    // Tell the children (or primitives) of the two moved nodes where they went.
+    bvh.relink_node(&dst_node, sibling_id);
+    bvh.relink_node(&sibling_node, parent_id);
 
     bvh.parents[sibling_id] = to as u32;
     bvh.parents[from] = to as u32;

@@ -44,8 +44,9 @@ pub struct Bvh2 {
     pub primitive_indices: Vec<u32>,
 
     /// A freelist for use when removing primitives from the bvh. These represent slots in Bvh2::primitive_indices
-    /// that are available if a primitive is added to the bvh. Only currently used by Bvh2::remove_primitive() and
-    /// Bvh2::insert_primitive() which are not part of the typical initial bvh generation.
+    /// that are available if a primitive is added to the bvh. Only currently used by Bvh2::remove_primitive(),
+    /// Bvh2::insert_primitive(), and Bvh2::insert_primitive_precise(), which are not part of the typical initial
+    /// BVH generation.
     pub primitive_indices_freelist: Vec<u32>,
 
     /// An optional mapping from primitives back to nodes.
@@ -747,6 +748,39 @@ impl Bvh2 {
                 break;
             }
             index = self.parents[index] as usize;
+        }
+    }
+
+    /// Tell the children of the node at `node_id`, or the primitives it contains if it is a leaf,
+    /// that it is now at `node_id`. Needed after moving a node into a different slot in `Bvh2::nodes`.
+    ///
+    /// If the node is already available, prefer [`Bvh2::relink_node()`].
+    #[inline]
+    pub fn relink(&mut self, node_id: usize) {
+        let node = self.nodes[node_id];
+        self.relink_node(&node, node_id);
+    }
+
+    /// Tell the children of `node`, or the primitives it contains if it is a leaf,
+    /// that it is now at `node_id`. Needed after moving a node into a different slot in `Bvh2::nodes`.
+    ///
+    /// `node` must be the node that now occupies the `node_id` slot of `Bvh2::nodes`.
+    #[inline]
+    pub fn relink_node(&mut self, node: &Bvh2Node, node_id: usize) {
+        debug_assert_eq!(node.first_index, self.nodes[node_id].first_index);
+        debug_assert_eq!(node.prim_count, self.nodes[node_id].prim_count);
+        if node.is_leaf() {
+            // Tell primitives where their node went.
+            update_primitives_to_nodes_for_node(
+                node,
+                node_id,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
+        } else {
+            // Tell children where their parent went.
+            self.parents[node.first_index as usize] = node_id as u32;
+            self.parents[node.first_index as usize + 1] = node_id as u32;
         }
     }
 
