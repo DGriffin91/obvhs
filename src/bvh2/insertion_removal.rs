@@ -18,6 +18,49 @@ pub struct SiblingInsertionCandidate {
 }
 
 impl Bvh2 {
+    /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
+    /// for the node being inserted, then attaches it there and refits back up to the root,
+    /// performing rotations along the way to help prevent the BVH from degenerating.
+    ///
+    /// This is the faster counterpart of [`Bvh2::insert_leaf_precise()`]. It doesn't need a traversal stack
+    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
+    ///
+    /// # Returns
+    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
+    /// since a rotation on the refit walk can move the node that was just attached.
+    ///
+    /// # Arguments
+    /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
+    pub fn insert_leaf(&mut self, new_node: Bvh2Node) -> usize {
+        assert!(new_node.is_leaf());
+
+        if self.nodes.is_empty() {
+            self.nodes.push(new_node);
+            self.parents.clear();
+            self.parents.push(0);
+            return 0;
+        }
+
+        self.init_parents_if_uninit();
+
+        let (sibling_id, sibling_depth) = self.find_sibling_greedy(new_node.aabb());
+
+        // Grow by an adjacent pair at the end for the displaced sibling and the new node.
+        // The node count is always odd, so the first of the two is always a left sibling.
+        let left_id = self.nodes.len();
+        self.nodes.push(Default::default());
+        self.nodes.push(Default::default());
+        self.parents.push(0);
+        self.parents.push(0);
+
+        let new_node_id = self.attach_leaf(new_node, sibling_id, left_id);
+        self.update_max_depth_for_greedy_insertion(sibling_depth);
+
+        // Need to work up the tree updating the aabbs since we just added a node.
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking_fast(sibling_id, new_node_id)
+    }
+
     /// Removes and returns the leaf specified by `node_id`.
     /// Puts `node_id` sibling in its parents place then moves the last two nodes into the now empty slots at `node_id`
     /// and its sibling.
@@ -125,279 +168,96 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         node_to_remove
     }
 
-    /// Searches the tree recursively to find the best sibling for the node being inserted. The best sibling is
-    /// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
-    /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
-    /// the sibling and both the sibling and new node are added to the end of `Bvh2::nodes`.
-    /// Refits back up to the root, performing rotations along the way to help prevent the BVH from degenerating.
+    /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
+    /// for the primitive being inserted, then attaches it there and refits back up to the root,
+    /// performing rotations along the way to help prevent the BVH from degenerating.
+    /// Updates [`Bvh2::primitive_indices`] and [`Bvh2::primitive_indices_freelist`].
     ///
-    /// See "Branch and Bound" <https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf> and
-    /// Jiˇrí Bittner et al. 2012 Fast Insertion-Based Optimization of Bounding Volume Hierarchies
-    ///
-    /// See [`Bvh2::insert_leaf()`] for a faster version that descends a single path when choosing the sibling.
-    /// Unlike this method, [`Bvh2::insert_leaf()`] also tries to keep [`Bvh2::max_depth`] up to date.
+    /// This is the faster counterpart of [`Bvh2::insert_primitive_precise()`]. It doesn't need a traversal stack
+    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
     ///
     /// # Returns
-    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
-    /// since a rotation on the refit walk can move the node that was just attached.
+    /// The index of the newly added node.
     ///
     /// # Arguments
-    /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
-    /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
-    ///   deepest leaf of the BVH. `insert_leaf_precise()` will resize this stack after traversal to be at least 2x the
-    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
-    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
-    ///   don't call `bvh.depth(0)` with each leaf; just let `insert_leaf_precise()` resize the stack as needed.
-    pub fn insert_leaf_precise(
-        &mut self,
-        new_node: Bvh2Node,
-        stack: &mut HeapStack<SiblingInsertionCandidate>,
-    ) -> usize {
-        assert!(new_node.is_leaf());
-
-        if self.nodes.is_empty() {
-            self.nodes.push(new_node);
-            self.parents.clear();
-            self.parents.push(0);
-            return 0;
-        }
-
+    /// * `aabb` - The aabb of the primitive being inserted.
+    /// * `primitive_id` - The index of the primitive being inserted.
+    pub fn insert_primitive(&mut self, aabb: Aabb, primitive_id: u32) -> usize {
+        self.init_primitives_to_nodes_if_uninit();
         self.init_parents_if_uninit();
-
-        let mut min_cost = f32::MAX;
-        let mut best_sibling_candidate_id = 0;
-        let mut max_stack_len = 1;
-        let new_node_cost = new_node.aabb().half_area();
-
-        stack.clear();
-        let root_aabb = self.nodes[0].aabb();
-
-        // Traverse the BVH to find the best sibling
-        stack.push(SiblingInsertionCandidate {
-            inherited_cost: root_aabb.union(new_node.aabb()).half_area() - root_aabb.half_area(),
-            index: 0,
-        });
-        while let Some(sibling_candidate) = stack.pop() {
-            let current_node_index = sibling_candidate.index as usize;
-
-            let candidate = &self.nodes[current_node_index];
-
-            let direct_cost = candidate.aabb().union(new_node.aabb()).half_area();
-            let total_cost = direct_cost + sibling_candidate.inherited_cost;
-
-            if total_cost < min_cost {
-                min_cost = total_cost;
-                best_sibling_candidate_id = current_node_index;
-            }
-
-            // If this is not a leaf, it's possible a better cost could be found further down.
-            if !candidate.is_leaf() {
-                let inherited_cost = total_cost - candidate.aabb().half_area();
-                let min_subtree_cost = new_node_cost + inherited_cost;
-                if min_subtree_cost < min_cost {
-                    stack.push(SiblingInsertionCandidate {
-                        inherited_cost,
-                        index: candidate.first_index,
-                    });
-                    stack.push(SiblingInsertionCandidate {
-                        inherited_cost,
-                        index: candidate.first_index + 1,
-                    });
-                    max_stack_len = stack.len().max(max_stack_len);
-                }
-            }
+        if self.primitives_to_nodes.len() <= primitive_id as usize {
+            self.primitives_to_nodes
+                .resize(primitive_id as usize + 1, INVALID);
         }
-
-        if max_stack_len * 2 > stack.cap() {
-            stack.reserve(max_stack_len * 2);
-        }
-
-        let best_sibling_candidate = self.nodes[best_sibling_candidate_id];
-
-        // To avoid having gaps or re-arranging the BVH:
-        // The new parent goes in the sibling's position.
-        // The sibling and new node go on the end.
-        let new_sibling_id = self.nodes.len() as u32;
-        let new_parent = Bvh2Node::new(
-            new_node.aabb().union(best_sibling_candidate.aabb()),
-            0,
-            new_sibling_id,
-        );
-
-        // New parent goes in the sibling's position.
-        let new_parent_id = best_sibling_candidate_id;
-        self.nodes[new_parent_id] = new_parent;
-
-        self.nodes.push(best_sibling_candidate);
-        let new_node_id = self.nodes.len();
-        self.nodes.push(new_node); // Put the new node at the very end.
-        self.parents.push(new_parent_id as u32);
-        self.parents.push(new_parent_id as u32);
-
-        // Tell the children (or primitives) of the moved sibling where it went.
-        self.relink_node(&best_sibling_candidate, new_sibling_id as usize);
-
-        if !best_sibling_candidate.is_leaf() {
-            // The sibling was moved to the end of the node list, but its children stayed where they were,
-            // so they now come before their parent.
-            self.children_are_ordered_after_parents = false;
-        }
-
-        // if primitives_to_nodes has already been initialized
-        if !self.primitives_to_nodes.is_empty() {
-            // Tell primitives where their node went.
-            let end = new_node.first_index + new_node.prim_count;
-            if self.primitives_to_nodes.len() < end as usize {
-                // Since we are adding a primitive it's possible that primitives_to_nodes is not large enough yet.
-                self.primitives_to_nodes.resize(end as usize, INVALID);
-            }
-            update_primitives_to_nodes_for_node(
-                &new_node,
-                new_node_id,
-                &self.primitive_indices,
-                &mut self.primitives_to_nodes,
-            )
-        }
-
-        // Need to work up the tree updating the aabbs since we just added a node.
-        // A rotation along the way can move the node we just attached, so we track it.
-        self.refit_and_rotate_from_tracking_fast(new_parent_id, new_node_id)
+        let first_index = if let Some(free_slot) = self.primitive_indices_freelist.pop() {
+            self.primitive_indices[free_slot as usize] = primitive_id;
+            free_slot
+        } else {
+            self.primitive_indices.push(primitive_id);
+            self.primitive_indices.len() as u32 - 1
+        };
+        let new_node_id = self.insert_leaf(Bvh2Node::new(aabb, 1, first_index));
+        self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
+        new_node_id
     }
 
-    /// Searches the tree for the best sibling for a leaf with the given `aabb` using a greedy top-down descent.
-    /// The best sibling is classified as the sibling that if chosen it would increase the surface area of the BVH the least.
-    ///
-    /// Unlike the branch and bound search in [`Bvh2::insert_leaf_precise()`], this only ever descends a single path from the root,
-    /// always taking the child with the lower bound on what inserting beneath it could cost, and stopping as soon as
-    /// neither child's bound can beat the best candidate already found. This is O(depth), needs no traversal stack,
-    /// and doesn't blow up the same way as the BVH gets deeper. However, it tends to find a slightly worse sibling
-    /// than the branch and bound search.
-    ///
-    /// # Returns
-    /// The index of the best sibling found, and the depth it was found at (the root has a depth of 0).
+    /// Removes the leaf that contains the given primitive. Should be correct for nodes with multiple primitives per
+    /// leaf but faster for nodes with only one primitive per leaf, and will leave node aabb oversized.
+    /// Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
     ///
     /// # Arguments
-    /// * `aabb` - The aabb of the leaf that is going to be inserted.
-    pub fn find_sibling_greedy(&self, aabb: &Aabb) -> (usize, usize) {
-        // This is based on `b2FindBestSibling` in Box2D by Erin Catto.
+    /// * `primitive_id` - The index of the primitive being removed.
+    pub fn remove_primitive(&mut self, primitive_id: u32) {
+        assert!(
+            !self.uses_spatial_splits,
+            "Removing primitives while using spatial splits is currently unsupported as it would require a mapping \
+from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
+        );
+        let remove_primitive_id = primitive_id;
+        self.init_parents_if_uninit();
+        self.init_primitives_to_nodes_if_uninit();
 
-        let center = aabb.center();
-        let area = aabb.half_area();
+        let node_id = self.primitives_to_nodes[remove_primitive_id as usize];
 
-        let root_aabb = self.nodes[0].aabb();
+        let node = &self.nodes[node_id as usize];
+        assert!(node.is_leaf());
+        if node.prim_count == 1 {
+            let removed_leaf = self.remove_leaf(node_id as usize);
+            self.primitive_indices_freelist
+                .push(removed_leaf.first_index);
+            self.primitive_indices[removed_leaf.first_index as usize] = INVALID;
+        } else {
+            // Update leaf with the remaining primitives, use the existing leftover space in primitive_indices and
+            // only add the removed primitive to the freelist
 
-        // Area of the node currently being descended into.
-        let mut area_base = root_aabb.half_area();
+            let node = &mut self.nodes[node_id as usize];
 
-        // Area of that node once it has been inflated to also contain the new leaf.
-        let mut direct_cost = root_aabb.union(aabb).half_area();
-
-        // How much every node from the root down to the current node would have to grow.
-        let mut inherited_cost = 0.0;
-
-        let mut best_cost = direct_cost;
-        let mut best_sibling_candidate_id = 0;
-        let mut best_sibling_candidate_depth = 0;
-
-        let mut current_node_index = 0;
-        let mut depth = 0;
-
-        // Descend the tree from the root, following a single greedy path.
-        while !self.nodes[current_node_index].is_leaf() {
-            let left_id = self.nodes[current_node_index].first_index as usize;
-            let right_id = left_id + 1;
-
-            // Cost of creating a new parent for this node and the new leaf.
-            let total_cost = direct_cost + inherited_cost;
-            if total_cost < best_cost {
-                best_cost = total_cost;
-                best_sibling_candidate_id = current_node_index;
-                best_sibling_candidate_depth = depth;
-            }
-
-            inherited_cost += direct_cost - area_base;
-
-            let left = &self.nodes[left_id];
-            let right = &self.nodes[right_id];
-            let left_is_leaf = left.is_leaf();
-            let right_is_leaf = right.is_leaf();
-            let left_aabb = left.aabb();
-            let right_aabb = right.aabb();
-            let left_direct_cost = left_aabb.union(aabb).half_area();
-            let right_direct_cost = right_aabb.union(aabb).half_area();
-
-            // Lower bound on the cost of choosing a sibling from the subtree rooted at each child.
-            // Left at f32::MAX for leaves since there is nothing below them to descend into.
-            let mut left_lower_cost = f32::MAX;
-            let mut right_lower_cost = f32::MAX;
-            let mut left_area = 0.0;
-            let mut right_area = 0.0;
-
-            if left_is_leaf {
-                let cost = left_direct_cost + inherited_cost;
-                if cost < best_cost {
-                    best_cost = cost;
-                    best_sibling_candidate_id = left_id;
-                    best_sibling_candidate_depth = depth + 1;
+            let start = node.first_index as usize;
+            let end = (node.first_index + node.prim_count) as usize;
+            let last = end - 1;
+            let mut spare_spot_id = start;
+            // Condense primitive_indices for this node.
+            for node_prim_id in start..end {
+                let direct_prim_id = self.primitive_indices[node_prim_id];
+                if direct_prim_id == remove_primitive_id {
+                    break;
                 }
-            } else {
-                left_area = left_aabb.half_area();
-
-                // Lower bound cost of choosing a sibling from the subtree rooted at the left child.
-                //
-                // This is the minimum of:
-                //
-                // 1. Choosing the child itself: inherited_cost + left_direct_cost
-                // 2. Choosing one of its descendants: inherited_cost + (left_direct_cost - left_area) + area
-                left_lower_cost = inherited_cost + left_direct_cost + (area - left_area).min(0.0);
+                spare_spot_id += 1;
             }
-
-            if right_is_leaf {
-                let cost = right_direct_cost + inherited_cost;
-                if cost < best_cost {
-                    best_cost = cost;
-                    best_sibling_candidate_id = right_id;
-                    best_sibling_candidate_depth = depth + 1;
-                }
-            } else {
-                right_area = right_aabb.half_area();
-
-                // See above for left_lower_cost.
-                right_lower_cost =
-                    inherited_cost + right_direct_cost + (area - right_area).min(0.0);
+            if spare_spot_id < last {
+                self.primitive_indices[spare_spot_id] = self.primitive_indices[last];
             }
+            // Free now open last position.
+            self.primitive_indices_freelist.push(last as u32);
+            self.primitive_indices[last] = INVALID;
 
-            // Note: Box2D also has a separate early out if both children are leaves,
-            //       but because the costs for leaves are left as f32::MAX, this check
-            //       handles that too.
-            if best_cost <= left_lower_cost && best_cost <= right_lower_cost {
-                // Neither subtree can beat the best candidate already found.
-                break;
-            }
-
-            if left_lower_cost == right_lower_cost && !left_is_leaf {
-                // The bounds give no clear choice, which happens when both children
-                // fully contain `aabb`. Fall back to the child whose center is closest.
-                left_lower_cost = (left_aabb.center() - center).length_squared();
-                right_lower_cost = (right_aabb.center() - center).length_squared();
-            }
-
-            // Descend into the more promising child.
-            if left_lower_cost < right_lower_cost && !left_is_leaf {
-                current_node_index = left_id;
-                area_base = left_area;
-                direct_cost = left_direct_cost;
-            } else {
-                current_node_index = right_id;
-                area_base = right_area;
-                direct_cost = right_direct_cost;
-            }
-
-            depth += 1;
+            assert!(node.prim_count > 1);
+            node.prim_count -= 1;
         }
 
-        (best_sibling_candidate_id, best_sibling_candidate_depth)
+        if self.primitives_to_nodes.len() > remove_primitive_id as usize {
+            self.primitives_to_nodes[remove_primitive_id as usize] = INVALID;
+        }
     }
 
     /// Attaches `new_node` to the BVH as the new sibling of the node at `sibling_id`.
@@ -550,64 +410,33 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         new_node_id
     }
 
-    /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
-    /// for the node being inserted, then attaches it there and refits back up to the root,
-    /// performing rotations along the way to help prevent the BVH from degenerating.
+    /// Searches the tree recursively to find the best sibling for the primitive being inserted
+    /// (see [`Bvh2::insert_leaf_precise()`]). Updates [`Bvh2::primitive_indices`] and
+    /// [`Bvh2::primitive_indices_freelist`]. Refits back up to the root, performing rotations
+    /// along the way to help prevent the BVH from degenerating.
     ///
-    /// This is the faster counterpart of [`Bvh2::insert_leaf_precise()`]. It doesn't need a traversal stack
-    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
+    /// See [`Bvh2::insert_primitive()`] for a faster version that descends a single path when choosing the sibling.
+    /// Unlike this method, [`Bvh2::insert_primitive()`] also tries to keep [`Bvh2::max_depth`] up to date.
     ///
     /// # Returns
     /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
     /// since a rotation on the refit walk can move the node that was just attached.
     ///
     /// # Arguments
-    /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
-    pub fn insert_leaf(&mut self, new_node: Bvh2Node) -> usize {
-        assert!(new_node.is_leaf());
-
-        if self.nodes.is_empty() {
-            self.nodes.push(new_node);
-            self.parents.clear();
-            self.parents.push(0);
-            return 0;
-        }
-
-        self.init_parents_if_uninit();
-
-        let (sibling_id, sibling_depth) = self.find_sibling_greedy(new_node.aabb());
-
-        // Grow by an adjacent pair at the end for the displaced sibling and the new node.
-        // The node count is always odd, so the first of the two is always a left sibling.
-        let left_id = self.nodes.len();
-        self.nodes.push(Default::default());
-        self.nodes.push(Default::default());
-        self.parents.push(0);
-        self.parents.push(0);
-
-        let new_node_id = self.attach_leaf(new_node, sibling_id, left_id);
-        self.update_max_depth_for_greedy_insertion(sibling_depth);
-
-        // Need to work up the tree updating the aabbs since we just added a node.
-        // A rotation along the way can move the node we just attached, so we track it.
-        self.refit_and_rotate_from_tracking_fast(sibling_id, new_node_id)
-    }
-
-    /// Searches the tree with the greedy descent in [`Bvh2::find_sibling_greedy()`] to find a sibling
-    /// for the primitive being inserted, then attaches it there and refits back up to the root,
-    /// performing rotations along the way to help prevent the BVH from degenerating.
-    /// Updates [`Bvh2::primitive_indices`] and [`Bvh2::primitive_indices_freelist`].
-    ///
-    /// This is the faster counterpart of [`Bvh2::insert_primitive_precise()`]. It doesn't need a traversal stack
-    /// and it tries to keep [`Bvh2::max_depth`] up to date, at the cost of sometimes picking a slightly worse sibling.
-    ///
-    /// # Returns
-    /// The index of the newly added node.
-    ///
-    /// # Arguments
     /// * `aabb` - The aabb of the primitive being inserted.
     /// * `primitive_id` - The index of the primitive being inserted.
-    pub fn insert_primitive(&mut self, aabb: Aabb, primitive_id: u32) -> usize {
+    /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
+    ///   deepest leaf of the BVH. `insert_leaf_precise()` will resize this stack after traversal to be at least 2x the
+    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
+    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
+    ///   don't call `bvh.depth(0)` with each leaf; just let `insert_leaf_precise()` resize the stack as needed.
+    pub fn insert_primitive_precise(
+        &mut self,
+        aabb: Aabb,
+        primitive_id: u32,
+        stack: &mut HeapStack<SiblingInsertionCandidate>,
+    ) -> usize {
         self.init_primitives_to_nodes_if_uninit();
         self.init_parents_if_uninit();
         if self.primitives_to_nodes.len() <= primitive_id as usize {
@@ -621,9 +450,149 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             self.primitive_indices.push(primitive_id);
             self.primitive_indices.len() as u32 - 1
         };
-        let new_node_id = self.insert_leaf(Bvh2Node::new(aabb, 1, first_index));
+        let new_node_id = self.insert_leaf_precise(Bvh2Node::new(aabb, 1, first_index), stack);
         self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
         new_node_id
+    }
+
+    /// Searches the tree recursively to find the best sibling for the node being inserted. The best sibling is
+    /// classified as the sibling that if chosen it would increase the surface area of the BVH the least.
+    /// When the best sibling is found, a parent of both the sibling and the new node is put in the location of
+    /// the sibling and both the sibling and new node are added to the end of `Bvh2::nodes`.
+    /// Refits back up to the root, performing rotations along the way to help prevent the BVH from degenerating.
+    ///
+    /// See "Branch and Bound" <https://box2d.org/files/ErinCatto_DynamicBVH_Full.pdf> and
+    /// Jiˇrí Bittner et al. 2012 Fast Insertion-Based Optimization of Bounding Volume Hierarchies
+    ///
+    /// See [`Bvh2::insert_leaf()`] for a faster version that descends a single path when choosing the sibling.
+    /// Unlike this method, [`Bvh2::insert_leaf()`] also tries to keep [`Bvh2::max_depth`] up to date.
+    ///
+    /// # Returns
+    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
+    /// since a rotation on the refit walk can move the node that was just attached.
+    ///
+    /// # Arguments
+    /// * `new_node` - This node must be a leaf and already have a valid `first_index` into `primitive_indices`.
+    /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
+    ///   deepest leaf of the BVH. `insert_leaf_precise()` will resize this stack after traversal to be at least 2x the
+    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
+    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
+    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
+    ///   don't call `bvh.depth(0)` with each leaf; just let `insert_leaf_precise()` resize the stack as needed.
+    pub fn insert_leaf_precise(
+        &mut self,
+        new_node: Bvh2Node,
+        stack: &mut HeapStack<SiblingInsertionCandidate>,
+    ) -> usize {
+        assert!(new_node.is_leaf());
+
+        if self.nodes.is_empty() {
+            self.nodes.push(new_node);
+            self.parents.clear();
+            self.parents.push(0);
+            return 0;
+        }
+
+        self.init_parents_if_uninit();
+
+        let mut min_cost = f32::MAX;
+        let mut best_sibling_candidate_id = 0;
+        let mut max_stack_len = 1;
+        let new_node_cost = new_node.aabb().half_area();
+
+        stack.clear();
+        let root_aabb = self.nodes[0].aabb();
+
+        // Traverse the BVH to find the best sibling
+        stack.push(SiblingInsertionCandidate {
+            inherited_cost: root_aabb.union(new_node.aabb()).half_area() - root_aabb.half_area(),
+            index: 0,
+        });
+        while let Some(sibling_candidate) = stack.pop() {
+            let current_node_index = sibling_candidate.index as usize;
+
+            let candidate = &self.nodes[current_node_index];
+
+            let direct_cost = candidate.aabb().union(new_node.aabb()).half_area();
+            let total_cost = direct_cost + sibling_candidate.inherited_cost;
+
+            if total_cost < min_cost {
+                min_cost = total_cost;
+                best_sibling_candidate_id = current_node_index;
+            }
+
+            // If this is not a leaf, it's possible a better cost could be found further down.
+            if !candidate.is_leaf() {
+                let inherited_cost = total_cost - candidate.aabb().half_area();
+                let min_subtree_cost = new_node_cost + inherited_cost;
+                if min_subtree_cost < min_cost {
+                    stack.push(SiblingInsertionCandidate {
+                        inherited_cost,
+                        index: candidate.first_index,
+                    });
+                    stack.push(SiblingInsertionCandidate {
+                        inherited_cost,
+                        index: candidate.first_index + 1,
+                    });
+                    max_stack_len = stack.len().max(max_stack_len);
+                }
+            }
+        }
+
+        if max_stack_len * 2 > stack.cap() {
+            stack.reserve(max_stack_len * 2);
+        }
+
+        let best_sibling_candidate = self.nodes[best_sibling_candidate_id];
+
+        // To avoid having gaps or re-arranging the BVH:
+        // The new parent goes in the sibling's position.
+        // The sibling and new node go on the end.
+        let new_sibling_id = self.nodes.len() as u32;
+        let new_parent = Bvh2Node::new(
+            new_node.aabb().union(best_sibling_candidate.aabb()),
+            0,
+            new_sibling_id,
+        );
+
+        // New parent goes in the sibling's position.
+        let new_parent_id = best_sibling_candidate_id;
+        self.nodes[new_parent_id] = new_parent;
+
+        self.nodes.push(best_sibling_candidate);
+        let new_node_id = self.nodes.len();
+        self.nodes.push(new_node); // Put the new node at the very end.
+        self.parents.push(new_parent_id as u32);
+        self.parents.push(new_parent_id as u32);
+
+        // Tell the children (or primitives) of the moved sibling where it went.
+        self.relink_node(&best_sibling_candidate, new_sibling_id as usize);
+
+        if !best_sibling_candidate.is_leaf() {
+            // The sibling was moved to the end of the node list, but its children stayed where they were,
+            // so they now come before their parent.
+            self.children_are_ordered_after_parents = false;
+        }
+
+        // if primitives_to_nodes has already been initialized
+        if !self.primitives_to_nodes.is_empty() {
+            // Tell primitives where their node went.
+            let end = new_node.first_index + new_node.prim_count;
+            if self.primitives_to_nodes.len() < end as usize {
+                // Since we are adding a primitive it's possible that primitives_to_nodes is not large enough yet.
+                self.primitives_to_nodes.resize(end as usize, INVALID);
+            }
+            update_primitives_to_nodes_for_node(
+                &new_node,
+                new_node_id,
+                &self.primitive_indices,
+                &mut self.primitives_to_nodes,
+            )
+        }
+
+        // Need to work up the tree updating the aabbs since we just added a node.
+        // A rotation along the way can move the node we just attached, so we track it.
+        self.refit_and_rotate_from_tracking_fast(new_parent_id, new_node_id)
     }
 
     /// Grows [`Bvh2::max_depth`] to account for a leaf that was just inserted below a sibling
@@ -638,6 +607,141 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
         // + 1 because `max_depth` is a traversal stack size rather than a node depth
         // + 1 more for a rotation that may push the new leaf one level deeper
         self.max_depth = self.max_depth.max(sibling_depth + 3);
+    }
+
+    /// Searches the tree for the best sibling for a leaf with the given `aabb` using a greedy top-down descent.
+    /// The best sibling is classified as the sibling that if chosen it would increase the surface area of the BVH the least.
+    ///
+    /// Unlike the branch and bound search in [`Bvh2::insert_leaf_precise()`], this only ever descends a single path from the root,
+    /// always taking the child with the lower bound on what inserting beneath it could cost, and stopping as soon as
+    /// neither child's bound can beat the best candidate already found. This is O(depth), needs no traversal stack,
+    /// and doesn't blow up the same way as the BVH gets deeper. However, it tends to find a slightly worse sibling
+    /// than the branch and bound search.
+    ///
+    /// # Returns
+    /// The index of the best sibling found, and the depth it was found at (the root has a depth of 0).
+    ///
+    /// # Arguments
+    /// * `aabb` - The aabb of the leaf that is going to be inserted.
+    pub fn find_sibling_greedy(&self, aabb: &Aabb) -> (usize, usize) {
+        // This is based on `b2FindBestSibling` in Box2D by Erin Catto.
+
+        let center = aabb.center();
+        let area = aabb.half_area();
+
+        let root_aabb = self.nodes[0].aabb();
+
+        // Area of the node currently being descended into.
+        let mut area_base = root_aabb.half_area();
+
+        // Area of that node once it has been inflated to also contain the new leaf.
+        let mut direct_cost = root_aabb.union(aabb).half_area();
+
+        // How much every node from the root down to the current node would have to grow.
+        let mut inherited_cost = 0.0;
+
+        let mut best_cost = direct_cost;
+        let mut best_sibling_candidate_id = 0;
+        let mut best_sibling_candidate_depth = 0;
+
+        let mut current_node_index = 0;
+        let mut depth = 0;
+
+        // Descend the tree from the root, following a single greedy path.
+        while !self.nodes[current_node_index].is_leaf() {
+            let left_id = self.nodes[current_node_index].first_index as usize;
+            let right_id = left_id + 1;
+
+            // Cost of creating a new parent for this node and the new leaf.
+            let total_cost = direct_cost + inherited_cost;
+            if total_cost < best_cost {
+                best_cost = total_cost;
+                best_sibling_candidate_id = current_node_index;
+                best_sibling_candidate_depth = depth;
+            }
+
+            inherited_cost += direct_cost - area_base;
+
+            let left = &self.nodes[left_id];
+            let right = &self.nodes[right_id];
+            let left_is_leaf = left.is_leaf();
+            let right_is_leaf = right.is_leaf();
+            let left_aabb = left.aabb();
+            let right_aabb = right.aabb();
+            let left_direct_cost = left_aabb.union(aabb).half_area();
+            let right_direct_cost = right_aabb.union(aabb).half_area();
+
+            // Lower bound on the cost of choosing a sibling from the subtree rooted at each child.
+            // Left at f32::MAX for leaves since there is nothing below them to descend into.
+            let mut left_lower_cost = f32::MAX;
+            let mut right_lower_cost = f32::MAX;
+            let mut left_area = 0.0;
+            let mut right_area = 0.0;
+
+            if left_is_leaf {
+                let cost = left_direct_cost + inherited_cost;
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_sibling_candidate_id = left_id;
+                    best_sibling_candidate_depth = depth + 1;
+                }
+            } else {
+                left_area = left_aabb.half_area();
+
+                // Lower bound cost of choosing a sibling from the subtree rooted at the left child.
+                //
+                // This is the minimum of:
+                //
+                // 1. Choosing the child itself: inherited_cost + left_direct_cost
+                // 2. Choosing one of its descendants: inherited_cost + (left_direct_cost - left_area) + area
+                left_lower_cost = inherited_cost + left_direct_cost + (area - left_area).min(0.0);
+            }
+
+            if right_is_leaf {
+                let cost = right_direct_cost + inherited_cost;
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_sibling_candidate_id = right_id;
+                    best_sibling_candidate_depth = depth + 1;
+                }
+            } else {
+                right_area = right_aabb.half_area();
+
+                // See above for left_lower_cost.
+                right_lower_cost =
+                    inherited_cost + right_direct_cost + (area - right_area).min(0.0);
+            }
+
+            // Note: Box2D also has a separate early out if both children are leaves,
+            //       but because the costs for leaves are left as f32::MAX, this check
+            //       handles that too.
+            if best_cost <= left_lower_cost && best_cost <= right_lower_cost {
+                // Neither subtree can beat the best candidate already found.
+                break;
+            }
+
+            if left_lower_cost == right_lower_cost && !left_is_leaf {
+                // The bounds give no clear choice, which happens when both children
+                // fully contain `aabb`. Fall back to the child whose center is closest.
+                left_lower_cost = (left_aabb.center() - center).length_squared();
+                right_lower_cost = (right_aabb.center() - center).length_squared();
+            }
+
+            // Descend into the more promising child.
+            if left_lower_cost < right_lower_cost && !left_is_leaf {
+                current_node_index = left_id;
+                area_base = left_area;
+                direct_cost = left_direct_cost;
+            } else {
+                current_node_index = right_id;
+                area_base = right_area;
+                direct_cost = right_direct_cost;
+            }
+
+            depth += 1;
+        }
+
+        (best_sibling_candidate_id, best_sibling_candidate_depth)
     }
 
     /// Computes the cost of a potential rotation around the node at `node_id`,
@@ -909,110 +1013,6 @@ from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
             index = self.parents[index] as usize;
         }
         tracked_node_id
-    }
-
-    /// Removes the leaf that contains the given primitive. Should be correct for nodes with multiple primitives per
-    /// leaf but faster for nodes with only one primitive per leaf, and will leave node aabb oversized.
-    /// Updates Bvh2::primitive_indices and Bvh2::primitive_indices_freelist.
-    ///
-    /// # Arguments
-    /// * `primitive_id` - The index of the primitive being removed.
-    pub fn remove_primitive(&mut self, primitive_id: u32) {
-        assert!(
-            !self.uses_spatial_splits,
-            "Removing primitives while using spatial splits is currently unsupported as it would require a mapping \
-from one primitive to multiple nodes in `Bvh2::primitives_to_nodes`."
-        );
-        let remove_primitive_id = primitive_id;
-        self.init_parents_if_uninit();
-        self.init_primitives_to_nodes_if_uninit();
-
-        let node_id = self.primitives_to_nodes[remove_primitive_id as usize];
-
-        let node = &self.nodes[node_id as usize];
-        assert!(node.is_leaf());
-        if node.prim_count == 1 {
-            let removed_leaf = self.remove_leaf(node_id as usize);
-            self.primitive_indices_freelist
-                .push(removed_leaf.first_index);
-            self.primitive_indices[removed_leaf.first_index as usize] = INVALID;
-        } else {
-            // Update leaf with the remaining primitives, use the existing leftover space in primitive_indices and
-            // only add the removed primitive to the freelist
-
-            let node = &mut self.nodes[node_id as usize];
-
-            let start = node.first_index as usize;
-            let end = (node.first_index + node.prim_count) as usize;
-            let last = end - 1;
-            let mut spare_spot_id = start;
-            // Condense primitive_indices for this node.
-            for node_prim_id in start..end {
-                let direct_prim_id = self.primitive_indices[node_prim_id];
-                if direct_prim_id == remove_primitive_id {
-                    break;
-                }
-                spare_spot_id += 1;
-            }
-            if spare_spot_id < last {
-                self.primitive_indices[spare_spot_id] = self.primitive_indices[last];
-            }
-            // Free now open last position.
-            self.primitive_indices_freelist.push(last as u32);
-            self.primitive_indices[last] = INVALID;
-
-            assert!(node.prim_count > 1);
-            node.prim_count -= 1;
-        }
-
-        if self.primitives_to_nodes.len() > remove_primitive_id as usize {
-            self.primitives_to_nodes[remove_primitive_id as usize] = INVALID;
-        }
-    }
-
-    /// Searches the tree recursively to find the best sibling for the primitive being inserted
-    /// (see [`Bvh2::insert_leaf_precise()`]). Updates [`Bvh2::primitive_indices`] and
-    /// [`Bvh2::primitive_indices_freelist`]. Refits back up to the root, performing rotations
-    /// along the way to help prevent the BVH from degenerating.
-    ///
-    /// See [`Bvh2::insert_primitive()`] for a faster version that descends a single path when choosing the sibling.
-    /// Unlike this method, [`Bvh2::insert_primitive()`] also tries to keep [`Bvh2::max_depth`] up to date.
-    ///
-    /// # Returns
-    /// The index of the newly added node. Note that this is generally not `self.nodes.len() - 1`,
-    /// since a rotation on the refit walk can move the node that was just attached.
-    ///
-    /// # Arguments
-    /// * `aabb` - The aabb of the primitive being inserted.
-    /// * `primitive_id` - The index of the primitive being inserted.
-    /// * `stack` - Used for the traversal stack. Needs to be large enough to initially accommodate traversal to the
-    ///   deepest leaf of the BVH. `insert_leaf_precise()` will resize this stack after traversal to be at least 2x the
-    ///   required size. This ends up being quite a bit faster than using a Vec and works well when inserting multiple
-    ///   nodes. But does require the user to provide a good initial guess. SiblingInsertionCandidate is tiny so be
-    ///   generous. Something like: `stack.reserve(bvh.depth(0) * 2).max(1000);` If you are inserting a lot of leaves
-    ///   don't call `bvh.depth(0)` with each leaf; just let `insert_leaf_precise()` resize the stack as needed.
-    pub fn insert_primitive_precise(
-        &mut self,
-        aabb: Aabb,
-        primitive_id: u32,
-        stack: &mut HeapStack<SiblingInsertionCandidate>,
-    ) -> usize {
-        self.init_primitives_to_nodes_if_uninit();
-        self.init_parents_if_uninit();
-        if self.primitives_to_nodes.len() <= primitive_id as usize {
-            self.primitives_to_nodes
-                .resize(primitive_id as usize + 1, INVALID);
-        }
-        let first_index = if let Some(free_slot) = self.primitive_indices_freelist.pop() {
-            self.primitive_indices[free_slot as usize] = primitive_id;
-            free_slot
-        } else {
-            self.primitive_indices.push(primitive_id);
-            self.primitive_indices.len() as u32 - 1
-        };
-        let new_node_id = self.insert_leaf_precise(Bvh2Node::new(aabb, 1, first_index), stack);
-        self.primitives_to_nodes[primitive_id as usize] = new_node_id as u32;
-        new_node_id
     }
 }
 
