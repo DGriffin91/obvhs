@@ -2,6 +2,7 @@ use std::{f32::consts::PI, time::Duration};
 
 use std::thread;
 
+use glam::camera::rh;
 use glam::*;
 use image::{ImageBuffer, Rgba};
 use obvhs::{
@@ -91,8 +92,9 @@ fn main() {
     // Compute camera projection & view matrices
     let aspect_ratio = target_size.x / target_size.y;
     let proj_inv =
-        Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
-    let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+        rh::proj::directx::perspective_infinite_reverse(fov.to_radians(), aspect_ratio, 0.01)
+            .inverse();
+    let view_inv = rh::view::look_at_mat4(eye.into(), look_at, Vec3::Y).inverse();
 
     let shared_buffer = AtomicColorBuffer::new(width, height);
     let shared_buffer_clone = shared_buffer.clone();

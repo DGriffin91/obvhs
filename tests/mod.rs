@@ -3,7 +3,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use glam::*;
+    use glam::{camera::rh, *};
     use obvhs::{
         BvhBuildParams,
         aabb::Aabb,
@@ -152,8 +152,9 @@ mod tests {
 
         // Compute camera projection & view matrices
         let aspect_ratio = target_size.x / target_size.y;
-        let proj_inv = Mat4::perspective_infinite_reverse_rh(fov, aspect_ratio, 0.01).inverse();
-        let view_inv = Mat4::look_at_rh(eye.into(), look_at.into(), up.into()).inverse();
+        let proj_inv =
+            rh::proj::directx::perspective_infinite_reverse(fov, aspect_ratio, 0.01).inverse();
+        let view_inv = rh::view::look_at_mat4(eye.into(), look_at.into(), up.into()).inverse();
 
         for x in 0..width {
             for y in 0..height {

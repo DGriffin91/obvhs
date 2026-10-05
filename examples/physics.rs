@@ -5,7 +5,7 @@ use std::{
 };
 
 use argh::FromArgs;
-use glam::*;
+use glam::{camera::rh, *};
 use minifb::{Key, MouseButton, Window, WindowOptions};
 use obvhs::{
     PrettyDuration,
@@ -185,8 +185,9 @@ impl DebugRenderer {
         // Compute camera projection & view matrices
         let aspect_ratio = target_size.x / target_size.y;
         let proj_inv =
-            Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
-        let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+            rh::proj::directx::perspective_infinite_reverse(fov.to_radians(), aspect_ratio, 0.01)
+                .inverse();
+        let view_inv = rh::view::look_at_mat4(eye.into(), look_at, Vec3::Y).inverse();
         Self {
             target_size,
             eye,

@@ -1,5 +1,5 @@
 use argh::FromArgs;
-use glam::*;
+use glam::{camera::rh, *};
 use image::{ImageBuffer, Rgba};
 use obvhs::{
     BvhBuildParams,
@@ -77,8 +77,9 @@ fn render(args: Args, bvh_build_params: BvhBuildParams) -> Vec<Vec3A> {
     // Compute camera projection & view matrices
     let aspect_ratio = target_size.x / target_size.y;
     let proj_inv =
-        Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
-    let view_inv = Mat4::look_at_rh(eye.into(), look_at, Vec3::Y).inverse();
+        rh::proj::directx::perspective_infinite_reverse(fov.to_radians(), aspect_ratio, 0.01)
+            .inverse();
+    let view_inv = rh::view::look_at_mat4(eye.into(), look_at, Vec3::Y).inverse();
 
     let shared_buffer =
         (!args.no_window).then(|| AtomicColorBuffer::new(width as usize, height as usize));

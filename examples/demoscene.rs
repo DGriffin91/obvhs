@@ -1,7 +1,7 @@
 use argh::FromArgs;
 // For fun, not pbr
 // Run with `--release --features parallel` unless you like waiting around for a very long time.
-use glam::*;
+use glam::{camera::rh, *};
 use image::{ImageBuffer, Rgba};
 use obvhs::{
     BvhBuildParams,
@@ -95,8 +95,9 @@ fn main() {
     // Compute camera projection & view matrices
     let aspect_ratio = target_size.x / target_size.y;
     let proj_inv =
-        Mat4::perspective_infinite_reverse_rh(fov.to_radians(), aspect_ratio, 0.01).inverse();
-    let view = Mat4::look_at_rh(eye.into(), look_at.into(), Vec3::Y);
+        rh::proj::directx::perspective_infinite_reverse(fov.to_radians(), aspect_ratio, 0.01)
+            .inverse();
+    let view = rh::view::look_at_mat4(eye.into(), look_at.into(), Vec3::Y);
     let view_inv = view.inverse();
 
     println!("|{}|", " ".repeat(args.samples as usize));
